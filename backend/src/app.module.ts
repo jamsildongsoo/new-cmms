@@ -1,33 +1,59 @@
 import { Module } from '@nestjs/common';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { AttachmentsModule } from './attachments/attachments.module';
 import { AuthModule } from './auth/auth.module';
-import { ConfigModule } from '@nestjs/config';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { ApprovalsModule } from './approvals/approvals.module';
+import { CodesModule } from './codes/codes.module';
+import { appConfig } from './config/app.config';
+import { databaseConfig } from './config/database.config';
+import { validateEnv } from './config/env.schema';
+import { jwtConfig } from './config/jwt.config';
+import { storageConfig } from './config/storage.config';
+import { IdentityModule } from './identity/identity.module';
+import { EquipmentModule } from './maintenance/equipment/equipment.module';
+import { NumberingModule } from './numbering/numbering.module';
+import { OrganizationModule } from './organization/organization.module';
 
 @Module({
   imports: [
-    AuthModule,
-    // 1. .env 파일 전역 사용 설정
     ConfigModule.forRoot({
       isGlobal: true,
+      load: [appConfig, databaseConfig, jwtConfig, storageConfig],
+      validate: validateEnv,
     }),
-    // 2. Supabase PostgreSQL 연결 설정
-    TypeOrmModule.forRoot({
-      type: 'postgres',
-      host: process.env.DB_HOST,
-      port: parseInt(process.env.DB_PORT || '5432', 10),
-      username: process.env.DB_USER,
-      password: process.env.DB_PASSWORD,
-      database: process.env.DB_NAME,
-      autoLoadEntities: true, // 엔티티 자동 로드
-      synchronize: true,      // 개발 단계에서는 자동 스키마 동기화 (운영 단계에서는 false 권장)
-      ssl: {
-        rejectUnauthorized: false, // Supabase 연결 시 SSL 필수
-      },
+    TypeOrmModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => ({
+        type: 'postgres',
+        host: configService.getOrThrow<string>('database.host'),
+        port: configService.getOrThrow<number>('database.port'),
+        username: configService.getOrThrow<string>('database.username'),
+        password: configService.getOrThrow<string>('database.password'),
+        database: configService.getOrThrow<string>('database.name'),
+        autoLoadEntities: true,
+        synchronize: configService.getOrThrow<boolean>('database.synchronize'),
+        logging: configService.getOrThrow<boolean>('database.logging'),
+        ssl: configService.get<boolean>('database.ssl')
+          ? {
+              rejectUnauthorized: configService.getOrThrow<boolean>(
+                'database.sslRejectUnauthorized',
+              ),
+            }
+          : false,
+      }),
     }),
+    AuthModule,
+    IdentityModule,
+    OrganizationModule,
+    AttachmentsModule,
+    ApprovalsModule,
+    CodesModule,
+    NumberingModule,
+    EquipmentModule,
   ],
-
   controllers: [AppController],
   providers: [AppService],
 })
