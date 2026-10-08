@@ -1,7 +1,8 @@
+import { AuditEntity } from '../../common/entities/audit.entity';
 import { Column, Entity, PrimaryColumn } from 'typeorm';
 
 @Entity('attachment')
-export class Attachment {
+export class Attachment extends AuditEntity {
   @PrimaryColumn({ type: 'varchar', length: 30 })
   companyId: string;
 
@@ -12,20 +13,8 @@ export class Attachment {
   refModule: string;
 
   @Column({ type: 'varchar', length: 50 })
-  refNo: string;
+  refId: string;
 
   @Column({ type: 'char', length: 1, default: 'N' })
   deleteYn: string;
-
-  @Column({ type: 'varchar', length: 50 })
-  createdBy: string;
-
-  @Column({ type: 'timestamptz', default: () => 'now()' })
-  createdAt: Date;
-
-  @Column({ type: 'varchar', length: 50, nullable: true })
-  updatedBy: string | null;
-
-  @Column({ type: 'timestamptz', nullable: true })
-  updatedAt: Date | null;
 }

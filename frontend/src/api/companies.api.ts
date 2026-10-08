@@ -1,15 +1,12 @@
+import type { AuditFields } from '../types/audit'
 import { http } from './http'
 
-export interface Company {
+export interface Company extends AuditFields {
   companyId: string
   name: string
   registrationNumber: string | null
   note: string | null
   deleteYn: string
-  createdBy: string
-  createdAt: string
-  updatedBy: string | null
-  updatedAt: string | null
 }
 
 export interface CompanyPayload {

@@ -6,11 +6,11 @@ import {
   type Site,
   type SitePayload,
 } from '../api/organization.api'
-import { OrganizationMasterPage } from './OrganizationMasterPage'
+import { MasterPage } from './MasterPage'
 
 export function SitesPage() {
   return (
-    <OrganizationMasterPage<Site, SitePayload>
+    <MasterPage<Site, SitePayload>
       title="Sites"
       subtitle="Physical sites in the current company"
       permissionPrefix="site"

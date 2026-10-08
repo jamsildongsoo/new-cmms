@@ -1,9 +1,10 @@
-import { IsString } from 'class-validator';
+import { IsNotEmpty, IsString, IsUUID } from 'class-validator';
 
 export class CreateAttachmentDto {
   @IsString()
+  @IsNotEmpty()
   refModule: string;
 
-  @IsString()
-  refNo: string;
+  @IsUUID()
+  refId: string;
 }

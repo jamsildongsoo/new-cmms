@@ -99,8 +99,6 @@ export class CodeItemsService {
       codeItemId,
       name: this.requireTrimmedString(dto.name, 'name'),
       sortOrder: this.normalizeSortOrder(dto.sortOrder),
-      deleteYn: 'N',
-      createdBy: userContext.userId,
     });
 
     return this.toResponse(await this.codeItemRepository.save(item));
@@ -125,9 +123,6 @@ export class CodeItemsService {
       item.sortOrder = this.normalizeSortOrder(dto.sortOrder);
     }
 
-    item.updatedBy = userContext.userId;
-    item.updatedAt = new Date();
-
     return this.toResponse(await this.codeItemRepository.save(item));
   }
 
@@ -142,11 +137,9 @@ export class CodeItemsService {
       codeItemId,
     );
 
-    item.deleteYn = 'Y';
-    item.updatedBy = userContext.userId;
-    item.updatedAt = new Date();
+    await this.codeItemRepository.remove(item);
 
-    return this.toResponse(await this.codeItemRepository.save(item));
+    return this.toResponse(item);
   }
 
   async findActiveByIdOrThrow(
@@ -158,7 +151,6 @@ export class CodeItemsService {
       companyId,
       codeId: this.requireTrimmedString(codeId, 'codeId'),
       codeItemId: this.requireTrimmedString(codeItemId, 'codeItemId'),
-      deleteYn: 'N',
     });
 
     if (!item) {
@@ -176,7 +168,6 @@ export class CodeItemsService {
       where: {
         companyId,
         codeId,
-        deleteYn: 'N',
       },
       order: {
         sortOrder: 'ASC',
@@ -223,11 +214,6 @@ export class CodeItemsService {
       codeItemId: item.codeItemId,
       name: item.name,
       sortOrder: item.sortOrder,
-      deleteYn: item.deleteYn,
-      createdBy: item.createdBy,
-      createdAt: item.createdAt,
-      updatedBy: item.updatedBy,
-      updatedAt: item.updatedAt,
     };
   }
 }

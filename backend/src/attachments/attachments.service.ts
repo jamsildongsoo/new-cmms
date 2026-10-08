@@ -45,11 +45,23 @@ export class AttachmentsService {
     userContext: UserContext,
     dto: CreateAttachmentDto,
   ): Promise<AttachmentResponseDto> {
+    const refModule = this.requireTrimmedString(dto.refModule, 'refModule');
+    const refId = this.requireTrimmedString(dto.refId, 'refId');
+    const existing = await this.attachmentRepository.findOneBy({
+      companyId: userContext.companyId,
+      refModule,
+      refId,
+      deleteYn: 'N',
+    });
+    if (existing) {
+      return this.toAttachmentResponse(existing);
+    }
+
     const attachment = this.attachmentRepository.create({
       companyId: userContext.companyId,
       attachmentId: randomUUID(),
-      refModule: this.requireTrimmedString(dto.refModule, 'refModule'),
-      refNo: this.requireTrimmedString(dto.refNo, 'refNo'),
+      refModule,
+      refId,
       deleteYn: 'N',
       createdBy: userContext.userId,
     });
@@ -279,7 +291,7 @@ export class AttachmentsService {
       companyId: attachment.companyId,
       attachmentId: attachment.attachmentId,
       refModule: attachment.refModule,
-      refNo: attachment.refNo,
+      refId: attachment.refId,
       deleteYn: attachment.deleteYn,
       createdBy: attachment.createdBy,
       createdAt: attachment.createdAt,

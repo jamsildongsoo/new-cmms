@@ -1,5 +1,5 @@
 import { AxiosError } from 'axios'
-import { Edit3, Plus, RefreshCw, Save, X } from 'lucide-react'
+import { Edit3, Eye, Plus, RefreshCw, Save, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import {
@@ -8,11 +8,13 @@ import {
   updateCompany,
   type Company,
 } from '../api/companies.api'
+import { toMessage } from '../api/errors'
 import { Button } from '../components/ui/Button'
 import { DataTable } from '../components/ui/DataTable'
 import { Field } from '../components/ui/Field'
 import { Input } from '../components/ui/Input'
 import { Textarea } from '../components/ui/Textarea'
+import type { FormMode } from '../types/form'
 
 interface CompanyFormState {
   name: string
@@ -34,78 +36,73 @@ function toForm(company: Company): CompanyFormState {
   }
 }
 
-function toMessage(error: unknown) {
-  if (error instanceof AxiosError) {
-    const message = (error.response?.data as { message?: unknown } | undefined)
-      ?.message
-    if (Array.isArray(message)) {
-      return message.join(', ')
-    }
-    if (typeof message === 'string') {
-      return message
-    }
-  }
-  return 'Request failed'
+function isNotFound(error: unknown) {
+  return error instanceof AxiosError && error.response?.status === 404
+}
+
+const formTitles: Record<FormMode, string> = {
+  create: 'New',
+  edit: 'Edit',
+  view: 'View',
 }
 
 export function CompaniesPage() {
   const [company, setCompany] = useState<Company | null>(null)
   const [form, setForm] = useState<CompanyFormState>(emptyForm)
-  const [isFormOpen, setIsFormOpen] = useState(false)
+  const [mode, setMode] = useState<FormMode | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
 
-  const loadCompany = useCallback(async () => {
+  const handleLoaded = useCallback((data: Company | null) => {
+    setCompany(data)
+    setNotice(data ? null : 'No company master data found')
+  }, [])
+
+  const handleLoadError = useCallback((loadError: unknown) => {
+    if (isNotFound(loadError)) {
+      handleLoaded(null)
+    } else {
+      setError(toMessage(loadError))
+    }
+  }, [handleLoaded])
+
+  const loadCompany = async () => {
     setIsLoading(true)
     setError(null)
     setNotice(null)
-
     try {
-      const data = await getCompany()
-      setCompany(data)
+      handleLoaded(await getCompany())
     } catch (loadError) {
-      if (
-        loadError instanceof AxiosError &&
-        loadError.response?.status === 404
-      ) {
-        setCompany(null)
-        setNotice('No company master data found')
-      } else {
-        setError(toMessage(loadError))
-      }
+      handleLoadError(loadError)
     } finally {
       setIsLoading(false)
     }
-  }, [])
+  }
 
   useEffect(() => {
-    void loadCompany()
-  }, [loadCompany])
+    let active = true
+    getCompany()
+      .then((data) => active && handleLoaded(data))
+      .catch((loadError) => active && handleLoadError(loadError))
+      .finally(() => active && setIsLoading(false))
+    return () => {
+      active = false
+    }
+  }, [handleLoaded, handleLoadError])
 
   const rows = useMemo(() => (company ? [company] : []), [company])
 
-  const openNewForm = () => {
-    setForm(emptyForm)
-    setIsFormOpen(true)
-    setError(null)
-    setNotice(null)
-  }
-
-  const openEditForm = () => {
-    if (!company) {
-      openNewForm()
-      return
-    }
-    setForm(toForm(company))
-    setIsFormOpen(true)
+  const openForm = (nextMode: FormMode) => {
+    setForm(company && nextMode !== 'create' ? toForm(company) : emptyForm)
+    setMode(nextMode)
     setError(null)
     setNotice(null)
   }
 
   const closeForm = () => {
-    setIsFormOpen(false)
+    setMode(null)
     setForm(emptyForm)
   }
 
@@ -126,7 +123,7 @@ export function CompaniesPage() {
         ? await updateCompany(payload)
         : await createCompany(payload)
       setCompany(savedCompany)
-      setIsFormOpen(false)
+      closeForm()
       setNotice(company ? 'Company updated' : 'Company created')
     } catch (saveError) {
       setError(toMessage(saveError))
@@ -154,12 +151,28 @@ export function CompaniesPage() {
             Refresh
           </Button>
           {company ? (
-            <Button onClick={openEditForm} disabled={isLoading || isSaving}>
-              <Edit3 className="h-4 w-4" />
-              Edit
-            </Button>
+            <>
+              <Button
+                variant="secondary"
+                onClick={() => openForm('view')}
+                disabled={isLoading || isSaving}
+              >
+                <Eye className="h-4 w-4" />
+                View
+              </Button>
+              <Button
+                onClick={() => openForm('edit')}
+                disabled={isLoading || isSaving}
+              >
+                <Edit3 className="h-4 w-4" />
+                Edit
+              </Button>
+            </>
           ) : (
-            <Button onClick={openNewForm} disabled={isLoading || isSaving}>
+            <Button
+              onClick={() => openForm('create')}
+              disabled={isLoading || isSaving}
+            >
               <Plus className="h-4 w-4" />
               New
             </Button>
@@ -180,11 +193,14 @@ export function CompaniesPage() {
         </div>
       )}
 
-      {isFormOpen && (
+      {mode && (
         <form
           className="border border-slate-200 bg-white p-3"
           onSubmit={(event) => void saveCompany(event)}
         >
+          <h2 className="mb-3 text-sm font-semibold text-slate-800">
+            {formTitles[mode]} Company
+          </h2>
           <div className="grid gap-3 md:grid-cols-2">
             <Field label="Company Name" required>
               <Input
@@ -195,11 +211,13 @@ export function CompaniesPage() {
                     name: event.target.value,
                   }))
                 }
+                disabled={mode === 'view'}
                 autoFocus
               />
             </Field>
             <Field label="Registration Number">
               <Input
+                disabled={mode === 'view'}
                 value={form.registrationNumber}
                 onChange={(event) =>
                   setForm((current) => ({
@@ -211,6 +229,7 @@ export function CompaniesPage() {
             </Field>
             <Field label="Note" className="md:col-span-2">
               <Textarea
+                disabled={mode === 'view'}
                 value={form.note}
                 onChange={(event) =>
                   setForm((current) => ({
@@ -229,12 +248,19 @@ export function CompaniesPage() {
               disabled={isSaving}
             >
               <X className="h-4 w-4" />
-              Cancel
+              {mode === 'view' ? 'Close' : 'Cancel'}
             </Button>
-            <Button type="submit" disabled={isSaving}>
-              <Save className="h-4 w-4" />
-              Save
-            </Button>
+            {mode === 'view' ? (
+              <Button type="button" onClick={() => openForm('edit')}>
+                <Edit3 className="h-4 w-4" />
+                Edit
+              </Button>
+            ) : (
+              <Button type="submit" disabled={isSaving}>
+                <Save className="h-4 w-4" />
+                Save
+              </Button>
+            )}
           </div>
         </form>
       )}

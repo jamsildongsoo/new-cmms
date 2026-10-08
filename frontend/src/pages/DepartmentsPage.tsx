@@ -6,11 +6,11 @@ import {
   type Department,
   type DepartmentPayload,
 } from '../api/organization.api'
-import { OrganizationMasterPage } from './OrganizationMasterPage'
+import { MasterPage } from './MasterPage'
 
 export function DepartmentsPage() {
   return (
-    <OrganizationMasterPage<Department, DepartmentPayload>
+    <MasterPage<Department, DepartmentPayload>
       title="Departments"
       subtitle="Departments and parent department relationships"
       permissionPrefix="department"

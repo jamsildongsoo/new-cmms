@@ -1,12 +1,13 @@
-import { AxiosError } from 'axios'
-import { Edit3, Plus, RefreshCw, Save, Trash2, X } from 'lucide-react'
+import { Edit3, Eye, Plus, RefreshCw, Save, Trash2, X } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
+import { toMessage } from '../api/errors'
 import { useAuth } from '../auth/useAuth'
 import { Button } from '../components/ui/Button'
 import { DataTable } from '../components/ui/DataTable'
 import { Field } from '../components/ui/Field'
 import { Input } from '../components/ui/Input'
+import type { FormMode } from '../types/form'
 
 export interface MasterField<TForm> {
   key: Extract<keyof TForm, string>
@@ -21,7 +22,7 @@ export interface MasterColumn<TRow> {
   render: (row: TRow) => string
 }
 
-interface OrganizationMasterPageProps<TRow, TForm> {
+interface MasterPageProps<TRow, TForm> {
   title: string
   subtitle: string
   permissionPrefix: string
@@ -37,25 +38,17 @@ interface OrganizationMasterPageProps<TRow, TForm> {
   deleteRow: (id: string) => Promise<TRow>
 }
 
-function toMessage(error: unknown) {
-  if (error instanceof AxiosError) {
-    const message = (error.response?.data as { message?: unknown } | undefined)
-      ?.message
-    if (Array.isArray(message)) {
-      return message.join(', ')
-    }
-    if (typeof message === 'string') {
-      return message
-    }
-  }
-  return 'Request failed'
+const formTitles: Record<FormMode, string> = {
+  create: 'New',
+  edit: 'Edit',
+  view: 'View',
 }
 
 function normalizeFormValue(value: unknown) {
   return value === null || value === undefined ? '' : String(value)
 }
 
-export function OrganizationMasterPage<
+export function MasterPage<
   TRow,
   TForm extends object,
 >({
@@ -72,12 +65,12 @@ export function OrganizationMasterPage<
   createRow,
   updateRow,
   deleteRow,
-}: OrganizationMasterPageProps<TRow, TForm>) {
+}: MasterPageProps<TRow, TForm>) {
   const { hasPermission } = useAuth()
   const [rows, setRows] = useState<TRow[]>([])
   const [form, setForm] = useState<TForm>(emptyForm)
-  const [editingRow, setEditingRow] = useState<TRow | null>(null)
-  const [isFormOpen, setIsFormOpen] = useState(false)
+  const [activeRow, setActiveRow] = useState<TRow | null>(null)
+  const [mode, setMode] = useState<FormMode | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -102,29 +95,38 @@ export function OrganizationMasterPage<
   }, [loadRows])
 
   useEffect(() => {
-    void refresh()
-  }, [refresh])
+    let active = true
+    loadRows()
+      .then((data) => active && setRows(data))
+      .catch((loadError) => active && setError(toMessage(loadError)))
+      .finally(() => active && setIsLoading(false))
+    return () => {
+      active = false
+    }
+  }, [loadRows])
 
-  const openNewForm = () => {
-    setEditingRow(null)
-    setForm(emptyForm)
-    setIsFormOpen(true)
-    setError(null)
-    setNotice(null)
-  }
-
-  const openEditForm = (row: TRow) => {
-    setEditingRow(row)
-    setForm(toForm(row))
-    setIsFormOpen(true)
+  const openForm = (nextMode: FormMode, row: TRow | null = null) => {
+    setActiveRow(row)
+    setForm(row ? toForm(row) : emptyForm)
+    setMode(nextMode)
     setError(null)
     setNotice(null)
   }
 
   const closeForm = () => {
-    setIsFormOpen(false)
-    setEditingRow(null)
+    setMode(null)
+    setActiveRow(null)
     setForm(emptyForm)
+  }
+
+  // Key fields are immutable, so the backend update DTOs do not accept them.
+  const toUpdatePayload = (current: TForm) => {
+    const immutableKeys = fields
+      .filter((field) => field.disabledOnEdit)
+      .map((field) => field.key as string)
+    return Object.fromEntries(
+      Object.entries(current).filter(([key]) => !immutableKeys.includes(key)),
+    ) as TForm
   }
 
   const saveRow = async (event: FormEvent<HTMLFormElement>) => {
@@ -134,8 +136,8 @@ export function OrganizationMasterPage<
     setNotice(null)
 
     try {
-      if (editingRow) {
-        await updateRow(getId(editingRow), form)
+      if (mode === 'edit' && activeRow) {
+        await updateRow(getId(activeRow), toUpdatePayload(form))
         setNotice(`${title} updated`)
       } else {
         await createRow(form)
@@ -187,7 +189,8 @@ export function OrganizationMasterPage<
             <RefreshCw className="h-4 w-4" />
             Refresh
           </Button>
-          <Button onClick={openNewForm} disabled={!canCreate || isSaving}>
+          <Button onClick={() => openForm('create')}
+            disabled={!canCreate || isSaving}>
             <Plus className="h-4 w-4" />
             New
           </Button>
@@ -207,11 +210,14 @@ export function OrganizationMasterPage<
         </div>
       )}
 
-      {isFormOpen && (
+      {mode && (
         <form
           className="border border-slate-200 bg-white p-3"
           onSubmit={(event) => void saveRow(event)}
         >
+          <h2 className="mb-3 text-sm font-semibold text-slate-800">
+            {formTitles[mode]} {title}
+          </h2>
           <div className="grid gap-3 md:grid-cols-2">
             {fields.map((field) => (
               <Field
@@ -221,7 +227,9 @@ export function OrganizationMasterPage<
               >
                 <Input
                   value={normalizeFormValue(form[field.key])}
-                  disabled={Boolean(editingRow && field.disabledOnEdit)}
+                  disabled={
+                    mode === 'view' || (mode === 'edit' && field.disabledOnEdit)
+                  }
                   onChange={(event) =>
                     setForm((current) => ({
                       ...current,
@@ -240,18 +248,29 @@ export function OrganizationMasterPage<
               disabled={isSaving}
             >
               <X className="h-4 w-4" />
-              Cancel
+              {mode === 'view' ? 'Close' : 'Cancel'}
             </Button>
-            <Button type="submit" disabled={isSaving}>
-              <Save className="h-4 w-4" />
-              Save
-            </Button>
+            {mode === 'view' ? (
+              <Button
+                type="button"
+                onClick={() => openForm('edit', activeRow)}
+                disabled={!canUpdate}
+              >
+                <Edit3 className="h-4 w-4" />
+                Edit
+              </Button>
+            ) : (
+              <Button type="submit" disabled={isSaving}>
+                <Save className="h-4 w-4" />
+                Save
+              </Button>
+            )}
           </div>
         </form>
       )}
 
       <DataTable<TRow>
-        gridTemplateColumns={`${columns.map(() => '1fr').join(' ')} 150px`}
+        gridTemplateColumns={`${columns.map(() => '1fr').join(' ')} 220px`}
         columns={[
           ...columns,
           {
@@ -262,7 +281,15 @@ export function OrganizationMasterPage<
                 <Button
                   size="sm"
                   variant="secondary"
-                  onClick={() => openEditForm(row)}
+                  onClick={() => openForm('view', row)}
+                >
+                  <Eye className="h-4 w-4" />
+                  View
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => openForm('edit', row)}
                   disabled={!canUpdate || isSaving}
                 >
                   <Edit3 className="h-4 w-4" />

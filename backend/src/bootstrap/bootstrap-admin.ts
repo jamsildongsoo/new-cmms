@@ -257,16 +257,9 @@ async function upsertAdminRolePermissions(
     ),
   );
   const permissionIdSet = new Set(permissionIds);
-  const now = new Date();
-
-  for (const rolePermission of existingRolePermissions) {
-    rolePermission.deleteYn = permissionIdSet.has(rolePermission.permissionId)
-      ? 'N'
-      : 'Y';
-    rolePermission.updatedBy = config.adminUserId;
-    rolePermission.updatedAt = now;
-  }
-
+  const removedRolePermissions = existingRolePermissions.filter(
+    (rolePermission) => !permissionIdSet.has(rolePermission.permissionId),
+  );
   const newRolePermissions = permissionIds
     .filter((permissionId) => !existingPermissionIds.has(permissionId))
     .map((permissionId) =>
@@ -274,12 +267,11 @@ async function upsertAdminRolePermissions(
         companyId: config.companyId,
         roleId: ADMIN_ROLE_ID,
         permissionId,
-        deleteYn: 'N',
-        createdBy: config.adminUserId,
       }),
     );
 
-  await repository.save([...existingRolePermissions, ...newRolePermissions]);
+  await repository.remove(removedRolePermissions);
+  await repository.save(newRolePermissions);
 }
 
 async function upsertAdminUser(

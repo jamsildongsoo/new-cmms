@@ -16,7 +16,7 @@ export interface ApprovalResponseDto {
   companyId: string;
   approvalId: string;
   refModule: string | null;
-  refNo: string | null;
+  refId: string | null;
   title: string;
   contentJson: unknown;
   submitterId: string;

@@ -4,9 +4,4 @@ export interface CodeItemResponseDto {
   codeItemId: string;
   name: string;
   sortOrder: number;
-  deleteYn: string;
-  createdBy: string;
-  createdAt: Date;
-  updatedBy: string | null;
-  updatedAt: Date | null;
 }

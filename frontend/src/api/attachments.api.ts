@@ -1,15 +1,12 @@
+import type { AuditFields } from '../types/audit'
 import { http } from './http'
 
-export interface Attachment {
+export interface Attachment extends AuditFields {
   companyId: string
   attachmentId: string
   refModule: string
-  refNo: string
+  refId: string
   deleteYn: string
-  createdBy: string
-  createdAt: string
-  updatedBy: string | null
-  updatedAt: string | null
 }
 
 export interface AttachmentItem {
@@ -17,19 +14,16 @@ export interface AttachmentItem {
   attachmentId: string
   itemNo: number
   originalName: string
-  storedName: string
-  storagePath: string
+  fileExtension: string | null
   mimeType: string | null
-  sizeBytes: number
-  deleteYn: string
-  createdBy: string
-  createdAt: string
+  size: number
+  checksum: string | null
 }
 
-export async function createAttachment(refModule: string, refNo: string) {
+export async function createAttachment(refModule: string, refId: string) {
   const response = await http.post<Attachment>('/attachments', {
     refModule,
-    refNo,
+    refId,
   })
   return response.data
 }

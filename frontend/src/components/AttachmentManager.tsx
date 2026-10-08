@@ -13,7 +13,7 @@ import { Button } from './ui/Button'
 interface AttachmentManagerProps {
   attachmentId: string | null
   refModule: string
-  refNo: string
+  refId: string
   disabled?: boolean
   onAttachmentIdChange: (attachmentId: string) => void
   onError: (message: string) => void
@@ -32,7 +32,7 @@ function formatBytes(value: number) {
 export function AttachmentManager({
   attachmentId,
   refModule,
-  refNo,
+  refId,
   disabled = false,
   onAttachmentIdChange,
   onError,
@@ -54,14 +54,23 @@ export function AttachmentManager({
   }, [attachmentId, onError])
 
   useEffect(() => {
-    void loadItems()
-  }, [loadItems])
+    let active = true
+    if (!attachmentId) {
+      return
+    }
+    getAttachmentItems(attachmentId)
+      .then((data) => active && setItems(data))
+      .catch(() => active && onError('Failed to load attachments'))
+    return () => {
+      active = false
+    }
+  }, [attachmentId, onError])
 
   const ensureAttachmentId = async () => {
     if (attachmentId) {
       return attachmentId
     }
-    const attachment = await createAttachment(refModule, refNo)
+    const attachment = await createAttachment(refModule, refId)
     onAttachmentIdChange(attachment.attachmentId)
     return attachment.attachmentId
   }
@@ -157,7 +166,7 @@ export function AttachmentManager({
                 <div className="truncate font-medium text-slate-800">
                   {item.originalName}
                 </div>
-                <div className="text-slate-500">{formatBytes(item.sizeBytes)}</div>
+                <div className="text-slate-500">{formatBytes(item.size)}</div>
               </div>
               <Button
                 type="button"

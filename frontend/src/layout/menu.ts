@@ -1,5 +1,6 @@
 import {
   Building2,
+  CalendarCheck,
   ClipboardCheck,
   Home,
   KeyRound,
@@ -93,6 +94,12 @@ export const menuGroups: MenuGroup[] = [
         path: '/equipment',
         permission: 'equipment:read',
         icon: Wrench,
+      },
+      {
+        label: 'Preventive Maintenance',
+        path: '/preventive-maintenance',
+        permission: 'preventive_maintenance:read',
+        icon: CalendarCheck,
       },
     ],
   },

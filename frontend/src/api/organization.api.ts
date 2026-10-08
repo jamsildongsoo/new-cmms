@@ -1,20 +1,16 @@
+import type { AuditFields } from '../types/audit'
 import { http } from './http'
 
-interface AuditFields {
+export interface Site extends AuditFields {
   companyId: string
   deleteYn: string
-  createdBy: string
-  createdAt: string
-  updatedBy: string | null
-  updatedAt: string | null
-}
-
-export interface Site extends AuditFields {
   siteId: string
   name: string
 }
 
 export interface Department extends AuditFields {
+  companyId: string
+  deleteYn: string
   deptId: string
   siteId: string | null
   name: string
@@ -22,6 +18,8 @@ export interface Department extends AuditFields {
 }
 
 export interface Warehouse extends AuditFields {
+  companyId: string
+  deleteYn: string
   warehouseId: string
   siteId: string | null
   name: string

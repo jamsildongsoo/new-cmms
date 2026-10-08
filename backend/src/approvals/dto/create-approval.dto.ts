@@ -5,18 +5,23 @@ import {
   IsDefined,
   IsOptional,
   IsString,
+  IsUUID,
   ValidateNested,
 } from 'class-validator';
 import { ApprovalStepInputDto } from './approval-step-input.dto';
 
 export class CreateApprovalDto {
   @IsOptional()
+  @IsUUID()
+  approvalId?: string;
+
+  @IsOptional()
   @IsString()
   refModule?: string | null;
 
   @IsOptional()
-  @IsString()
-  refNo?: string | null;
+  @IsUUID()
+  refId?: string | null;
 
   @IsString()
   title: string;

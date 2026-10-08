@@ -14,6 +14,11 @@ import { jwtConfig } from './config/jwt.config';
 import { storageConfig } from './config/storage.config';
 import { IdentityModule } from './identity/identity.module';
 import { EquipmentModule } from './maintenance/equipment/equipment.module';
+import { PreventiveMaintenanceModule } from './maintenance/preventive-maintenance/preventive-maintenance.module';
+import { WorkOrderModule } from './maintenance/work-order/work-order.module';
+import { WorkPermitModule } from './maintenance/work-permit/work-permit.module';
+import { PurchaseRequestModule } from './purchase/purchase-request/purchase-request.module';
+import { PurchaseOrderModule } from './purchase/purchase-order/purchase-order.module';
 import { NumberingModule } from './numbering/numbering.module';
 import { OrganizationModule } from './organization/organization.module';
 
@@ -53,6 +58,11 @@ import { OrganizationModule } from './organization/organization.module';
     CodesModule,
     NumberingModule,
     EquipmentModule,
+    PreventiveMaintenanceModule,
+    WorkOrderModule,
+    WorkPermitModule,
+    PurchaseRequestModule,
+    PurchaseOrderModule,
   ],
   controllers: [AppController],
   providers: [AppService],

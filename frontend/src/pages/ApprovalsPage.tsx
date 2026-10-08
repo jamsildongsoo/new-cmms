@@ -1,4 +1,3 @@
-import { AxiosError } from 'axios'
 import {
   Check,
   Edit3,
@@ -11,7 +10,8 @@ import {
   X,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { FormEvent } from 'react'
+import { useLocation } from 'react-router-dom'
+import type { FormEvent, ReactNode } from 'react'
 import {
   approveApproval,
   cancelApproval,
@@ -27,8 +27,8 @@ import {
   type ApprovalPayload,
   type ApprovalStep,
   type ApprovalStepPayload,
-  type ApprovalStatus,
 } from '../api/approvals.api'
+import { toMessage } from '../api/errors'
 import { useAuth } from '../auth/useAuth'
 import { AttachmentManager } from '../components/AttachmentManager'
 import { RichTextEditor } from '../components/RichTextEditor'
@@ -37,9 +37,16 @@ import { DataTable } from '../components/ui/DataTable'
 import { Field } from '../components/ui/Field'
 import { Input } from '../components/ui/Input'
 import { Select } from '../components/ui/Select'
+import { StatusBadge } from '../components/ui/StatusBadge'
 import { Textarea } from '../components/ui/Textarea'
+import { documentModules } from '../documents/registry'
+import type { ApprovalDraft } from '../documents/snapshot'
+import { documentStatusLabels } from '../types/document'
 
 interface ApprovalFormState {
+  approvalId: string
+  refModule: string | null
+  refId: string | null
   title: string
   contentJson: unknown
   attachmentId: string | null
@@ -56,35 +63,16 @@ const boxes: { key: ApprovalBox; label: string }[] = [
   { key: 'reference', label: 'Reference' },
 ]
 
-const statusLabels: Record<ApprovalStatus, string> = {
-  D: 'Draft',
-  P: 'In Progress',
-  C: 'Confirmed',
-  R: 'Rejected',
-  X: 'Cancelled',
-}
-
 const emptyForm: ApprovalFormState = {
+  approvalId: '',
+  refModule: null,
+  refId: null,
   title: '',
   contentJson: { type: 'doc', content: [{ type: 'paragraph' }] },
   attachmentId: null,
   steps: [{ type: 'APPROVER', userId: '' }],
   note: '',
   submit: false,
-}
-
-function toMessage(error: unknown) {
-  if (error instanceof AxiosError) {
-    const message = (error.response?.data as { message?: unknown } | undefined)
-      ?.message
-    if (Array.isArray(message)) {
-      return message.join(', ')
-    }
-    if (typeof message === 'string') {
-      return message
-    }
-  }
-  return 'Request failed'
 }
 
 function stepsFromForm(form: ApprovalFormState): ApprovalStepPayload[] {
@@ -128,15 +116,21 @@ function contentToText(contentJson: unknown) {
       if ('content' in node && Array.isArray(node.content)) {
         node.content.forEach(walk)
       }
+      if ('type' in node && node.type === 'paragraph') {
+        textParts.push('\n')
+      }
     }
     walk(contentJson)
-    return textParts.join(' ').trim()
+    return textParts.join('').trim()
   }
   return ''
 }
 
 function toForm(approval: Approval): ApprovalFormState {
   return {
+    approvalId: approval.approvalId,
+    refModule: approval.refModule,
+    refId: approval.refId,
     title: approval.title,
     contentJson: approval.contentJson,
     attachmentId: approval.attachmentId,
@@ -157,6 +151,8 @@ function toForm(approval: Approval): ApprovalFormState {
 
 function toPayload(form: ApprovalFormState): ApprovalPayload {
   return {
+    refModule: form.refModule,
+    refId: form.refId,
     title: form.title,
     contentJson: form.contentJson,
     attachmentId: form.attachmentId,
@@ -195,9 +191,21 @@ export function ApprovalsPage() {
   const [approvals, setApprovals] = useState<Approval[]>([])
   const [selectedApproval, setSelectedApproval] = useState<Approval | null>(null)
   const [editingApproval, setEditingApproval] = useState<Approval | null>(null)
-  const [form, setForm] = useState<ApprovalFormState>(emptyForm)
+  const prefill = (useLocation().state as { prefill?: ApprovalDraft } | null)
+    ?.prefill
+  const [form, setForm] = useState<ApprovalFormState>(() =>
+    prefill
+      ? {
+          ...emptyForm,
+          ...prefill,
+          approvalId: crypto.randomUUID(),
+          steps: [{ type: 'APPROVER', userId: '' }],
+        }
+      : emptyForm,
+  )
+  const [documentViewOpen, setDocumentViewOpen] = useState(false)
   const [actionComment, setActionComment] = useState('')
-  const [isFormOpen, setIsFormOpen] = useState(false)
+  const [isFormOpen, setIsFormOpen] = useState(Boolean(prefill))
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -226,8 +234,27 @@ export function ApprovalsPage() {
   }, [])
 
   useEffect(() => {
-    void loadBox(activeBox)
-  }, [activeBox, loadBox])
+    let active = true
+    getApprovalBox(activeBox)
+      .then((data) => {
+        if (active) {
+          setApprovals(data)
+          setSelectedApproval(data[0] ?? null)
+        }
+      })
+      .catch((loadError) => active && setError(toMessage(loadError)))
+      .finally(() => active && setIsLoading(false))
+    return () => {
+      active = false
+    }
+  }, [activeBox])
+
+  const selectBox = (box: ApprovalBox) => {
+    setActiveBox(box)
+    setIsLoading(true)
+    setError(null)
+    setNotice(null)
+  }
 
   const selectedCurrentStep = useMemo(() => {
     if (!selectedApproval) {
@@ -255,9 +282,21 @@ export function ApprovalsPage() {
     selectedApproval?.status === 'P' &&
     selectedCurrentStep?.userId === user?.userId
 
+  const linkedModule =
+    selectedApproval?.refModule && selectedApproval.refId
+      ? documentModules[selectedApproval.refModule]
+      : undefined
+  const canOpenLinked = linkedModule
+    ? hasPermission(linkedModule.readPermission)
+    : false
+
   const openNewForm = () => {
     setEditingApproval(null)
-    setForm({ ...emptyForm, steps: [{ type: 'APPROVER', userId: '' }] })
+    setForm({
+      ...emptyForm,
+      approvalId: crypto.randomUUID(),
+      steps: [{ type: 'APPROVER', userId: '' }],
+    })
     setIsFormOpen(true)
     setError(null)
     setNotice(null)
@@ -301,7 +340,7 @@ export function ApprovalsPage() {
       const payload = toPayload(form)
       const savedApproval = editingApproval
         ? await updateApproval(editingApproval.approvalId, payload)
-        : await createApproval(payload)
+        : await createApproval({ ...payload, approvalId: form.approvalId })
       setSelectedApproval(savedApproval)
       setIsFormOpen(false)
       setEditingApproval(null)
@@ -400,7 +439,7 @@ export function ApprovalsPage() {
           <button
             key={box.key}
             type="button"
-            onClick={() => setActiveBox(box.key)}
+            onClick={() => selectBox(box.key)}
             className={[
               'h-8 border-b-2 px-3 text-xs font-medium',
               activeBox === box.key
@@ -538,7 +577,7 @@ export function ApprovalsPage() {
               <AttachmentManager
                 attachmentId={form.attachmentId}
                 refModule="approval"
-                refNo={editingApproval?.approvalId ?? 'draft'}
+                refId={form.approvalId}
                 disabled={isSaving}
                 onAttachmentIdChange={(attachmentId) =>
                   setForm((current) => ({ ...current, attachmentId }))
@@ -609,7 +648,7 @@ export function ApprovalsPage() {
             {
               key: 'status',
               label: 'Status',
-              render: (row) => statusLabels[row.status],
+              render: (row) => <StatusBadge status={row.status} />,
             },
           ]}
           rows={approvals}
@@ -656,7 +695,7 @@ export function ApprovalsPage() {
                     {approval.title}
                   </span>
                   <span className="block text-slate-500">
-                    {statusLabels[approval.status]} / {approval.submitterId}
+                    {documentStatusLabels[approval.status]} / {approval.submitterId}
                   </span>
                 </button>
               ))}
@@ -673,8 +712,20 @@ export function ApprovalsPage() {
                   {contentToText(selectedApproval.contentJson)}
                 </div>
               </div>
+              {linkedModule && canOpenLinked && (
+                <Button
+                  variant="secondary"
+                  onClick={() => setDocumentViewOpen(true)}
+                >
+                  <Eye className="h-4 w-4" />
+                  Open {linkedModule.label}
+                </Button>
+              )}
               <div className="grid grid-cols-2 gap-2">
-                <Info label="Status" value={statusLabels[selectedApproval.status]} />
+                <Info
+                label="Status"
+                value={<StatusBadge status={selectedApproval.status} />}
+              />
                 <Info label="Submitter" value={selectedApproval.submitterId} />
                 <Info
                   label="Submitted"
@@ -712,7 +763,7 @@ export function ApprovalsPage() {
                 <AttachmentManager
                   attachmentId={selectedApproval.attachmentId}
                   refModule="approval"
-                  refNo={selectedApproval.approvalId}
+                  refId={selectedApproval.approvalId}
                   disabled={!canEditSelected}
                   onAttachmentIdChange={() => undefined}
                   onError={setError}
@@ -802,15 +853,28 @@ export function ApprovalsPage() {
           )}
         </div>
       </div>
+      {documentViewOpen && linkedModule && selectedApproval?.refId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="max-h-full w-full max-w-3xl overflow-auto bg-white shadow-lg">
+            <div className="flex justify-end border-b border-slate-200 p-1">
+              <Button variant="ghost" onClick={() => setDocumentViewOpen(false)}>
+                <X className="h-4 w-4" />
+                Close
+              </Button>
+            </div>
+            {linkedModule.renderView(selectedApproval.refId)}
+          </div>
+        </div>
+      )}
     </section>
   )
 }
 
-function Info({ label, value }: { label: string; value: string }) {
+function Info({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div>
       <div className="text-[11px] font-medium text-slate-500">{label}</div>
-      <div className="break-words text-xs text-slate-800">{value || '-'}</div>
+      <div className="break-words text-xs text-slate-800">{value === '' || value == null ? '-' : value}</div>
     </div>
   )
 }

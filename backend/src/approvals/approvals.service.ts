@@ -24,6 +24,7 @@ import {
   ApprovalStepType,
 } from './entities/approval-step.entity';
 import { Approval } from './entities/approval.entity';
+import { SOURCE_DOCUMENTS } from './source-documents';
 
 type ApprovalBox = 'submit' | 'pending' | 'processed' | 'closed' | 'reference';
 
@@ -40,11 +41,20 @@ export class ApprovalsService {
     userContext: UserContext,
     dto: CreateApprovalDto,
   ): Promise<ApprovalResponseDto> {
+    const approvalId = dto.approvalId ?? randomUUID();
+    const existingApproval = await this.approvalRepository.findOneBy({
+      companyId: userContext.companyId,
+      approvalId,
+    });
+    if (existingApproval) {
+      throw new ConflictException('Approval already exists');
+    }
+
     const approval = this.approvalRepository.create({
       companyId: userContext.companyId,
-      approvalId: randomUUID(),
+      approvalId,
       refModule: this.normalizeNullableString(dto.refModule),
-      refNo: this.normalizeNullableString(dto.refNo),
+      refId: this.normalizeNullableString(dto.refId),
       title: this.requireTrimmedString(dto.title, 'title'),
       contentJson: this.requireContentJson(dto.contentJson),
       submitterId: userContext.userId,
@@ -128,8 +138,8 @@ export class ApprovalsService {
     if (dto.refModule !== undefined) {
       approval.refModule = this.normalizeNullableString(dto.refModule);
     }
-    if (dto.refNo !== undefined) {
-      approval.refNo = this.normalizeNullableString(dto.refNo);
+    if (dto.refId !== undefined) {
+      approval.refId = this.normalizeNullableString(dto.refId);
     }
     if (dto.title !== undefined) {
       approval.title = this.requireTrimmedString(dto.title, 'title');
@@ -203,8 +213,6 @@ export class ApprovalsService {
       if (step.type === ApprovalStepType.REFERENCE) {
         step.status = 'Y';
       }
-      step.updatedBy = userContext.userId;
-      step.updatedAt = now;
     }
 
     approval.status = DocumentStatus.PROGRESS;
@@ -214,6 +222,7 @@ export class ApprovalsService {
 
     await this.approvalStepRepository.save(steps);
     await this.approvalRepository.save(approval);
+    await this.syncSourceStatus(approval);
 
     return this.findOne(userContext, approval.approvalId);
   }
@@ -232,8 +241,6 @@ export class ApprovalsService {
     currentStep.status = 'Y';
     currentStep.comment = this.normalizeNullableString(dto.comment);
     currentStep.actedAt = now;
-    currentStep.updatedBy = userContext.userId;
-    currentStep.updatedAt = now;
 
     const nextApprover = this.findCurrentApprover(
       steps.filter((step) => step.stepNo !== currentStep.stepNo),
@@ -248,6 +255,7 @@ export class ApprovalsService {
 
     await this.approvalStepRepository.save(currentStep);
     await this.approvalRepository.save(approval);
+    await this.syncSourceStatus(approval);
 
     return this.findOne(userContext, approval.approvalId);
   }
@@ -266,8 +274,6 @@ export class ApprovalsService {
     currentStep.status = 'N';
     currentStep.comment = this.normalizeNullableString(dto.comment);
     currentStep.actedAt = now;
-    currentStep.updatedBy = userContext.userId;
-    currentStep.updatedAt = now;
 
     approval.status = DocumentStatus.REJECTED;
     approval.completedAt = now;
@@ -276,6 +282,7 @@ export class ApprovalsService {
 
     await this.approvalStepRepository.save(currentStep);
     await this.approvalRepository.save(approval);
+    await this.syncSourceStatus(approval);
 
     return this.findOne(userContext, approval.approvalId);
   }
@@ -302,7 +309,20 @@ export class ApprovalsService {
     approval.updatedAt = now;
 
     await this.approvalRepository.save(approval);
+    await this.syncSourceStatus(approval);
     return this.findOne(userContext, approval.approvalId);
+  }
+
+  private async syncSourceStatus(approval: Approval): Promise<void> {
+    const source = approval.refModule && SOURCE_DOCUMENTS[approval.refModule];
+    if (!source || !approval.refId) {
+      return;
+    }
+    await this.approvalRepository.manager.update(
+      source.entity,
+      { companyId: approval.companyId, [source.idField]: approval.refId },
+      { status: approval.status },
+    );
   }
 
   private async findActionContext(
@@ -452,7 +472,6 @@ export class ApprovalsService {
         type: ApprovalStepType.SUBMITTER,
         userId: userContext.userId,
         status: null,
-        createdBy: userContext.userId,
       }),
       ...normalizedSteps.map((step, index) =>
         this.approvalStepRepository.create({
@@ -462,7 +481,6 @@ export class ApprovalsService {
           type: step.type,
           userId: step.userId,
           status: null,
-          createdBy: userContext.userId,
         }),
       ),
     ];
@@ -597,7 +615,7 @@ export class ApprovalsService {
       companyId: approval.companyId,
       approvalId: approval.approvalId,
       refModule: approval.refModule,
-      refNo: approval.refNo,
+      refId: approval.refId,
       title: approval.title,
       contentJson: approval.contentJson,
       submitterId: approval.submitterId,

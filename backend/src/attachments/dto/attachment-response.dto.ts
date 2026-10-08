@@ -2,7 +2,7 @@ export interface AttachmentResponseDto {
   companyId: string;
   attachmentId: string;
   refModule: string;
-  refNo: string;
+  refId: string;
   deleteYn: string;
   createdBy: string;
   createdAt: Date;

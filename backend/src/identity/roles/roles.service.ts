@@ -31,7 +31,6 @@ export class RolesService {
       where: {
         companyId,
         roleId,
-        deleteYn: 'N',
       },
       order: {
         permissionId: 'ASC',
@@ -152,18 +151,10 @@ export class RolesService {
       },
     });
     const requestedPermissionIds = new Set(permissionIds);
-    const now = new Date();
-
-    for (const rolePermission of existingRolePermissions) {
-      if (requestedPermissionIds.has(rolePermission.permissionId)) {
-        rolePermission.deleteYn = 'N';
-      } else {
-        rolePermission.deleteYn = 'Y';
-      }
-      rolePermission.updatedBy = userContext.userId;
-      rolePermission.updatedAt = now;
-    }
-
+    const removedRolePermissions = existingRolePermissions.filter(
+      (rolePermission) =>
+        !requestedPermissionIds.has(rolePermission.permissionId),
+    );
     const existingPermissionIds = new Set(
       existingRolePermissions.map(
         (rolePermission) => rolePermission.permissionId,
@@ -176,15 +167,11 @@ export class RolesService {
           companyId: userContext.companyId,
           roleId,
           permissionId,
-          deleteYn: 'N',
-          createdBy: userContext.userId,
         }),
       );
 
-    await this.rolePermissionRepository.save([
-      ...existingRolePermissions,
-      ...newRolePermissions,
-    ]);
+    await this.rolePermissionRepository.remove(removedRolePermissions);
+    await this.rolePermissionRepository.save(newRolePermissions);
 
     return this.findActivePermissionIds(userContext.companyId, roleId);
   }

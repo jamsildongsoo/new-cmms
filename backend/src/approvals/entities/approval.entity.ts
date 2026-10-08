@@ -1,8 +1,9 @@
+import { AuditEntity } from '../../common/entities/audit.entity';
 import { Column, Entity, PrimaryColumn } from 'typeorm';
 import { DocumentStatus } from '../../common/constants/document-status';
 
 @Entity('approval')
-export class Approval {
+export class Approval extends AuditEntity {
   @PrimaryColumn({ type: 'varchar', length: 30 })
   companyId: string;
 
@@ -13,7 +14,7 @@ export class Approval {
   refModule: string | null;
 
   @Column({ type: 'varchar', length: 50, nullable: true })
-  refNo: string | null;
+  refId: string | null;
 
   @Column({ type: 'varchar', length: 200 })
   title: string;
@@ -41,16 +42,4 @@ export class Approval {
 
   @Column({ type: 'char', length: 1, default: 'N' })
   deleteYn: string;
-
-  @Column({ type: 'varchar', length: 50 })
-  createdBy: string;
-
-  @Column({ type: 'timestamptz', default: () => 'now()' })
-  createdAt: Date;
-
-  @Column({ type: 'varchar', length: 50, nullable: true })
-  updatedBy: string | null;
-
-  @Column({ type: 'timestamptz', nullable: true })
-  updatedAt: Date | null;
 }

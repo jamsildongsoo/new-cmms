@@ -6,11 +6,11 @@ import {
   type Warehouse,
   type WarehousePayload,
 } from '../api/organization.api'
-import { OrganizationMasterPage } from './OrganizationMasterPage'
+import { MasterPage } from './MasterPage'
 
 export function WarehousesPage() {
   return (
-    <OrganizationMasterPage<Warehouse, WarehousePayload>
+    <MasterPage<Warehouse, WarehousePayload>
       title="Warehouses"
       subtitle="Warehouse master data by site"
       permissionPrefix="warehouse"

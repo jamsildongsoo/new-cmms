@@ -1,5 +1,11 @@
 import { Type } from 'class-transformer';
-import { IsArray, IsOptional, IsString, ValidateNested } from 'class-validator';
+import {
+  IsArray,
+  IsOptional,
+  IsString,
+  IsUUID,
+  ValidateNested,
+} from 'class-validator';
 import { ApprovalStepInputDto } from './approval-step-input.dto';
 
 export class UpdateApprovalDto {
@@ -8,8 +14,8 @@ export class UpdateApprovalDto {
   refModule?: string | null;
 
   @IsOptional()
-  @IsString()
-  refNo?: string | null;
+  @IsUUID()
+  refId?: string | null;
 
   @IsOptional()
   @IsString()

@@ -1,3 +1,5 @@
+import type { AuditFields } from '../types/audit'
+import type { DocumentStatus } from '../types/document'
 import { http } from './http'
 
 export type ApprovalBox =
@@ -7,7 +9,6 @@ export type ApprovalBox =
   | 'closed'
   | 'reference'
 
-export type ApprovalStatus = 'D' | 'P' | 'C' | 'R' | 'X'
 export type ApprovalStepType = 'SUBMITTER' | 'APPROVER' | 'REFERENCE'
 
 export interface ApprovalStep {
@@ -21,24 +22,20 @@ export interface ApprovalStep {
   actedAt: string | null
 }
 
-export interface Approval {
+export interface Approval extends AuditFields {
   companyId: string
   approvalId: string
   refModule: string | null
-  refNo: string | null
+  refId: string | null
   title: string
   contentJson: unknown
   submitterId: string
-  status: ApprovalStatus
+  status: DocumentStatus
   attachmentId: string | null
   submittedAt: string | null
   completedAt: string | null
   note: string | null
   deleteYn: string
-  createdBy: string
-  createdAt: string
-  updatedBy: string | null
-  updatedAt: string | null
   steps: ApprovalStep[]
 }
 
@@ -49,13 +46,17 @@ export interface ApprovalStepPayload {
 
 export interface ApprovalPayload {
   refModule?: string | null
-  refNo?: string | null
+  refId?: string | null
   title: string
   contentJson: unknown
   attachmentId?: string | null
   note?: string | null
   steps: ApprovalStepPayload[]
   submit?: boolean
+}
+
+export interface ApprovalCreatePayload extends ApprovalPayload {
+  approvalId?: string
 }
 
 export interface ApprovalActionPayload {
@@ -72,7 +73,7 @@ export async function getApproval(approvalId: string) {
   return response.data
 }
 
-export async function createApproval(payload: ApprovalPayload) {
+export async function createApproval(payload: ApprovalCreatePayload) {
   const response = await http.post<Approval>('/approvals', payload)
   return response.data
 }
