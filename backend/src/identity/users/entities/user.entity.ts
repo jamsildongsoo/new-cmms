@@ -29,6 +29,12 @@ export class User extends AuditEntity {
   @Column({ type: 'varchar', length: 50, nullable: true })
   phoneNumber: string | null;
 
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  title: string | null;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  position: string | null;
+
   @Column({ type: 'varchar', length: 30 })
   roleId: string;
 

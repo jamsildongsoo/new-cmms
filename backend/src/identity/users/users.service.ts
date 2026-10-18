@@ -76,6 +76,8 @@ export class UsersService {
       name: validatedDto.name,
       email: validatedDto.email,
       phoneNumber: validatedDto.phoneNumber,
+      title: validatedDto.title,
+      position: validatedDto.position,
       roleId: validatedDto.roleId,
       deptId: validatedDto.deptId,
       accessScope: validatedDto.accessScope,
@@ -111,6 +113,12 @@ export class UsersService {
     }
     if (validatedDto.phoneNumber !== undefined) {
       user.phoneNumber = validatedDto.phoneNumber;
+    }
+    if (validatedDto.title !== undefined) {
+      user.title = validatedDto.title;
+    }
+    if (validatedDto.position !== undefined) {
+      user.position = validatedDto.position;
     }
     if (validatedDto.roleId !== undefined) {
       user.roleId = validatedDto.roleId;
@@ -174,6 +182,8 @@ export class UsersService {
       name,
       email: this.normalizeNullableString(createUserDto.email),
       phoneNumber: this.normalizeNullableString(createUserDto.phoneNumber),
+      title: this.normalizeNullableString(createUserDto.title),
+      position: this.normalizeNullableString(createUserDto.position),
       roleId,
       deptId,
       accessScope,
@@ -198,6 +208,14 @@ export class UsersService {
         updateUserDto.phoneNumber === undefined
           ? undefined
           : this.normalizeNullableString(updateUserDto.phoneNumber),
+      title:
+        updateUserDto.title === undefined
+          ? undefined
+          : this.normalizeNullableString(updateUserDto.title),
+      position:
+        updateUserDto.position === undefined
+          ? undefined
+          : this.normalizeNullableString(updateUserDto.position),
       roleId:
         updateUserDto.roleId === undefined
           ? undefined
@@ -247,6 +265,8 @@ export class UsersService {
       name: user.name,
       email: user.email,
       phoneNumber: user.phoneNumber,
+      title: user.title,
+      position: user.position,
       roleId: user.roleId,
       deptId: user.deptId,
       accessScope: user.accessScope,

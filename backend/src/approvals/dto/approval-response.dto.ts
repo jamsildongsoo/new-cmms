@@ -1,7 +1,21 @@
 import { DocumentStatus } from '../../common/constants/document-status';
 import { ApprovalStepType } from '../entities/approval-step.entity';
 
+export interface ApprovalUserInfoDto {
+  userId: string;
+  userName: string;
+  deptId: string;
+  deptName: string | null;
+  title: string | null;
+  position: string | null;
+}
+
 export interface ApprovalStepResponseDto {
+  userName: string | null;
+  deptId: string | null;
+  deptName: string | null;
+  title: string | null;
+  position: string | null;
   companyId: string;
   approvalId: string;
   stepNo: number;
@@ -24,7 +38,6 @@ export interface ApprovalResponseDto {
   attachmentId: string | null;
   submittedAt: Date | null;
   completedAt: Date | null;
-  note: string | null;
   deleteYn: string;
   createdBy: string;
   createdAt: Date;

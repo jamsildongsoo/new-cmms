@@ -7,7 +7,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { UserContext } from '../../auth/types/user-context.type';
-import { CodeCategoriesService } from '../code-categories/code-categories.service';
+import { isCode } from '../../common/constants/code';
 import { CodeItemResponseDto } from './dto/code-item-response.dto';
 import { CreateCodeItemDto } from './dto/create-code-item.dto';
 import { UpdateCodeItemDto } from './dto/update-code-item.dto';
@@ -18,70 +18,36 @@ export class CodeItemsService {
   constructor(
     @InjectRepository(CodeItem)
     private readonly codeItemRepository: Repository<CodeItem>,
-    private readonly codeCategoriesService: CodeCategoriesService,
   ) {}
 
-  async findByCategory(
+  async findByCode(
     userContext: UserContext,
     codeId: string,
   ): Promise<CodeItemResponseDto[]> {
-    await this.codeCategoriesService.findActiveByIdOrThrow(
+    return this.findActiveItems(
       userContext.companyId,
-      codeId,
+      this.assertKnownCode(codeId),
     );
-
-    return this.findActiveItems(userContext.companyId, codeId);
   }
 
-  async findLookup(
+  async findOne(
     userContext: UserContext,
-    query: { module?: string; codeId?: string },
-  ): Promise<Record<string, CodeItemResponseDto[]> | CodeItemResponseDto[]> {
-    const module = this.normalizeOptionalString(query.module);
-    const codeId = this.normalizeOptionalString(query.codeId);
-
-    if (codeId) {
-      const category = await this.codeCategoriesService.findActiveByIdOrThrow(
-        userContext.companyId,
-        codeId,
-      );
-      if (module && category.module !== module) {
-        throw new BadRequestException('codeId does not belong to module');
-      }
-      return this.findActiveItems(userContext.companyId, codeId);
-    }
-
-    if (!module) {
-      throw new BadRequestException('module or codeId is required');
-    }
-
-    const categories = await this.codeCategoriesService.findAll(userContext);
-    const moduleCategories = categories.filter(
-      (category) => category.module === module,
+    codeId: string,
+    codeItemId: string,
+  ): Promise<CodeItemResponseDto> {
+    const item = await this.findActiveByIdOrThrow(
+      userContext.companyId,
+      codeId,
+      codeItemId,
     );
-    const result: Record<string, CodeItemResponseDto[]> = {};
-
-    for (const category of moduleCategories) {
-      result[category.codeId] = await this.findActiveItems(
-        userContext.companyId,
-        category.codeId,
-      );
-    }
-
-    return result;
+    return this.toResponse(item);
   }
 
   async create(
     userContext: UserContext,
-    codeId: string,
     dto: CreateCodeItemDto,
   ): Promise<CodeItemResponseDto> {
-    await this.codeCategoriesService.findActiveByIdOrThrow(
-      userContext.companyId,
-      codeId,
-    );
-
-    const normalizedCodeId = this.requireTrimmedString(codeId, 'codeId');
+    const normalizedCodeId = this.assertKnownCode(dto.codeId);
     const codeItemId = this.requireTrimmedString(dto.codeItemId, 'codeItemId');
     const existingItem = await this.codeItemRepository.findOneBy({
       companyId: userContext.companyId,
@@ -149,7 +115,7 @@ export class CodeItemsService {
   ): Promise<CodeItem> {
     const item = await this.codeItemRepository.findOneBy({
       companyId,
-      codeId: this.requireTrimmedString(codeId, 'codeId'),
+      codeId: this.assertKnownCode(codeId),
       codeItemId: this.requireTrimmedString(codeItemId, 'codeItemId'),
     });
 
@@ -188,13 +154,12 @@ export class CodeItemsService {
     return value.trim();
   }
 
-  private normalizeOptionalString(
-    value: string | undefined,
-  ): string | undefined {
-    if (value === undefined || value.trim() === '') {
-      return undefined;
+  private assertKnownCode(codeId: string | undefined): string {
+    const normalized = this.requireTrimmedString(codeId, 'codeId');
+    if (!isCode(normalized)) {
+      throw new NotFoundException('Code not found');
     }
-    return value.trim();
+    return normalized;
   }
 
   private normalizeSortOrder(value: number | undefined): number {

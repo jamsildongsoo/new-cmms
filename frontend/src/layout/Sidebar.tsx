@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { useAuth } from '../auth/useAuth'
+import { useAuth } from '@/modules/auth'
 import { menuGroups } from './menu'
 
 export function Sidebar() {

@@ -19,6 +19,14 @@ export class CreateUserDto {
   @IsString()
   phoneNumber?: string | null;
 
+  @IsOptional()
+  @IsString()
+  title?: string | null;
+
+  @IsOptional()
+  @IsString()
+  position?: string | null;
+
   @IsString()
   roleId: string;
 

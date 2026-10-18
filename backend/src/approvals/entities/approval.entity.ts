@@ -37,9 +37,6 @@ export class Approval extends AuditEntity {
   @Column({ type: 'timestamptz', nullable: true })
   completedAt: Date | null;
 
-  @Column({ type: 'text', nullable: true })
-  note: string | null;
-
   @Column({ type: 'char', length: 1, default: 'N' })
   deleteYn: string;
 }

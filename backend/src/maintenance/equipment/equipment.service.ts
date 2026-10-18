@@ -8,8 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { UserContext } from '../../auth/types/user-context.type';
 import { CodeValidationService } from '../../codes/code-validation.service';
-import { CodeCategory } from '../../common/constants/code-categories';
-import { AppModuleKey } from '../../common/constants/modules';
+import { Code } from '../../common/constants/code';
 import { PaginatedResponseDto } from '../../common/dto/paginated-response.dto';
 import { normalizePaginationQuery } from '../../common/utils/pagination.util';
 import { Department } from '../../organization/departments/entities/department.entity';
@@ -291,8 +290,7 @@ export class EquipmentService {
   ): Promise<void> {
     return this.codeValidationService.assertValidItem({
       companyId,
-      module: AppModuleKey.EQUIPMENT,
-      codeId: CodeCategory.EQUIPMENT_TYPE,
+      codeId: Code.EQUIPMENT_TYPE,
       codeItemId: typeCode,
     });
   }

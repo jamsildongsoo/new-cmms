@@ -1,6 +1,6 @@
 import { LogOut } from 'lucide-react'
-import { useAuth } from '../auth/useAuth'
-import { Button } from '../components/ui/Button'
+import { useAuth } from '@/modules/auth'
+import { Button } from '@/shared/ui/Button'
 
 export function Topbar() {
   const { logout, user } = useAuth()

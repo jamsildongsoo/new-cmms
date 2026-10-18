@@ -16,7 +16,47 @@ body {
 .ProseMirror ul,
 .ProseMirror ol {
   margin: 0.5rem 0;
-  padding-left: 1.25rem;
+  padding-left: 1.5rem;
+}
+
+.ProseMirror ul {
+  list-style: disc outside;
+}
+
+.ProseMirror ol {
+  list-style: decimal outside;
+}
+
+.ProseMirror li > p {
+  margin: 0;
+}
+
+.ProseMirror h1,
+.ProseMirror h2,
+.ProseMirror h3 {
+  margin: 0.5rem 0 0.25rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.ProseMirror h1 {
+  font-size: 1.5rem;
+}
+
+.ProseMirror h2 {
+  font-size: 1.25rem;
+}
+
+.ProseMirror h3 {
+  font-size: 1.1rem;
+}
+
+.ProseMirror .selectedCell {
+  background: #dbeafe;
+}
+
+.ProseMirror .tableWrapper {
+  overflow-x: auto;
 }
 
 .ProseMirror table {

@@ -3,6 +3,9 @@ import { IsInt, IsOptional, IsString, Min } from 'class-validator';
 
 export class CreateCodeItemDto {
   @IsString()
+  codeId: string;
+
+  @IsString()
   codeItemId: string;
 
   @IsString()

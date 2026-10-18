@@ -6,6 +6,8 @@ export interface UserResponseDto {
   name: string;
   email: string | null;
   phoneNumber: string | null;
+  title: string | null;
+  position: string | null;
   roleId: string;
   deptId: string;
   accessScope: AccessScope;

@@ -33,10 +33,6 @@ export class CreateApprovalDto {
   @IsString()
   attachmentId?: string | null;
 
-  @IsOptional()
-  @IsString()
-  note?: string | null;
-
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => ApprovalStepInputDto)

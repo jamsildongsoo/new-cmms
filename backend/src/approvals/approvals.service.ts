@@ -8,12 +8,15 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'node:crypto';
 import { In, Repository } from 'typeorm';
+import { User } from '../identity/users/entities/user.entity';
+import { Department } from '../organization/departments/entities/department.entity';
 import { UserContext } from '../auth/types/user-context.type';
 import { DocumentStatus } from '../common/constants/document-status';
 import { assertDraft } from '../common/utils/document-status.util';
 import { ApprovalActionDto } from './dto/approval-action.dto';
 import {
   ApprovalResponseDto,
+  ApprovalUserInfoDto,
   ApprovalStepResponseDto,
 } from './dto/approval-response.dto';
 import { ApprovalStepInputDto } from './dto/approval-step-input.dto';
@@ -35,7 +38,88 @@ export class ApprovalsService {
     private readonly approvalRepository: Repository<Approval>,
     @InjectRepository(ApprovalStep)
     private readonly approvalStepRepository: Repository<ApprovalStep>,
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
+    @InjectRepository(Department)
+    private readonly departmentRepository: Repository<Department>,
   ) {}
+
+  async searchUsers(
+    userContext: UserContext,
+    query: string,
+  ): Promise<ApprovalUserInfoDto[]> {
+    const keyword = query.trim();
+    if (!keyword) {
+      return [];
+    }
+    const pattern = `%${keyword.replace(/[\\%_]/g, '\\$&')}%`;
+    const users = await this.userRepository
+      .createQueryBuilder('u')
+      .where('u.companyId = :companyId', { companyId: userContext.companyId })
+      .andWhere("u.deleteYn = 'N'")
+      .andWhere('(u.userId ILIKE :pattern OR u.name ILIKE :pattern)', {
+        pattern,
+      })
+      .orderBy('u.userId', 'ASC')
+      .limit(10)
+      .getMany();
+    const directory = await this.loadDirectory(
+      userContext.companyId,
+      users.map((user) => user.userId),
+    );
+    return users.map((user) => directory.get(user.userId)!);
+  }
+
+  async findUserInfo(
+    userContext: UserContext,
+    userId: string,
+  ): Promise<ApprovalUserInfoDto> {
+    const user = await this.userRepository.findOneBy({
+      companyId: userContext.companyId,
+      userId: userId.trim(),
+      deleteYn: 'N',
+    });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+    return (await this.loadDirectory(userContext.companyId, [user.userId])).get(
+      user.userId,
+    )!;
+  }
+
+  private async loadDirectory(
+    companyId: string,
+    userIds: string[],
+  ): Promise<Map<string, ApprovalUserInfoDto>> {
+    const directory = new Map<string, ApprovalUserInfoDto>();
+    const ids = [...new Set(userIds)];
+    if (ids.length === 0) {
+      return directory;
+    }
+    const users = await this.userRepository.findBy({
+      companyId,
+      userId: In(ids),
+    });
+    const deptIds = [...new Set(users.map((user) => user.deptId))];
+    const departments = deptIds.length
+      ? await this.departmentRepository.findBy({
+          companyId,
+          deptId: In(deptIds),
+        })
+      : [];
+    const deptNames = new Map(departments.map((d) => [d.deptId, d.name]));
+    for (const user of users) {
+      directory.set(user.userId, {
+        userId: user.userId,
+        userName: user.name,
+        deptId: user.deptId,
+        deptName: deptNames.get(user.deptId) ?? null,
+        title: user.title,
+        position: user.position,
+      });
+    }
+    return directory;
+  }
 
   async create(
     userContext: UserContext,
@@ -60,7 +144,6 @@ export class ApprovalsService {
       submitterId: userContext.userId,
       status: DocumentStatus.DRAFT,
       attachmentId: this.normalizeNullableString(dto.attachmentId),
-      note: this.normalizeNullableString(dto.note),
       deleteYn: 'N',
       createdBy: userContext.userId,
     });
@@ -96,10 +179,17 @@ export class ApprovalsService {
       ),
     );
 
+    const directory = await this.loadDirectory(
+      userContext.companyId,
+      filteredApprovals.flatMap((approval) =>
+        (stepsByApprovalId.get(approval.approvalId) ?? []).map((s) => s.userId),
+      ),
+    );
     return filteredApprovals.map((approval) =>
       this.toResponse(
         approval,
         stepsByApprovalId.get(approval.approvalId) ?? [],
+        directory,
       ),
     );
   }
@@ -120,7 +210,14 @@ export class ApprovalsService {
       throw new ForbiddenException('Approval is not visible to this user');
     }
 
-    return this.toResponse(approval, steps);
+    return this.toResponse(
+      approval,
+      steps,
+      await this.loadDirectory(
+        userContext.companyId,
+        steps.map((step) => step.userId),
+      ),
+    );
   }
 
   async update(
@@ -149,9 +246,6 @@ export class ApprovalsService {
     }
     if (dto.attachmentId !== undefined) {
       approval.attachmentId = this.normalizeNullableString(dto.attachmentId);
-    }
-    if (dto.note !== undefined) {
-      approval.note = this.normalizeNullableString(dto.note);
     }
 
     approval.updatedBy = userContext.userId;
@@ -183,6 +277,7 @@ export class ApprovalsService {
     return this.toResponse(
       await this.approvalRepository.save(approval),
       await this.findSteps(userContext.companyId, [approval.approvalId]),
+      new Map(),
     );
   }
 
@@ -610,6 +705,7 @@ export class ApprovalsService {
   private toResponse(
     approval: Approval,
     steps: ApprovalStep[],
+    directory: Map<string, ApprovalUserInfoDto>,
   ): ApprovalResponseDto {
     return {
       companyId: approval.companyId,
@@ -623,18 +719,26 @@ export class ApprovalsService {
       attachmentId: approval.attachmentId,
       submittedAt: approval.submittedAt,
       completedAt: approval.completedAt,
-      note: approval.note,
       deleteYn: approval.deleteYn,
       createdBy: approval.createdBy,
       createdAt: approval.createdAt,
       updatedBy: approval.updatedBy,
       updatedAt: approval.updatedAt,
-      steps: steps.map((step) => this.toStepResponse(step)),
+      steps: steps.map((step) => this.toStepResponse(step, directory)),
     };
   }
 
-  private toStepResponse(step: ApprovalStep): ApprovalStepResponseDto {
+  private toStepResponse(
+    step: ApprovalStep,
+    directory: Map<string, ApprovalUserInfoDto>,
+  ): ApprovalStepResponseDto {
+    const info = directory.get(step.userId);
     return {
+      userName: info?.userName ?? null,
+      deptId: info?.deptId ?? null,
+      deptName: info?.deptName ?? null,
+      title: info?.title ?? null,
+      position: info?.position ?? null,
       companyId: step.companyId,
       approvalId: step.approvalId,
       stepNo: step.stepNo,

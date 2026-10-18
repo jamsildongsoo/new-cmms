@@ -20,6 +20,14 @@ export class UpdateUserDto {
 
   @IsOptional()
   @IsString()
+  title?: string | null;
+
+  @IsOptional()
+  @IsString()
+  position?: string | null;
+
+  @IsOptional()
+  @IsString()
   roleId?: string;
 
   @IsOptional()

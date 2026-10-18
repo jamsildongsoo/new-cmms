@@ -7,7 +7,6 @@ import {
   MapPin,
   Package,
   Shield,
-  Tags,
   UserRound,
   UsersRound,
   Warehouse,
@@ -72,12 +71,6 @@ export const menuGroups: MenuGroup[] = [
   {
     label: 'Codes',
     items: [
-      {
-        label: 'Code Categories',
-        path: '/code-categories',
-        permission: 'code:read',
-        icon: Tags,
-      },
       {
         label: 'Code Items',
         path: '/code-items',

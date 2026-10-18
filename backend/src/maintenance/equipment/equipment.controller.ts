@@ -10,36 +10,16 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
-import { RequirePermissions } from '../../auth/decorators/require-permissions.decorator';
+import { RequirePermission } from '../../auth/decorators/require-permissions.decorator';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import type { UserContext } from '../../auth/types/user-context.type';
 import { AppModuleKey } from '../../common/constants/modules';
-import {
-  buildPermissionCode,
-  PermissionAction,
-} from '../../common/constants/permissions';
+import { PermissionAction } from '../../common/constants/permissions';
 import { CreateEquipmentDto } from './dto/create-equipment.dto';
 import { SearchEquipmentDto } from './dto/search-equipment.dto';
 import { UpdateEquipmentDto } from './dto/update-equipment.dto';
 import { EquipmentService } from './equipment.service';
-
-const EQUIPMENT_CREATE = buildPermissionCode(
-  AppModuleKey.EQUIPMENT,
-  PermissionAction.CREATE,
-);
-const EQUIPMENT_READ = buildPermissionCode(
-  AppModuleKey.EQUIPMENT,
-  PermissionAction.READ,
-);
-const EQUIPMENT_UPDATE = buildPermissionCode(
-  AppModuleKey.EQUIPMENT,
-  PermissionAction.UPDATE,
-);
-const EQUIPMENT_DELETE = buildPermissionCode(
-  AppModuleKey.EQUIPMENT,
-  PermissionAction.DELETE,
-);
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('equipment')
@@ -47,7 +27,7 @@ export class EquipmentController {
   constructor(private readonly equipmentService: EquipmentService) {}
 
   // List equipment with optional module-specific search.
-  @RequirePermissions(EQUIPMENT_READ)
+  @RequirePermission(AppModuleKey.EQUIPMENT, PermissionAction.READ)
   @Get()
   findAll(
     @CurrentUser() user: UserContext,
@@ -57,7 +37,7 @@ export class EquipmentController {
   }
 
   // Get one equipment master record.
-  @RequirePermissions(EQUIPMENT_READ)
+  @RequirePermission(AppModuleKey.EQUIPMENT, PermissionAction.READ)
   @Get(':equipmentId')
   findOne(
     @CurrentUser() user: UserContext,
@@ -67,14 +47,14 @@ export class EquipmentController {
   }
 
   // Create one equipment master record.
-  @RequirePermissions(EQUIPMENT_CREATE)
+  @RequirePermission(AppModuleKey.EQUIPMENT, PermissionAction.CREATE)
   @Post()
   create(@CurrentUser() user: UserContext, @Body() dto: CreateEquipmentDto) {
     return this.equipmentService.create(user, dto);
   }
 
   // Update one equipment master record.
-  @RequirePermissions(EQUIPMENT_UPDATE)
+  @RequirePermission(AppModuleKey.EQUIPMENT, PermissionAction.UPDATE)
   @Patch(':equipmentId')
   update(
     @CurrentUser() user: UserContext,
@@ -85,7 +65,7 @@ export class EquipmentController {
   }
 
   // Soft-delete one equipment master record.
-  @RequirePermissions(EQUIPMENT_DELETE)
+  @RequirePermission(AppModuleKey.EQUIPMENT, PermissionAction.DELETE)
   @Delete(':equipmentId')
   remove(
     @CurrentUser() user: UserContext,
