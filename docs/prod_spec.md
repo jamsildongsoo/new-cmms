@@ -1,428 +1,102 @@
-# Product Specification for new-cmms
-
-## Overview
-
-new-cmms is an on-premise computerized maintenance management system for one business group. It supports multiple companies in the group, but it is not a SaaS product.
-
-The system manages organization data, users, roles, permissions, maintenance activities, purchase flow, inventory/stock, reporting, attachments, and general approval documents.
-
-Accounting management is planned for a future phase.
-
-Detailed table and field structures are defined in `docs/db_spec.md`.
-
-## Product Scope
-
-### Common Features
-- Organization management
-- Code management
-- User, role, and permission management
-### Equipment Management
-- Equipment management
-- Preventive maintenance
-- Work orders
-- Work permits
-### Material Management
-- Material management
-- Purchase requests
-- Purchase orders
-- Inventory documents
-- Stock status and inventory ledger
-- Monthly inventory closing lock
-### Approval Management
-- General approval documents
-### Attachment Management
-- Attachments
-### Reporting
-- Reports
-
-## Target Users
-
-- Admin
-  - Manages company setup, organization data, users, roles, permissions, and system codes.
-- Maintenance Manager
-  - Oversees equipment, preventive maintenance, work orders, work permits, maintenance status, and maintenance reports.
-- Maintenance Staff
-  - Executes maintenance work, records preventive maintenance results, creates work order results, and creates purchase requests.
-- Purchase Manager
-  - Manages purchase requests, purchase orders, purchasing status, and purchase-related reports.
-- Inventory Manager
-  - Manages materials, warehouses, stock documents, stock status, inventory ledger, and monthly closing.
-- Account Manager / Account Staff
-  - Future scope. Handles accounting-related workflows connected to purchasing, inventory valuation, and financial reports.
-
-## Detailed Specifications for new-cmms
-
-### Company and Organization Scope
-
-The system supports multiple companies in one group. All business data is isolated by company.
-
-Each user belongs to exactly one company. No user, including admin/platform users, can access data across companies.
-
-All business tables must include `companyId`.
-
-One company can have several sites, departments, and warehouses. Departments and warehouses belong to one company and can include site information. Site is not part of the primary key for departments or warehouses.
-
-Each user must have a company, site, department, and access scope. The user's site and department define their default organization position.
-
-### Access Scope
-
-Access scope filters business data inside the user's company.
-
-Access scope types:
-
-- `OWN_DEPARTMENT`
-  - User can access records related to their own department.
-- `OWN_SITE`
-  - User can access records related to their own site.
-- `COMPANY_ALL`
-  - User can access all records in their company.
-
-There is no separate site-level or warehouse-level permission restriction. Site, department, and warehouse are used for data scope/filtering only.
-
-Stock access and stock actions are controlled by RBAC permissions.
-
-Example:
-
-- Maintenance staff can create purchase requests.
-- Inventory manager can manage stock documents and stock status.
-- Purchase manager can manage purchase flow and view stock status.
-
-### Authentication and Authorization
-
-The system uses JWT-based authentication.
-
-All protected APIs must use JWT guard authentication.
-
-Permissions are controlled by API-level CRUD permissions. Each role can be granted permission for actions such as create, read, update, and delete for each functional API/module.
-
-Example permission codes:
-
-- `equipment:create`
-- `equipment:read`
-- `equipment:update`
-- `equipment:delete`
-- `work_order:create`
-- `work_order:read`
-- `work_order:update`
-- `work_order:delete`
-
-Document flow actions are controlled by document business flow, not by generic CRUD permission rules.
-
-## Common Document Status
-
-Business documents use a common document status model.
-
-Status codes:
-
-- `D`: Draft
-- `P`: Progress
-- `C`: Confirm
-- `R`: Reject
-- `X`: Cancel
-
-Status flow:
-
-```text
-D -> P
-P -> C
-P -> R
-P -> X
-```
-
-Status rules:
-
-- Draft documents can be updated, deleted, and moved to progress.
-- Draft documents do not need cancel status. A draft document can be deleted instead.
-- Progress documents cannot be updated or deleted through normal edit.
-- Progress documents can be confirmed, rejected, or cancelled.
-- Confirmed documents are final and cannot be reversed.
-- Rejected documents are historical and can be referenced when creating a new draft document.
-- Cancelled documents are final and used only after a document has moved to progress.
-
-Only documents with status `D` can be updated or deleted in the service layer. This rule does not depend on document owner.
-
-Approval workflow policy is handled by each company outside the system. The system stores and controls document status only.
-
-## Code Management
-
-Codes are managed in the database and must not be hardcoded in application logic.
-
-Code categories represent system-defined code types and are not created by users. Code items are company-specific and managed by company users.
-
-Examples:
-
-- Equipment type/category
-- Preventive maintenance type/category
-- Work order type/category
-- Failure cause type
-- Purchase type
-- Stock movement type
-
-Code category/type is linked to each module by system design, but actual selectable code items come from the database.
-
-Active/inactive control is not required at this stage.
-
-## Numbering
-
-Document numbers are generated by company, module, year/month, and serial number.
-
-Format:
-
-```text
-{companyCode}-{moduleCode}-{YYYYMM}-{serial}
-```
-
-Examples:
-
-```text
-CR-WO-202610-00001
-HPS-PR-202610-00001
-```
-
-Rules:
-
-- `companyCode`: company code such as `CR`, `HPS`
-- `moduleCode`: module code such as `PM`, `WO`, `WP`, `PR`, `PO`
-- `YYYYMM`: document year and month
-- `serial`: 5-digit monthly sequence
-
-## Equipment
-
-Equipment is managed per company and site. Department is required.
-
-Equipment includes type/category, location, maker information, operation information, legal inspection information, notes, attachments, soft delete, and audit data.
-
-QR/barcode and parent/child equipment hierarchy are not required at this stage.
-
-## Preventive Maintenance
-
-Preventive maintenance is abbreviated as `prev-maint`.
-
-Preventive maintenance records store maintenance results only. They do not directly convert into work orders.
-
-In the preventive maintenance list, overdue items should be highlighted based on the equipment's last preventive maintenance date and configured maintenance period.
-
-Preventive maintenance includes header data, check/result items, attachments, soft delete, and audit data.
-
-## Work Order
-
-A work order consists of two independent parts:
-
-- Plan
-- Result
-
-Each part has its own document status, labor, cost, and note.
-
-The result can be created and processed without a confirmed plan.
-
-Work orders include equipment, failure cause, department, user, plan information, result information, items, attachments, soft delete, and audit data.
-
-## Work Permit
-
-Work permits are managed by company and site.
-
-Work permit equipment information is entered as text, not selected by equipment master. This allows one permit to describe several equipment items or work areas flexibly.
-
-When users create a work permit, they use built-in templates for each permit type and modify the content as needed for the actual work requirement.
-
-Work permits contain plan data only.
-
-The current stage only needs basic hour-level time handling:
-
-- `date`: `YYYYMMDD`
-- `startTime`: `YYYYMMDD:HH`
-- `endTime`: `YYYYMMDD:HH`
-
-Minute-level time is not required.
-
-## Material
-
-Materials are managed per company.
-
-Materials include type/category, unit, inventory information, maker information, soft delete, and audit data.
-
-Materials are not lot-controlled or serial-controlled in the current stage. Materials are not directly linked to equipment or work orders in the material master.
-
-## Purchase Request
-
-Purchase requests are mainly created by maintenance staff.
-
-Purchase requests include request header data, requested material items, document status, soft delete, and audit data.
-
-The abbreviated document ID is `requestId`.
-
-## Purchase Order
-
-Purchase orders are created by purchaser/admin users.
-
-The expected delivery date can be calculated based on the material master lead time.
-
-Purchase orders include order header data, material items with price/currency/quantity, document status, soft delete, and audit data.
-
-## Purchase Allocation
-
-Purchase allocation links purchase request items to purchase order items and future delivery items.
-
-Allocation is managed by request item. Quantity is not stored in the allocation table because partial allocation and partial delivery are not supported.
-
-Rules:
-
-- Partial allocation is not supported.
-- Partial delivery is not supported.
-- Allocation is handled by full request item.
-- Multiple request items can be merged into one purchase order item.
-- A request item is either allocated or not allocated.
-- Purchase delivery is future scope.
-
-## Inventory
-
-Material stock stores the current quantity and moving-average price of each material by company and warehouse.
-
-Inventory documents manage stock movements.
-
-Inventory document types:
-
-- `RECEIPT`
-- `ISSUE`
-- `TRANSFER`
-- `ADJUSTMENT`
-
-Inventory document rules:
-
-- Receipt is created from a purchase order.
-- Issue is done without department or work order reference.
-- Transfer creates both issue movement from source warehouse and receipt movement to target warehouse.
-- Adjustment can increase or decrease stock.
-- Inventory document status follows the common document status flow.
-
-## Inventory Ledger
-
-The inventory ledger is generated when an inventory document is confirmed.
-
-The ledger is used for stock history, moving-average calculation, and audit trail.
-
-Ledger records store movement quantity, unit price, amount, balance quantity, moving average price, and balance amount after each confirmed transaction.
-
-## Moving Average Price
-
-Material stock value is calculated using moving average price.
-
-When stock is received, the moving average price is recalculated:
-
-```text
-newMovingAveragePrice =
-(currentBalanceAmount + receiptAmount) / (currentBalanceQty + receiptQty)
-```
-
-Issue, transfer out, and adjustment out use the current moving average price.
-
-The material stock table stores the latest quantity and moving average price.
-
-The inventory ledger stores historical movement and balance after each confirmed transaction.
-
-## Inventory Closing Lock
-
-Inventory closing is performed monthly at company level.
-
-Closing is not handled as an inventory document. It is managed by a separate closing lock table.
-
-Rules:
-
-- Closing is managed by company and month.
-- Once a month is closed, inventory documents dated in that month or earlier cannot be created, updated, deleted, cancelled, or confirmed.
-- Closing locks inventory transactions for the closed period.
-- Closing does not create stock movement by itself.
-
-## General Approval Module
-
-The general approval module is used for general-purpose internal documents.
-
-It is separate from business document status rules.
-
-Features:
-
-- Tiptap editor content
-- Required attachment
-- Approval/reject/reference handling
-- Approval history
-- Comment/note for approval or rejection
-- Tab-separated approval lists
-
-The approval list only displays approval documents linked to the logged-in user.
-
-A user can see an approval document only when they are related to it as one of the following:
-
-- requester / submitter
-- current approver
-- previous approver
-- future approver
-- reference user
-
-Even if a user has company-level access scope, they should not see unrelated approval documents unless they are linked to the approval document.
-
-Approval tabs:
-
-- Submit
-  - Documents submitted by the logged-in user.
-- Pending
-  - Documents currently waiting for the logged-in user's approval.
-- Processed
-  - Documents where the logged-in user already approved, but the full approval flow is still in progress.
-- Closed
-  - Documents completed, rejected, or cancelled where the logged-in user is linked as submitter or approver.
-- Reference
-  - Documents shared with the logged-in user as reference documents.
-
-The pending tab/box shows only documents where the logged-in user is the current step approver.
-
-If the logged-in user is a future approver, the document must not appear in the pending box until the approval flow reaches that user's step.
-
-Reference steps do not require action. They become visible in the reference box when the approval is submitted.
-
-
-## Attachments
-
-A common attachment module is required.
-
-Attachment metadata is stored in the database. Physical files are stored in local storage with MinIO-compatible object storage support.
-
-Maximum file size and allowed file types are controlled by `.env`.
-
-The attachment module must support upload, download, draft-stage delete, file metadata, entity/module reference, local/MinIO storage, and `.env`-based validation.
-
-Attachments are required for:
-
-- Equipment
-- Preventive maintenance
-- Work order
-- Work permit
-- General approval documents
-
-## Reports
-
-Reports use dedicated printable report forms, not React screen rendering.
-
-The report form can be implemented as dedicated HTML/template output optimized for print/export.
-
-Landscape reports:
-
-- Material list
-- Equipment list
-- Preventive maintenance list
-- Work order list
-- Work permit list
-- Purchase request list
-- Purchase order list
-- Stock list
-
-Portrait reports:
-
-- Preventive maintenance detail
-- Work order detail
-- Work permit detail
-- Purchase request detail
-- Purchase order detail
-- Stock document detail
-
-Material and equipment detail reports are not required.
-
+# Product Specification
+CMMS system 
+
+## 1. 개요 및 스코프
+단일 비즈니스 그룹 내 다수 계열사(멀티 컴퍼니)를 지원하는 **온프레미스(On-premise) 컴퓨터화 유지보수 관리 시스템**입니다. 본 시스템은 멀티 테넌시 형태의 격리 환경을 제공하되, 구독형(SaaS) 서비스가 아닌 단일 그룹사 전용 폐쇄망 배포를 목적으로 합니다.
+
+### 1.1 포함 범위 (In-Scope)
+- 유저/보안: 사용자 계정(회사별 유일. 사업장/부서정보 포함. 접근범위), 인증, 비밀번호 정책, 세션 관리
+- 조직/공통: 계열사, 사업장, 부서(Parent-Child 구조. 사업장정보 포함), 창고(사업장정보 포함), 공통 코드(회사별 공통), 사용자 권한(RBAC)
+- 설비 관리: 설비 마스터, 예방 보전(결과 관리만 수행. 설비 마스터에서 작업주기 관리), 작업의뢰서(Troble memo), 작업 오더(계획/결과 분리), 작업 허가서(템플릿)
+- 자재 관리: 자재 마스터, 구매 요청, 구매 발주, 재고 처리(입고,출고,이동, 조정), 재고 수불 문서, 수불장, 이동평균법 기반 재고 평가, 월 마감 락
+- 결재: 공통결재문서(결재선,첨부), 타 시스템 결재연계(연계문서는 내부관리)
+- 게시판: 공지사항, 내부 게시글 관리
+- 공통기능: 첨부파일(로컬 MinIO 호환)
+
+---
+
+## 2. 조직 구조 및 접근 권한 (Multi-Company Isolation)
+본 시스템은 모든 비즈니스 데이터가 회사별로 철저히 격리되는 멀티 테넌시 구조를 따릅니다.
+
+### 2.1 조직 데이터 계층
+- **그룹 (Group):** 최상위 환경 (물리 데이터베이스 공유)
+- **계열사 (Company):** 논리적 최고 격리 수준. 모든 비즈니스 테이블에 `companyId` 포함 필수. 타사 데이터 접근 불가.
+- **사업장 (Site):** 계열사 하위 조직. 부서 및 창고의 메타데이터로 포함되나, 복합 기본키(PK) 구조에 포함되지 않음.
+- **부서 (Department) & 창고 (Warehouse):** 계열사에 종속되는 독립 엔티티.
+
+### 2.2 사용자 데이터 접근 범위 (Access Scope)
+모든 사용자는 반드시 하나의 회사, 사업장, 부서에 할당되며, 권한 범위(`accessScope`)에 따라 데이터 조회 조건이 강제 필터링됩니다.
+- OWN_DEPARTMENT: 로그인 사용자와 동일한 `deptId`를 가진 레코드만 접근 가능
+- OWN_SITE: 로그인 사용자와 동일한 `siteId`를 가진 레코드만 접근 가능 **다단계 부서 권한 관리는 미지원**
+- COMPANY_ALL: 소속 계열사(`companyId`) 내의 모든 레코드 접근 가능
+
+### 2.3 사용자 권한 범위 (Role-Based Access Control)
+모듈과 controller의 RBAC 정책을 통해 접근 관리함 **Access Scope와 별개로 기능 실행 권한을 제어함**
+- controller 단위로 접근 권한을 정의하며, 각 모듈별로 CRUD(Create, Read, Update, Delete) 권한을 세분화하여 설정합니다.
+- 미 정의된 controller나 모듈에 대해서는 query 시 접근이 차단됩니다.
+
+---
+
+## 3. 공통 문서 상태 및 비즈니스 플로우
+모든 프로세스 문서(예방 보전, 작업 오더, 작업 허가서, 구매 요청, 구매 발주 등)는 통일된 상태 모델을 공유합니다.
+
+### 3.1 상태 코드 및 전이 규칙
+
+[D] 초안 (Draft) ---------> [P] 진행 중 (Progress)
+                                |-----> [C] 확정 (Confirm)
+                                |-----> [R] 반려 (Reject)
+                                |-----> [X] 취소 (Cancel)
+---
+
+### 3.2 상태별 제약 조건 및 비즈니스 정책
+- **초안 (D):** 데이터 수정 및 삭제가 가능한 유일한 상태입니다. 서비스 레이어에서 작성자 본인 여부와 상관없이 오직 `status = 'D'`일 때만 수정/삭제 API를 허용합니다. 취소(`X`) 상태로 바로 전이할 수 없으며, 불필요 시 레코드를 삭제해야 합니다.
+- **진행 중 (P):** 일반적인 편집 화면을 통한 수정/삭제가 차단됩니다. 확정(`C`), 반려(`R`), 취소(`X`) 상태로만 전이 가능합니다.
+- **확정 (C) / 취소 (X):** 최종 상태(Final Status)이며, 어떠한 경우에도 이전 상태로 되돌릴 수 없습니다(불가역적).
+- **반려 (R):** 이력 관리를 위해 보존되는 최종 상태입니다. 해당 문서는 수정할 수 없으나, 신규 초안 문서 작성 시 참조 데이터로 불러올 수 있습니다.
+- **결재 시스템 연동:** 본 시스템은 자체적인 결재 승인선 워크플로우 엔진을 내장하지 않습니다. 결재 문서 테이블에서 해당 비즈니스 문서의 ID를 참조하여 결재 액션이 일어날 때, 비즈니스 문서의 `status` 값을 변경하는 방식으로만 제어합니다.
+
+---
+
+## 4. 공통 기능 명세
+
+### 4.1 채번 규칙 (Numbering)
+신규 문서 생성시 UUID를 생성하여 고유 식별자로 사용합니다. 저장 또는 상신 시 문서 관리번호를 생성하여 부여합니다. 단, 사용자기 직접 입력 시 생성하지 않습니다.
+- **포맷:** `{companyCode}-{moduleCode}-{YYYYMM}-{serial}`
+- **예시:** `CR-WO-202610-00001` (계열사코드 `CR`, 작업오더 `WO`, 2026년 10월, 5자리 순번)
+- **대상 모듈 코드:** `PM`(예방보전), `WO`(작업오더), `WP`(작업허가), `PR`(구매요청), `PO`(구매발주)
+
+### 4.2 공통 코드 관리 (Code Management)
+- **코드 카테고리 (Category):** 시스템 고유 정의 값 (예: 설비 유형, 고장 원인, 수불 유형 등). 시스템 디자인 단계에서 소스코드가 아닌 DB 테이블로 관리하되, 일반 사용자는 생성/수정이 불가능합니다.
+- **코드 아이템 (Item):** 각 계열사별 사용자가 자사의 업무 기준에 맞춰 생성 및 관리하는 세부 코드 값입니다. 애플리케이션 로직 내부에서 특정 코드 값을 하드코딩하는 것을 엄격히 금지합니다.
+
+### 4.3 첨부파일 관리 (Attachment)
+- **구조:** 공통 첨부파일 마스터(헤더)와 실제 파일 단위의 상세 아이템 구조를 가집니다. 비즈니스 문서 테이블은 UUID로 생성된f `attachmentId`를 외래키 개념으로 참조합니다.
+- **격리:** 첨부파일 엔티티 내에 `refModule` 및 `refId`를 기록하여 원본 비즈니스 문서와의 소유권 및 유효성을 일치시킵니다.
+- **저장소:** 물리 파일은 서버 내부 로컬 스토리지에 저장하되, 향후 MinIO 오브젝트 스토리지 호환 플러그인을 즉시 적용할 수 있는 인터페이스 구조로 설계합니다. 파일 크기 및 가용 확장자는 `.env`로 제한합니다.
+
+---
+
+## 5. 도메인별 세부 사양
+
+### 5.1 설비 관리 (Equipment)
+- 회사 및 사업장별로 관리하며, 소속 부서(`deptId`) 지정은 필수적입니다.
+- 설비 유형, 설치 위치, 제조사 정보, 가동 정보, 법정 검사 주기, 비고 데이터를 저장합니다.
+
+### 5.2 예방 보전 (Preventive Maintenance - `prev-maint`)
+- 정비 주기 및 최종 정비일을 기준으로 기한이 도래하거나 지난(Overdue) 항목을 목록 화면에서 시각적으로 하이라이트 표시해야 합니다.
+- 작업 오더(Work Order) 스케줄러와 직접 자동 연동되거나 자동으로 전환되지 않으며, 현장 점검 후 결과를 독립적으로 기록하는 용도로 사용됩니다.
+
+### 5.3 작업 오더 (Work Order)
+- 하나의 작업 오더는 **[계획(Plan)]** 부분과 **[결과(Result)]** 부분으로 완벽히 분리되어 독립적으로 작동합니다.
+- 각 영역은 투입 공수, 소요 비용, 작업 내용을 별도로 가집니다.
+- 계획 문서가 `Confirm(C)` 상태로 확정되지 않았더라도, 현장에서 즉시 결과 문서를 생성하여 독립적으로 비즈니스 플로우를 진행할 수 있습니다.
+
+### 5.4 작업 허가서 (Work Permit)
+- 마스터 설비 데이터를 참조하여 선택하는 구조가 아닌, 대상 설비 및 구역 정보를 **텍스트 형태로 직접 자유롭게 입력**하도록 하여 한 장의 허가서에 여러 작업 영역을 유연하게 기술할 수 있도록 합니다.
+- 허가서 유형별 기설정된 내장 템플릿을 호출하여 본문 내용을 가변적으로 수정하는 방식을 취합니다.
+- 날짜 및 시간 관리는 연월일 및 시 단위(`YYYYMMDD:HH`)만 지원하며, 분(Minute) 단위 제어는 제외합니다.
+
+### 5.5 자재 및 재고 관리 (Material & Inventory)
+- **자재 마스터:** 계열사별로 관리되며, 기초 단위 및 가동 재고 정보만 가집니다.
+- **재고 평가 및 수불:** 재고 확정(`Confirm`) 액션 발생 시, 데이터베이스 트랜잭션 내부에서 **이동평균법(Moving-average valuation)** 알고리즘에 의해 자재 단가 및 총액, 재고 수불장 레코드가 원자적(Atomically)으로 갱신되어야 합니다.
+- **월 마감 락 (Monthly Lock):** 특정 월의 재고 마감 처리가 완료되면, 해당 월에 영향을 주는 모든 과거 날짜 기준의 재고 변동, 구매 확정, 자재 수불 거래 트랜잭션이 백엔드 단에서 강력히 차단됩니다.
