@@ -1,3 +1,5 @@
+import { NumberingService } from '../../numbering/numbering.service';
+import { Headers } from '@nestjs/common';
 import {
   Body,
   Controller,
@@ -22,12 +24,21 @@ import { PreventiveMaintenanceService } from './preventive-maintenance.service';
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('preventive-maintenance')
 export class PreventiveMaintenanceController {
-  constructor(private readonly service: PreventiveMaintenanceService) {}
+  constructor(
+    private readonly numbering: NumberingService,
+    private readonly service: PreventiveMaintenanceService,
+  ) {}
 
   @RequirePermission(AppModuleKey.PREVENTIVE_MAINTENANCE, PermissionAction.READ)
   @Get()
   findAll(@CurrentUser() user: UserContext) {
     return this.service.findAll(user);
+  }
+
+  @RequirePermission(AppModuleKey.PREVENTIVE_MAINTENANCE, PermissionAction.READ)
+  @Get('options')
+  getOptions(@CurrentUser() user: UserContext) {
+    return this.service.getOptions(user);
   }
 
   @RequirePermission(AppModuleKey.PREVENTIVE_MAINTENANCE, PermissionAction.READ)
@@ -44,8 +55,17 @@ export class PreventiveMaintenanceController {
   create(
     @CurrentUser() user: UserContext,
     @Body() dto: CreatePreventiveMaintenanceDto,
+    @Headers('idempotency-key') requestKey: string,
   ) {
-    return this.service.create(user, dto);
+    return this.numbering.createDocument(
+      user,
+      AppModuleKey.PREVENTIVE_MAINTENANCE,
+      requestKey,
+      (documentId) =>
+        this.service.create(user, Object.assign({}, dto, { pmId: documentId })),
+      (documentId) => this.service.findOne(user, documentId),
+      dto.attachmentId,
+    );
   }
 
   @RequirePermission(
@@ -58,7 +78,13 @@ export class PreventiveMaintenanceController {
     @Param('pmId') pmId: string,
     @Body() dto: UpdatePreventiveMaintenanceDto,
   ) {
-    return this.service.update(user, pmId, dto);
+    return this.numbering.saveDocument(
+      user,
+      AppModuleKey.PREVENTIVE_MAINTENANCE,
+      pmId,
+      dto.attachmentId,
+      () => this.service.update(user, pmId, dto),
+    );
   }
 
   @RequirePermission(

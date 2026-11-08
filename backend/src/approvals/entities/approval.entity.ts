@@ -10,6 +10,10 @@ export class Approval extends AuditEntity {
   @PrimaryColumn({ type: 'varchar', length: 50 })
   approvalId: string;
 
+  // 시스템 문서 ID와 별개로 사용자가 입력하는 문서 관리번호. 기존 문서는 빈 값으로 유지한다.
+  @Column({ type: 'varchar', length: 50, default: '' })
+  documentNo: string;
+
   @Column({ type: 'varchar', length: 50, nullable: true })
   refModule: string | null;
 

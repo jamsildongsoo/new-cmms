@@ -2,6 +2,8 @@ export interface CompanyResponseDto {
   companyId: string;
   name: string;
   registrationNumber: string | null;
+  contactName: string | null;
+  phoneNumber: string | null;
   note: string | null;
   deleteYn: string;
   createdBy: string;

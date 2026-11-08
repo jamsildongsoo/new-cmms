@@ -1,6 +1,11 @@
 export const CODES = [
+  {codeId:'INVENTORY_TRANSACTION_TYPE',name:'재고 수불 유형'},
   { codeId: 'EQUIPMENT_TYPE', name: 'Equipment Type' },
-  { codeId: 'PREVENTIVE_MAINTENANCE_TYPE', name: 'Preventive Maintenance Type' },
+  {
+    codeId: 'PREVENTIVE_MAINTENANCE_TYPE',
+    name: 'Preventive Maintenance Type',
+  },
+  { codeId: 'WORK_REQUEST_PRIORITY', name: '작업의뢰 긴급도' },
   { codeId: 'WORK_ORDER_TYPE', name: 'Work Order Type' },
   { codeId: 'FAILURE_CAUSE_TYPE', name: 'Failure Cause Type' },
   { codeId: 'WORK_PERMIT_TYPE', name: 'Work Permit Type' },

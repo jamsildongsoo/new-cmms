@@ -21,14 +21,4 @@ export const storageConfig = registerAs('storage', () => ({
     .split(',')
     .map((mimeType) => mimeType.trim())
     .filter(Boolean),
-  minio: {
-    endpoint: process.env.MINIO_ENDPOINT,
-    region: process.env.MINIO_REGION ?? ENV_DEFAULTS.MINIO_REGION,
-    bucket: process.env.MINIO_BUCKET,
-    accessKey: process.env.MINIO_ACCESS_KEY,
-    secretKey: process.env.MINIO_SECRET_KEY,
-    forcePathStyle:
-      (process.env.MINIO_FORCE_PATH_STYLE ??
-        ENV_DEFAULTS.MINIO_FORCE_PATH_STYLE) === 'true',
-  },
 }));

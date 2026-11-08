@@ -1,3 +1,4 @@
+/** DB 전체 공용 권한 정의를 관리한다. 역할별 배정의 회사 격리와는 별도 경계다. */
 import {
   BadRequestException,
   ConflictException,

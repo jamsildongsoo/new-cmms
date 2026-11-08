@@ -1,285 +1,165 @@
-import { AxiosError } from 'axios'
-import { Edit3, Eye, Plus, RefreshCw, Save, X } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { FormEvent } from 'react'
-import {
-  createCompany,
-  getCompany,
-  updateCompany,
-  type Company,
-} from './companies.api'
+import { useEffect, useState, type FormEvent } from 'react'
+import { useAuth } from '@/modules/auth'
 import { toMessage } from '@/shared/api/errors'
+import { printDocument } from '@/shared/lib/print'
 import { Button } from '@/shared/ui/Button'
-import { DataTable } from '@/shared/ui/DataTable'
 import { Field } from '@/shared/ui/Field'
 import { Input } from '@/shared/ui/Input'
 import { Textarea } from '@/shared/ui/Textarea'
-import type { FormMode } from '@/shared/types/form'
-
-interface CompanyFormState {
-  name: string
-  registrationNumber: string
-  note: string
-}
-
-const emptyForm: CompanyFormState = {
-  name: '',
-  registrationNumber: '',
-  note: '',
-}
-
-function toForm(company: Company): CompanyFormState {
-  return {
-    name: company.name,
-    registrationNumber: company.registrationNumber ?? '',
-    note: company.note ?? '',
-  }
-}
-
-function isNotFound(error: unknown) {
-  return error instanceof AxiosError && error.response?.status === 404
-}
-
-const formTitles: Record<FormMode, string> = {
-  create: 'New',
-  edit: 'Edit',
-  view: 'View',
-}
+import { getCompany, updateCompany, type Company } from './companies.api'
 
 export function CompaniesPage() {
+  const { hasPermission } = useAuth()
   const [company, setCompany] = useState<Company | null>(null)
-  const [form, setForm] = useState<CompanyFormState>(emptyForm)
-  const [mode, setMode] = useState<FormMode | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
+  const editing = hasPermission('company:update')
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
 
-  const handleLoaded = useCallback((data: Company | null) => {
-    setCompany(data)
-    setNotice(data ? null : 'No company master data found')
-  }, [])
-
-  const handleLoadError = useCallback((loadError: unknown) => {
-    if (isNotFound(loadError)) {
-      handleLoaded(null)
-    } else {
-      setError(toMessage(loadError))
-    }
-  }, [handleLoaded])
-
-  const loadCompany = async () => {
-    setIsLoading(true)
-    setError(null)
-    setNotice(null)
-    try {
-      handleLoaded(await getCompany())
-    } catch (loadError) {
-      handleLoadError(loadError)
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
   useEffect(() => {
     let active = true
     getCompany()
-      .then((data) => active && handleLoaded(data))
-      .catch((loadError) => active && handleLoadError(loadError))
-      .finally(() => active && setIsLoading(false))
+      .then((row) => {
+        if (active) setCompany(row)
+      })
+      .catch((e) => {
+        if (active) setError(toMessage(e))
+      })
     return () => {
       active = false
     }
-  }, [handleLoaded, handleLoadError])
+  }, [])
 
-  const rows = useMemo(() => (company ? [company] : []), [company])
-
-  const openForm = (nextMode: FormMode) => {
-    setForm(company && nextMode !== 'create' ? toForm(company) : emptyForm)
-    setMode(nextMode)
-    setError(null)
-    setNotice(null)
-  }
-
-  const closeForm = () => {
-    setMode(null)
-    setForm(emptyForm)
-  }
-
-  const saveCompany = async (event: FormEvent<HTMLFormElement>) => {
+  async function save(event: FormEvent) {
     event.preventDefault()
+    if (!company || !editing || isSaving || !hasPermission('company:update'))
+      return
     setIsSaving(true)
     setError(null)
-    setNotice(null)
-
-    const payload = {
-      name: form.name,
-      registrationNumber: form.registrationNumber,
-      note: form.note,
-    }
-
     try {
-      const savedCompany = company
-        ? await updateCompany(payload)
-        : await createCompany(payload)
-      setCompany(savedCompany)
-      closeForm()
-      setNotice(company ? 'Company updated' : 'Company created')
-    } catch (saveError) {
-      setError(toMessage(saveError))
+      const { name, registrationNumber, contactName, phoneNumber, note } =
+        company
+      setCompany(
+        await updateCompany({
+          name,
+          registrationNumber,
+          contactName,
+          phoneNumber,
+          note,
+        }),
+      )
+      setNotice('Company updated')
+    } catch (e) {
+      setError(toMessage(e))
     } finally {
       setIsSaving(false)
     }
   }
 
+  const update = (key: keyof Company, value: string) =>
+    setCompany((current) => (current ? { ...current, [key]: value } : current))
+
   return (
     <section className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h1 className="text-base font-semibold text-slate-900">Companies</h1>
-          <p className="text-xs text-slate-500">
-            Company master data for the current tenant
-          </p>
-        </div>
-        <div className="flex shrink-0 gap-2">
+      <div className="flex items-center justify-between gap-2">
+        <h1 className="text-base font-semibold">회사 정보</h1>
+        <div className="flex gap-2">
           <Button
+            type="button"
             variant="secondary"
-            onClick={() => void loadCompany()}
-            disabled={isLoading || isSaving}
+            disabled={!company || isSaving}
+            onClick={() =>
+              company &&
+              printDocument({
+                title: '회사 정보',
+                fields: [
+                  ['회사코드', company.companyId],
+                  ['회사명', company.name],
+                  ['사업자번호', company.registrationNumber],
+                  ['담당자', company.contactName],
+                  ['연락처', company.phoneNumber],
+                  ['비고', company.note],
+                ],
+              })
+            }
           >
-            <RefreshCw className="h-4 w-4" />
-            Refresh
+            인쇄
           </Button>
-          {company ? (
-            <>
-              <Button
-                variant="secondary"
-                onClick={() => openForm('view')}
-                disabled={isLoading || isSaving}
-              >
-                <Eye className="h-4 w-4" />
-                View
-              </Button>
-              <Button
-                onClick={() => openForm('edit')}
-                disabled={isLoading || isSaving}
-              >
-                <Edit3 className="h-4 w-4" />
-                Edit
-              </Button>
-            </>
-          ) : (
+          {editing && (
             <Button
-              onClick={() => openForm('create')}
-              disabled={isLoading || isSaving}
+              type="submit"
+              form="company-form"
+              disabled={!company || isSaving}
             >
-              <Plus className="h-4 w-4" />
-              New
+              저장
             </Button>
           )}
         </div>
       </div>
-
-      {(error || notice) && (
+      <p className="text-xs text-slate-500">
+        Company code is managed during setup. Company information can be edited
+        here.
+      </p>
+      {error && (
         <div
-          className={[
-            'border px-3 py-2 text-xs',
-            error
-              ? 'border-red-200 bg-red-50 text-red-700'
-              : 'border-emerald-200 bg-emerald-50 text-emerald-700',
-          ].join(' ')}
+          role="alert"
+          className="border border-red-200 bg-red-50 p-2 text-xs text-red-700"
         >
-          {error ?? notice}
+          {error}
         </div>
       )}
-
-      {mode && (
+      {notice && <p className="text-xs text-emerald-700">{notice}</p>}
+      {company && (
         <form
-          className="border border-slate-200 bg-white p-3"
-          onSubmit={(event) => void saveCompany(event)}
+          id="company-form"
+          onSubmit={(event) => void save(event)}
+          className="space-y-3 border border-slate-200 bg-white p-3"
         >
-          <h2 className="mb-3 text-sm font-semibold text-slate-800">
-            {formTitles[mode]} Company
-          </h2>
           <div className="grid gap-3 md:grid-cols-2">
+            <Field label="Company ID">
+              <Input value={company.companyId} disabled />
+            </Field>
             <Field label="Company Name" required>
               <Input
-                value={form.name}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    name: event.target.value,
-                  }))
-                }
-                disabled={mode === 'view'}
-                autoFocus
+                required
+                value={company.name}
+                disabled={!editing || isSaving}
+                onChange={(e) => update('name', e.target.value)}
               />
             </Field>
             <Field label="Registration Number">
               <Input
-                disabled={mode === 'view'}
-                value={form.registrationNumber}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    registrationNumber: event.target.value,
-                  }))
-                }
+                value={company.registrationNumber ?? ''}
+                disabled={!editing || isSaving}
+                onChange={(e) => update('registrationNumber', e.target.value)}
+              />
+            </Field>
+            <Field label="Contact Name">
+              <Input
+                value={company.contactName ?? ''}
+                maxLength={100}
+                disabled={!editing || isSaving}
+                onChange={(e) => update('contactName', e.target.value)}
+              />
+            </Field>
+            <Field label="Phone Number">
+              <Input
+                value={company.phoneNumber ?? ''}
+                maxLength={50}
+                disabled={!editing || isSaving}
+                onChange={(e) => update('phoneNumber', e.target.value)}
               />
             </Field>
             <Field label="Note" className="md:col-span-2">
               <Textarea
-                disabled={mode === 'view'}
-                value={form.note}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    note: event.target.value,
-                  }))
-                }
+                value={company.note ?? ''}
+                disabled={!editing || isSaving}
+                onChange={(e) => update('note', e.target.value)}
               />
             </Field>
           </div>
-          <div className="mt-3 flex justify-end gap-2">
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={closeForm}
-              disabled={isSaving}
-            >
-              <X className="h-4 w-4" />
-              {mode === 'view' ? 'Close' : 'Cancel'}
-            </Button>
-            {mode === 'view' ? (
-              <Button type="button" onClick={() => openForm('edit')}>
-                <Edit3 className="h-4 w-4" />
-                Edit
-              </Button>
-            ) : (
-              <Button type="submit" disabled={isSaving}>
-                <Save className="h-4 w-4" />
-                Save
-              </Button>
-            )}
-          </div>
         </form>
       )}
-
-      <DataTable<Company>
-        gridTemplateColumns="140px 1fr 180px 100px"
-        columns={[
-          { key: 'companyId', label: 'Company ID', render: (row) => row.companyId },
-          { key: 'name', label: 'Name', render: (row) => row.name },
-          {
-            key: 'registrationNumber',
-            label: 'Registration No.',
-            render: (row) => row.registrationNumber ?? '-',
-          },
-          { key: 'status', label: 'Status', render: (row) => row.deleteYn },
-        ]}
-        rows={rows}
-        emptyText={isLoading ? 'Loading...' : 'No company data'}
-      />
     </section>
   )
 }

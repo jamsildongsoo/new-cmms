@@ -1,12 +1,4 @@
-import {
-  Body,
-  Controller,
-  Delete,
-  Get,
-  Patch,
-  Post,
-  UseGuards,
-} from '@nestjs/common';
+import { Body, Controller, Get, Patch, UseGuards } from '@nestjs/common';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { RequirePermission } from '../../auth/decorators/require-permissions.decorator';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
@@ -15,7 +7,6 @@ import type { UserContext } from '../../auth/types/user-context.type';
 import { AppModuleKey } from '../../common/constants/modules';
 import { PermissionAction } from '../../common/constants/permissions';
 import { CompaniesService } from './companies.service';
-import { CreateCompanyDto } from './dto/create-company.dto';
 import { UpdateCompanyDto } from './dto/update-company.dto';
 
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -30,24 +21,10 @@ export class CompaniesController {
     return this.companiesService.findMine(user);
   }
 
-  // Create the authenticated user's company master data.
-  @RequirePermission(AppModuleKey.COMPANY, PermissionAction.CREATE)
-  @Post()
-  createMine(@CurrentUser() user: UserContext, @Body() dto: CreateCompanyDto) {
-    return this.companiesService.createMine(user, dto);
-  }
-
   // Update the authenticated user's company master data.
   @RequirePermission(AppModuleKey.COMPANY, PermissionAction.UPDATE)
   @Patch()
   updateMine(@CurrentUser() user: UserContext, @Body() dto: UpdateCompanyDto) {
     return this.companiesService.updateMine(user, dto);
-  }
-
-  // Soft-delete the authenticated user's company master data.
-  @RequirePermission(AppModuleKey.COMPANY, PermissionAction.DELETE)
-  @Delete()
-  removeMine(@CurrentUser() user: UserContext) {
-    return this.companiesService.removeMine(user);
   }
 }

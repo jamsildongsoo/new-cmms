@@ -1,3 +1,4 @@
+import { WorkRequest } from '../maintenance/work-request/entities/work-request.entity';
 import { EntityTarget } from 'typeorm';
 import { AppModuleKey } from '../common/constants/modules';
 import { PreventiveMaintenance } from '../maintenance/preventive-maintenance/entities/preventive-maintenance.entity';
@@ -13,6 +14,10 @@ interface SourceDocument {
 
 // Document modules whose status follows their approval (refModule -> entity).
 export const SOURCE_DOCUMENTS: Record<string, SourceDocument> = {
+  [AppModuleKey.WORK_REQUEST]: {
+    entity: WorkRequest,
+    idField: 'workRequestId',
+  },
   [AppModuleKey.PREVENTIVE_MAINTENANCE]: {
     entity: PreventiveMaintenance,
     idField: 'pmId',

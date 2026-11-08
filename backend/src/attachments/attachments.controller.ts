@@ -22,18 +22,19 @@ import {
 } from './attachments.service';
 import { CreateAttachmentDto } from './dto/create-attachment.dto';
 
+// 첨부 API는 공통 인증을 적용하고, 회사 범위는 서비스에서 인증 정보로 제한한다.
 @UseGuards(JwtAuthGuard)
 @Controller('attachments')
 export class AttachmentsController {
   constructor(private readonly attachmentsService: AttachmentsService) {}
 
-  // Create an attachment header linked to an owning module/document.
+  // 문서 저장 전에는 refId=null로 그룹을 만들고 최초 저장 후 문서번호를 연결한다.
   @Post()
   create(@CurrentUser() user: UserContext, @Body() dto: CreateAttachmentDto) {
     return this.attachmentsService.create(user, dto);
   }
 
-  // List file items stored under one attachment header.
+  // 첨부 그룹에 속한 파일 메타데이터를 반환한다. 파일이 없으면 빈 배열을 반환한다.
   @Get(':attachmentId/items')
   findItems(
     @CurrentUser() user: UserContext,
@@ -42,7 +43,7 @@ export class AttachmentsController {
     return this.attachmentsService.findItems(user, attachmentId);
   }
 
-  // Upload one or more files into an attachment header.
+  // multipart의 files 필드를 메모리 버퍼로 받은 뒤 서비스에서 검증·저장한다.
   @Post(':attachmentId/items')
   @UseInterceptors(FilesInterceptor('files'))
   uploadItems(
@@ -53,7 +54,7 @@ export class AttachmentsController {
     return this.attachmentsService.uploadItems(user, attachmentId, files);
   }
 
-  // Download a single attachment item by item number.
+  // 회사와 첨부 소속을 확인한 파일을 저장소에서 읽어 다운로드 응답으로 전달한다.
   @Get(':attachmentId/items/:itemNo/download')
   async downloadItem(
     @CurrentUser() user: UserContext,
@@ -77,7 +78,7 @@ export class AttachmentsController {
     response.send(download.buffer);
   }
 
-  // Delete one attachment item row and its physical file.
+  // 실제 파일과 상세 행만 삭제하며 첨부 그룹 헤더는 유지한다.
   @Delete(':attachmentId/items/:itemNo')
   removeItem(
     @CurrentUser() user: UserContext,

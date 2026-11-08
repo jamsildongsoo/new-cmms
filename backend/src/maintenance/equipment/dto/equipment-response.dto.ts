@@ -2,6 +2,11 @@ export interface EquipmentResponseDto {
   companyId: string;
   siteId: string;
   equipmentId: string;
+  parentEquipmentId: string | null;
+  pmTargetYn: string;
+  permitTargetYn: string;
+  legalInspectionDate: string | null;
+  legalNextInspectionDate: string | null;
   name: string;
   typeCode: string;
   location: string | null;
@@ -11,8 +16,10 @@ export interface EquipmentResponseDto {
   serialNo: string | null;
   installDate: string | null;
   deptId: string;
-  period: number | null;
-  unit: string | null;
+  inspectionPeriod: number | null;
+  inspectionUnit: string | null;
+  inspectionDate: string | null;
+  nextInspectionDate: string | null;
   legalInspectionPeriod: number | null;
   legalInspectionUnit: string | null;
   attachmentId: string | null;

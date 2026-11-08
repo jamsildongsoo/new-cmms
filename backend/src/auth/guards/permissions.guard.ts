@@ -1,3 +1,4 @@
+/** Controller의 요구 권한과 서버 UserContext를 비교한다. 권한 선언이 없는 경로의 업무 조건은 Service가 검사한다. */
 import {
   CanActivate,
   ExecutionContext,

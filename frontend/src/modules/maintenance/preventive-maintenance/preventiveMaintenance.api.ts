@@ -4,13 +4,43 @@ import { http } from '@/shared/api/http'
 
 export const PM_MODULE = 'preventive_maintenance'
 
+export interface InspectionItem {
+  name: string
+  standardValue: string
+  inspectionValue: string
+  unit: string
+}
+
+export interface PMOptions {
+  departments: { value: string; label: string }[]
+  users: { value: string; label: string }[]
+  equipment: {
+    equipmentId: string
+    name: string
+    inspectionPeriod: number | null
+    inspectionUnit: string | null
+  }[]
+  types: { value: string; label: string }[]
+}
+
+export async function getPMOptions() {
+  return (await http.get<PMOptions>('/preventive-maintenance/options')).data
+}
+
 export interface PreventiveMaintenance extends AuditFields {
   companyId: string
   pmId: string
   documentNo: string
   title: string
   equipmentId: string
-  plannedDate: string | null
+  result: 'OK' | 'NOK' | null
+  inspectionDeptId: string | null
+  inspectorId: string | null
+  inspectionDeptName?: string | null
+  inspectorName?: string | null
+  inspectionDate: string | null
+  nextInspectionDate: string | null
+  items: InspectionItem[]
   typeCode: string | null
   content: string | null
   requesterId: string
@@ -24,7 +54,12 @@ export interface PreventiveMaintenancePayload {
   documentNo: string
   title: string
   equipmentId: string
-  plannedDate?: string | null
+  result?: 'OK' | 'NOK' | null
+  inspectionDeptId?: string | null
+  inspectorId?: string | null
+  inspectionDate?: string | null
+  nextInspectionDate?: string | null
+  items?: InspectionItem[]
   typeCode?: string | null
   content?: string | null
   attachmentId?: string | null
@@ -46,12 +81,13 @@ export async function getPreventiveMaintenance(pmId: string) {
 }
 
 export async function createPreventiveMaintenance(
-  pmId: string,
+  requestKey: string,
   payload: PreventiveMaintenancePayload,
 ) {
   const response = await http.post<PreventiveMaintenance>(
     '/preventive-maintenance',
-    { pmId, ...payload },
+    payload,
+    { headers: { 'Idempotency-Key': requestKey } },
   )
   return response.data
 }

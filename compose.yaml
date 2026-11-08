@@ -1,0 +1,57 @@
+name: new-cmms
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    init: true
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      API_PREFIX: api
+      FILE_STORAGE_DRIVER: local
+      FILE_LOCAL_ROOT: /app/uploads
+    expose:
+      - "3000"
+    volumes:
+      - type: bind
+        source: ${UPLOADS_HOST_PATH:-./data/uploads}
+        target: /app/uploads
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${DB_CERTS_HOST_PATH:-./deploy/db-certs}
+        target: /app/certs
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health',{signal:AbortSignal.timeout(4000)}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 40s
+      retries: 3
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+  nginx:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${CMMS_BIND_ADDRESS:-127.0.0.1}:${CMMS_HTTP_PORT:-8080}:80"
+      - "${CMMS_BIND_ADDRESS:-127.0.0.1}:${CMMS_HTTPS_PORT:-8443}:443"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

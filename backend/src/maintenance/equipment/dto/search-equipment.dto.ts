@@ -11,4 +11,7 @@ export class SearchEquipmentDto extends PaginationQueryDto {
   @IsOptional()
   @IsString()
   searchVal?: string;
+  @IsOptional() @IsString() siteId?: string;
+  @IsOptional() @IsString() deptId?: string;
+  @IsOptional() @IsString() parentEquipmentId?: string;
 }

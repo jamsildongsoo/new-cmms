@@ -1,3 +1,5 @@
+import { NumberingService } from '../../numbering/numbering.service';
+import { Headers } from '@nestjs/common';
 import {
   Body,
   Controller,
@@ -22,7 +24,10 @@ import { WorkPermitService } from './work-permit.service';
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('work-permit')
 export class WorkPermitController {
-  constructor(private readonly service: WorkPermitService) {}
+  constructor(
+    private readonly numbering: NumberingService,
+    private readonly service: WorkPermitService,
+  ) {}
 
   @RequirePermission(AppModuleKey.WORK_PERMIT, PermissionAction.READ)
   @Get()
@@ -30,6 +35,24 @@ export class WorkPermitController {
     return this.service.findAll(user);
   }
 
+  @RequirePermission(AppModuleKey.WORK_PERMIT, PermissionAction.READ)
+  @Get('options')
+  options(@CurrentUser() user: UserContext) {
+    return this.service.options(user);
+  }
+  @RequirePermission(AppModuleKey.WORK_PERMIT, PermissionAction.READ)
+  @Get(':workPermitId/approval-draft')
+  draft(@CurrentUser() user: UserContext, @Param('workPermitId') id: string) {
+    return this.service.approvalDraft(user, id);
+  }
+  @RequirePermission(AppModuleKey.WORK_PERMIT, PermissionAction.READ)
+  @Get(':workPermitId/print-data')
+  printData(
+    @CurrentUser() user: UserContext,
+    @Param('workPermitId') id: string,
+  ) {
+    return this.service.printData(user, id);
+  }
   @RequirePermission(AppModuleKey.WORK_PERMIT, PermissionAction.READ)
   @Get(':workPermitId')
   findOne(
@@ -41,8 +64,23 @@ export class WorkPermitController {
 
   @RequirePermission(AppModuleKey.WORK_PERMIT, PermissionAction.CREATE)
   @Post()
-  create(@CurrentUser() user: UserContext, @Body() dto: CreateWorkPermitDto) {
-    return this.service.create(user, dto);
+  create(
+    @CurrentUser() user: UserContext,
+    @Body() dto: CreateWorkPermitDto,
+    @Headers('idempotency-key') requestKey: string,
+  ) {
+    return this.numbering.createDocument(
+      user,
+      AppModuleKey.WORK_PERMIT,
+      requestKey,
+      (documentId) =>
+        this.service.create(
+          user,
+          Object.assign({}, dto, { workPermitId: documentId }),
+        ),
+      (documentId) => this.service.findOne(user, documentId),
+      dto.attachmentId,
+    );
   }
 
   @RequirePermission(AppModuleKey.WORK_PERMIT, PermissionAction.UPDATE)
@@ -52,7 +90,13 @@ export class WorkPermitController {
     @Param('workPermitId') workPermitId: string,
     @Body() dto: UpdateWorkPermitDto,
   ) {
-    return this.service.update(user, workPermitId, dto);
+    return this.numbering.saveDocument(
+      user,
+      AppModuleKey.WORK_PERMIT,
+      workPermitId,
+      dto.attachmentId,
+      () => this.service.update(user, workPermitId, dto),
+    );
   }
 
   @RequirePermission(AppModuleKey.WORK_PERMIT, PermissionAction.DELETE)

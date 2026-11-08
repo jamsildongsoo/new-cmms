@@ -16,20 +16,12 @@ export interface EnvironmentVariables {
   DB_LOGGING: boolean;
   JWT_ACCESS_SECRET: string;
   JWT_ACCESS_EXPIRES_IN: string;
-  JWT_REFRESH_SECRET: string;
-  JWT_REFRESH_EXPIRES_IN: string;
-  FILE_STORAGE_DRIVER: 'local' | 'minio';
+  FILE_STORAGE_DRIVER: 'local';
   FILE_LOCAL_ROOT: string;
   FILE_MAX_SIZE_BYTES: number;
   FILE_MAX_FILES_PER_UPLOAD: number;
   FILE_MAX_UPLOAD_TOTAL_BYTES: number;
   FILE_ALLOWED_MIME_TYPES: string;
-  MINIO_ENDPOINT?: string;
-  MINIO_REGION?: string;
-  MINIO_BUCKET?: string;
-  MINIO_ACCESS_KEY?: string;
-  MINIO_SECRET_KEY?: string;
-  MINIO_FORCE_PATH_STYLE: boolean;
 }
 
 export const ENV_DEFAULTS = {
@@ -43,7 +35,6 @@ export const ENV_DEFAULTS = {
   DB_SYNCHRONIZE: 'false',
   DB_LOGGING: 'false',
   JWT_ACCESS_EXPIRES_IN: '15m',
-  JWT_REFRESH_EXPIRES_IN: '7d',
   FILE_STORAGE_DRIVER: 'local',
   FILE_LOCAL_ROOT: './uploads',
   FILE_MAX_SIZE_BYTES: '10485760',
@@ -51,8 +42,6 @@ export const ENV_DEFAULTS = {
   FILE_MAX_UPLOAD_TOTAL_BYTES: '52428800',
   FILE_ALLOWED_MIME_TYPES:
     'image/jpeg,image/png,application/pdf,text/plain,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/x-hwp,application/haansofthwp,application/vnd.hancom.hwp,application/vnd.hancom.hwpx,application/zip',
-  MINIO_REGION: 'us-east-1',
-  MINIO_FORCE_PATH_STYLE: 'true',
 } as const;
 
 export function validateEnv(
@@ -100,8 +89,8 @@ export function validateEnv(
     'FILE_STORAGE_DRIVER',
     ENV_DEFAULTS.FILE_STORAGE_DRIVER,
   );
-  if (!['local', 'minio'].includes(storageDriver)) {
-    errors.push('FILE_STORAGE_DRIVER must be local or minio');
+  if (storageDriver !== 'local') {
+    errors.push('FILE_STORAGE_DRIVER must be local');
   }
 
   const validated = {
@@ -121,15 +110,10 @@ export function validateEnv(
     ),
     DB_SYNCHRONIZE: readBoolean('DB_SYNCHRONIZE', ENV_DEFAULTS.DB_SYNCHRONIZE),
     DB_LOGGING: readBoolean('DB_LOGGING', ENV_DEFAULTS.DB_LOGGING),
-    JWT_ACCESS_SECRET: readString('JWT_ACCESS_SECRET', config.JWT_SECRET),
+    JWT_ACCESS_SECRET: readString('JWT_ACCESS_SECRET'),
     JWT_ACCESS_EXPIRES_IN: readString(
       'JWT_ACCESS_EXPIRES_IN',
-      config.JWT_EXPIRES_IN ?? ENV_DEFAULTS.JWT_ACCESS_EXPIRES_IN,
-    ),
-    JWT_REFRESH_SECRET: readString('JWT_REFRESH_SECRET', config.JWT_SECRET),
-    JWT_REFRESH_EXPIRES_IN: readString(
-      'JWT_REFRESH_EXPIRES_IN',
-      ENV_DEFAULTS.JWT_REFRESH_EXPIRES_IN,
+      ENV_DEFAULTS.JWT_ACCESS_EXPIRES_IN,
     ),
     FILE_STORAGE_DRIVER:
       storageDriver as EnvironmentVariables['FILE_STORAGE_DRIVER'],
@@ -153,41 +137,10 @@ export function validateEnv(
       'FILE_ALLOWED_MIME_TYPES',
       ENV_DEFAULTS.FILE_ALLOWED_MIME_TYPES,
     ),
-    MINIO_ENDPOINT: config.MINIO_ENDPOINT,
-    MINIO_REGION: config.MINIO_REGION ?? ENV_DEFAULTS.MINIO_REGION,
-    MINIO_BUCKET: config.MINIO_BUCKET,
-    MINIO_ACCESS_KEY: config.MINIO_ACCESS_KEY,
-    MINIO_SECRET_KEY: config.MINIO_SECRET_KEY,
-    MINIO_FORCE_PATH_STYLE: readBoolean(
-      'MINIO_FORCE_PATH_STYLE',
-      ENV_DEFAULTS.MINIO_FORCE_PATH_STYLE,
-    ),
   };
 
   if (validated.NODE_ENV === 'production' && validated.DB_SYNCHRONIZE) {
     errors.push('DB_SYNCHRONIZE must be false in production');
-  }
-
-  if (
-    validated.NODE_ENV === 'production' &&
-    validated.JWT_ACCESS_SECRET === validated.JWT_REFRESH_SECRET
-  ) {
-    errors.push(
-      'JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must differ in production',
-    );
-  }
-
-  if (validated.FILE_STORAGE_DRIVER === 'minio') {
-    for (const key of [
-      'MINIO_ENDPOINT',
-      'MINIO_BUCKET',
-      'MINIO_ACCESS_KEY',
-      'MINIO_SECRET_KEY',
-    ]) {
-      if (!config[key] || config[key]?.trim() === '') {
-        errors.push(`${key} is required when FILE_STORAGE_DRIVER=minio`);
-      }
-    }
   }
 
   if (errors.length > 0) {

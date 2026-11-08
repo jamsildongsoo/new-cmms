@@ -38,6 +38,9 @@ export class User extends AuditEntity {
   @Column({ type: 'varchar', length: 30 })
   roleId: string;
 
+  @Column({ type: 'varchar', length: 30, nullable: true })
+  siteId: string | null;
+
   @Column({ type: 'varchar', length: 30 })
   deptId: string;
 

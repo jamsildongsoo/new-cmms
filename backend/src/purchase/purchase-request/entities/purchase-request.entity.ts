@@ -7,7 +7,7 @@ export class PurchaseRequest extends AuditEntity {
   @PrimaryColumn({ type: 'varchar', length: 30 })
   companyId: string;
 
-  // Client-generated UUID so attachments can link before the first save.
+  // 최초 저장 시 서버에서 공통 채번하며 이후 변경하지 않는 문서 ID.
   @PrimaryColumn({ type: 'varchar', length: 50 })
   requestId: string;
 
@@ -40,4 +40,11 @@ export class PurchaseRequest extends AuditEntity {
 
   @Column({ type: 'char', length: 1, default: 'N' })
   deleteYn: string;
+
+  @Column({ type: 'varchar', length: 30, nullable: true }) siteId:
+    string | null;
+  @Column({ type: 'varchar', length: 30, nullable: true }) deptId:
+    string | null;
+  @Column({ type: 'char', length: 8, nullable: true }) requestDate:
+    string | null;
 }

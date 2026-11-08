@@ -1,6 +1,7 @@
 import { AuditEntity } from '../../../common/entities/audit.entity';
-import { Column, Entity, PrimaryColumn } from 'typeorm';
+import { Column, Entity, PrimaryColumn, Index } from 'typeorm';
 
+@Index(['companyId', 'parentEquipmentId'])
 @Entity('equipment')
 export class Equipment extends AuditEntity {
   @PrimaryColumn({ type: 'varchar', length: 30 })
@@ -11,6 +12,21 @@ export class Equipment extends AuditEntity {
 
   @PrimaryColumn({ type: 'varchar', length: 50 })
   equipmentId: string;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  parentEquipmentId: string | null;
+
+  @Column({ type: 'char', length: 1, default: 'N' })
+  pmTargetYn: string;
+
+  @Column({ type: 'char', length: 1, default: 'N' })
+  permitTargetYn: string;
+
+  @Column({ type: 'char', length: 8, nullable: true })
+  legalInspectionDate: string | null;
+
+  @Column({ type: 'char', length: 8, nullable: true })
+  legalNextInspectionDate: string | null;
 
   @Column({ type: 'varchar', length: 150 })
   name: string;
@@ -40,10 +56,17 @@ export class Equipment extends AuditEntity {
   deptId: string;
 
   @Column({ type: 'integer', nullable: true })
-  period: number | null;
+  inspectionPeriod: number | null;
 
   @Column({ type: 'varchar', length: 20, nullable: true })
-  unit: string | null;
+  inspectionUnit: string | null;
+
+  // PM 완결 시 해당 문서에 저장된 날짜로 갱신한다. 주기가 없으면 다음 점검일은 비워 둔다.
+  @Column({ type: 'char', length: 8, nullable: true })
+  inspectionDate: string | null;
+
+  @Column({ type: 'char', length: 8, nullable: true })
+  nextInspectionDate: string | null;
 
   @Column({ type: 'integer', nullable: true })
   legalInspectionPeriod: number | null;

@@ -27,8 +27,10 @@ export interface ApprovalStepResponseDto {
 }
 
 export interface ApprovalResponseDto {
+  sourceAttachmentIds?: string[];
   companyId: string;
   approvalId: string;
+  documentNo: string;
   refModule: string | null;
   refId: string | null;
   title: string;

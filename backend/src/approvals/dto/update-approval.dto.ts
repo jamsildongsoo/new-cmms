@@ -3,7 +3,7 @@ import {
   IsArray,
   IsOptional,
   IsString,
-  IsUUID,
+  MaxLength,
   ValidateNested,
 } from 'class-validator';
 import { ApprovalStepInputDto } from './approval-step-input.dto';
@@ -11,10 +11,16 @@ import { ApprovalStepInputDto } from './approval-step-input.dto';
 export class UpdateApprovalDto {
   @IsOptional()
   @IsString()
+  @MaxLength(50)
+  documentNo?: string;
+
+  @IsOptional()
+  @IsString()
   refModule?: string | null;
 
   @IsOptional()
-  @IsUUID()
+  @IsString()
+  @MaxLength(50)
   refId?: string | null;
 
   @IsOptional()

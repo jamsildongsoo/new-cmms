@@ -33,12 +33,13 @@ export class WarehousesController {
 
   // Get one active warehouse in the authenticated user's company.
   @RequirePermission(AppModuleKey.WAREHOUSE, PermissionAction.READ)
-  @Get(':warehouseId')
+  @Get(':siteId/:warehouseId')
   findOne(
     @CurrentUser() user: UserContext,
+    @Param('siteId') siteId: string,
     @Param('warehouseId') warehouseId: string,
   ) {
-    return this.warehousesService.findOne(user, warehouseId);
+    return this.warehousesService.findOne(user, siteId, warehouseId);
   }
 
   // Create a warehouse in the authenticated user's company.
@@ -50,22 +51,24 @@ export class WarehousesController {
 
   // Update a warehouse in the authenticated user's company.
   @RequirePermission(AppModuleKey.WAREHOUSE, PermissionAction.UPDATE)
-  @Patch(':warehouseId')
+  @Patch(':siteId/:warehouseId')
   update(
     @CurrentUser() user: UserContext,
+    @Param('siteId') siteId: string,
     @Param('warehouseId') warehouseId: string,
     @Body() dto: UpdateWarehouseDto,
   ) {
-    return this.warehousesService.update(user, warehouseId, dto);
+    return this.warehousesService.update(user, siteId, warehouseId, dto);
   }
 
   // Soft-delete a warehouse in the authenticated user's company.
   @RequirePermission(AppModuleKey.WAREHOUSE, PermissionAction.DELETE)
-  @Delete(':warehouseId')
+  @Delete(':siteId/:warehouseId')
   remove(
     @CurrentUser() user: UserContext,
+    @Param('siteId') siteId: string,
     @Param('warehouseId') warehouseId: string,
   ) {
-    return this.warehousesService.remove(user, warehouseId);
+    return this.warehousesService.remove(user, siteId, warehouseId);
   }
 }

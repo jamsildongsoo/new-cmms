@@ -33,6 +33,12 @@ export class RolesController {
     return this.rolesService.findAll(user);
   }
 
+  @RequirePermission(AppModuleKey.ROLE, PermissionAction.READ)
+  @Get('permission-options')
+  findPermissionOptions() {
+    return this.rolesService.findPermissionOptions();
+  }
+
   // Get one active role in the authenticated user's company.
   @RequirePermission(AppModuleKey.ROLE, PermissionAction.READ)
   @Get(':roleId')

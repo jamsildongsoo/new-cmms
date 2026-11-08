@@ -53,7 +53,6 @@ export class DepartmentsService {
     const department = this.departmentRepository.create({
       companyId: userContext.companyId,
       deptId,
-      siteId: this.normalizeNullableString(dto.siteId),
       name: this.requireTrimmedString(dto.name, 'name'),
       parentDeptId: this.normalizeParentDeptId(dto.parentDeptId, deptId),
       deleteYn: 'N',
@@ -73,9 +72,6 @@ export class DepartmentsService {
       deptId,
     );
 
-    if (dto.siteId !== undefined) {
-      department.siteId = this.normalizeNullableString(dto.siteId);
-    }
     if (dto.name !== undefined) {
       department.name = this.requireTrimmedString(dto.name, 'name');
     }
@@ -156,7 +152,6 @@ export class DepartmentsService {
     return {
       companyId: department.companyId,
       deptId: department.deptId,
-      siteId: department.siteId,
       name: department.name,
       parentDeptId: department.parentDeptId,
       deleteYn: department.deleteYn,

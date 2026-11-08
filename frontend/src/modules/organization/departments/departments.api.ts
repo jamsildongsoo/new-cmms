@@ -5,14 +5,12 @@ export interface Department extends AuditFields {
   companyId: string
   deleteYn: string
   deptId: string
-  siteId: string | null
   name: string
   parentDeptId: string | null
 }
 
 export interface DepartmentPayload {
   deptId?: string
-  siteId?: string | null
   name: string
   parentDeptId?: string | null
 }
@@ -36,7 +34,10 @@ export async function updateDepartment(
   deptId: string,
   payload: DepartmentPayload,
 ) {
-  const response = await http.patch<Department>(`/departments/${deptId}`, payload)
+  const response = await http.patch<Department>(
+    `/departments/${deptId}`,
+    payload,
+  )
   return response.data
 }
 

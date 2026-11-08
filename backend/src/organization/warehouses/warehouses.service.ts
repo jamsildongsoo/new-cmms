@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { QueryFailedError, Repository } from 'typeorm';
 import { UserContext } from '../../auth/types/user-context.type';
 import { CreateWarehouseDto } from './dto/create-warehouse.dto';
 import { UpdateWarehouseDto } from './dto/update-warehouse.dto';
@@ -22,17 +22,22 @@ export class WarehousesService {
   async findAll(userContext: UserContext): Promise<WarehouseResponseDto[]> {
     const warehouses = await this.warehouseRepository.find({
       where: { companyId: userContext.companyId, deleteYn: 'N' },
-      order: { warehouseId: 'ASC' },
+      order: { siteId: 'ASC', warehouseId: 'ASC' },
     });
     return warehouses.map((warehouse) => this.toResponse(warehouse));
   }
 
   async findOne(
     userContext: UserContext,
+    siteId: string,
     warehouseId: string,
   ): Promise<WarehouseResponseDto> {
     return this.toResponse(
-      await this.findActiveByIdOrThrow(userContext.companyId, warehouseId),
+      await this.findActiveByIdOrThrow(
+        userContext.companyId,
+        siteId,
+        warehouseId,
+      ),
     );
   }
 
@@ -44,8 +49,10 @@ export class WarehousesService {
       dto.warehouseId,
       'warehouseId',
     );
+    const siteId = this.requireTrimmedString(dto.siteId, 'siteId');
     const existingWarehouse = await this.warehouseRepository.findOneBy({
       companyId: userContext.companyId,
+      siteId,
       warehouseId,
     });
 
@@ -55,29 +62,37 @@ export class WarehousesService {
 
     const warehouse = this.warehouseRepository.create({
       companyId: userContext.companyId,
+      siteId,
       warehouseId,
-      siteId: this.normalizeNullableString(dto.siteId),
       name: this.requireTrimmedString(dto.name, 'name'),
       deleteYn: 'N',
       createdBy: userContext.userId,
     });
 
-    return this.toResponse(await this.warehouseRepository.save(warehouse));
+    try {
+      return this.toResponse(await this.warehouseRepository.save(warehouse));
+    } catch (error) {
+      if (
+        error instanceof QueryFailedError &&
+        (error.driverError as { code?: string }).code === '23505'
+      )
+        throw new ConflictException('Warehouse already exists in this site');
+      throw error;
+    }
   }
 
   async update(
     userContext: UserContext,
+    siteId: string,
     warehouseId: string,
     dto: UpdateWarehouseDto,
   ): Promise<WarehouseResponseDto> {
     const warehouse = await this.findActiveByIdOrThrow(
       userContext.companyId,
+      siteId,
       warehouseId,
     );
 
-    if (dto.siteId !== undefined) {
-      warehouse.siteId = this.normalizeNullableString(dto.siteId);
-    }
     if (dto.name !== undefined) {
       warehouse.name = this.requireTrimmedString(dto.name, 'name');
     }
@@ -90,10 +105,12 @@ export class WarehousesService {
 
   async remove(
     userContext: UserContext,
+    siteId: string,
     warehouseId: string,
   ): Promise<WarehouseResponseDto> {
     const warehouse = await this.findActiveByIdOrThrow(
       userContext.companyId,
+      siteId,
       warehouseId,
     );
     warehouse.deleteYn = 'Y';
@@ -104,10 +121,12 @@ export class WarehousesService {
 
   private async findActiveByIdOrThrow(
     companyId: string,
+    siteId: string,
     warehouseId: string,
   ): Promise<Warehouse> {
     const warehouse = await this.warehouseRepository.findOneBy({
       companyId,
+      siteId: this.requireTrimmedString(siteId, 'siteId'),
       warehouseId: this.requireTrimmedString(warehouseId, 'warehouseId'),
       deleteYn: 'N',
     });
@@ -125,16 +144,6 @@ export class WarehousesService {
       throw new BadRequestException(`${fieldName} is required`);
     }
     return value.trim();
-  }
-
-  private normalizeNullableString(
-    value: string | null | undefined,
-  ): string | null {
-    if (value === null || value === undefined) {
-      return null;
-    }
-    const trimmedValue = value.trim();
-    return trimmedValue === '' ? null : trimmedValue;
   }
 
   private toResponse(warehouse: Warehouse): WarehouseResponseDto {

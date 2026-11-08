@@ -31,6 +31,9 @@ export class CreateUserDto {
   roleId: string;
 
   @IsString()
+  siteId: string;
+
+  @IsString()
   deptId: string;
 
   @IsIn(Object.values(AccessScope))

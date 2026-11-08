@@ -1,3 +1,4 @@
+/** 역할·권한 배정은 회사별로 관리하고 Permission 정의는 DB 공용 카탈로그에서 읽는다. */
 import {
   BadRequestException,
   ConflictException,
@@ -13,6 +14,7 @@ import { UpdateRolePermissionsDto } from './dto/update-role-permissions.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
 import { RolePermission } from './entities/role-permission.entity';
 import { Role } from './entities/role.entity';
+import { Permission } from '../permissions/entities/permission.entity';
 
 @Injectable()
 export class RolesService {
@@ -23,7 +25,15 @@ export class RolesService {
     private readonly rolePermissionRepository: Repository<RolePermission>,
   ) {}
 
-  async findActivePermissionIds(
+  async findPermissionOptions() {
+    return this.roleRepository.manager.find(Permission, {
+      where: { deleteYn: 'N' },
+      order: { module: 'ASC', action: 'ASC' },
+      select: { permissionId: true, name: true, module: true, action: true },
+    });
+  }
+
+  async findAssignedPermissionIds(
     companyId: string,
     roleId: string,
   ): Promise<string[]> {
@@ -132,7 +142,7 @@ export class RolesService {
     roleId: string,
   ): Promise<string[]> {
     await this.findActiveByIdOrThrow(userContext.companyId, roleId);
-    return this.findActivePermissionIds(userContext.companyId, roleId);
+    return this.findAssignedPermissionIds(userContext.companyId, roleId);
   }
 
   async updatePermissions(
@@ -173,7 +183,7 @@ export class RolesService {
     await this.rolePermissionRepository.remove(removedRolePermissions);
     await this.rolePermissionRepository.save(newRolePermissions);
 
-    return this.findActivePermissionIds(userContext.companyId, roleId);
+    return this.findAssignedPermissionIds(userContext.companyId, roleId);
   }
 
   private async findActiveByIdOrThrow(

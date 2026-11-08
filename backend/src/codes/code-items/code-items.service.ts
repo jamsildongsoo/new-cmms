@@ -1,3 +1,4 @@
+/** 시스템 코드 그룹의 하위 항목을 인증 회사별로 관리한다. 항목 PK는 회사+그룹+항목 코드다. */
 import {
   BadRequestException,
   ConflictException,

@@ -1,3 +1,4 @@
+/** 회사별 설비와 같은 사업장의 부모 계층을 관리하며 순환과 활성 하위 설비 삭제를 방지한다. */
 import {
   BadRequestException,
   ConflictException,
@@ -7,6 +8,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { UserContext } from '../../auth/types/user-context.type';
+import { CodeItem } from '../../codes/code-items/entities/code-item.entity';
 import { CodeValidationService } from '../../codes/code-validation.service';
 import { Code } from '../../common/constants/code';
 import { PaginatedResponseDto } from '../../common/dto/paginated-response.dto';
@@ -36,6 +38,95 @@ export class EquipmentService {
     private readonly codeValidationService: CodeValidationService,
   ) {}
 
+  // 설비 조회 권한만으로 입력에 필요한 동일 회사의 선택 목록을 제공한다.
+  async getOptions(userContext: UserContext) {
+    const companyId = userContext.companyId;
+    const [sites, departments, types] = await Promise.all([
+      this.siteRepository.find({
+        where: { companyId, deleteYn: 'N' },
+        order: { siteId: 'ASC' },
+      }),
+      this.departmentRepository.find({
+        where: { companyId, deleteYn: 'N' },
+        order: { deptId: 'ASC' },
+      }),
+      this.equipmentRepository.manager.getRepository(CodeItem).find({
+        where: { companyId, codeId: Code.EQUIPMENT_TYPE },
+        order: { sortOrder: 'ASC', codeItemId: 'ASC' },
+      }),
+    ]);
+    return {
+      sites: sites.map(({ siteId, name }) => ({ value: siteId, label: name })),
+      departments: departments.map(({ deptId, name }) => ({
+        value: deptId,
+        label: name,
+      })),
+      types: types.map(({ codeItemId, name }) => ({
+        value: codeItemId,
+        label: name,
+      })),
+    };
+  }
+
+  // 목록 페이지 제한과 무관하게 같은 회사의 전체 트리 노드를 제공한다.
+  async tree(
+    user: UserContext,
+    siteId?: string,
+  ): Promise<EquipmentResponseDto[]> {
+    const rows = await this.equipmentRepository.find({
+      where: {
+        companyId: user.companyId,
+        deleteYn: 'N',
+        ...(siteId ? { siteId } : {}),
+      },
+      order: { equipmentId: 'ASC' },
+    });
+    return rows.map((row) => this.toResponse(row));
+  }
+
+  private async assertNoChildren(companyId: string, equipmentId: string) {
+    if (
+      await this.equipmentRepository.findOneBy({
+        companyId,
+        parentEquipmentId: equipmentId,
+        deleteYn: 'N',
+      })
+    )
+      throw new ConflictException(
+        '활성 하위 설비가 있어 삭제 또는 사업장 변경을 할 수 없습니다.',
+      );
+  }
+
+  private async assertParent(
+    companyId: string,
+    equipmentId: string,
+    siteId: string,
+    parentEquipmentId: string | null,
+  ) {
+    if (!parentEquipmentId) return;
+    if (parentEquipmentId === equipmentId)
+      throw new BadRequestException(
+        '자기 자신을 상위 설비로 지정할 수 없습니다.',
+      );
+    const rows = await this.equipmentRepository.find({
+      where: { companyId, deleteYn: 'N' },
+    });
+    const byId = new Map(rows.map((row) => [row.equipmentId, row]));
+    const visited = new Set<string>([equipmentId]);
+    let current: string | null = parentEquipmentId;
+    while (current) {
+      if (visited.has(current))
+        throw new BadRequestException('순환 설비 연결은 허용되지 않습니다.');
+      visited.add(current);
+      const parent = byId.get(current);
+      if (!parent || parent.siteId !== siteId)
+        throw new BadRequestException(
+          '상위 설비는 동일 회사·사업장의 활성 설비여야 합니다.',
+        );
+      current = parent.parentEquipmentId ?? null;
+    }
+  }
+
   async findAll(
     userContext: UserContext,
     query: SearchEquipmentDto,
@@ -51,6 +142,12 @@ export class EquipmentService {
       .orderBy('equipment.equipmentId', 'ASC')
       .skip(pagination.offset)
       .take(pagination.limit);
+
+    for (const field of ['siteId', 'deptId', 'parentEquipmentId'] as const)
+      if (query[field]?.trim())
+        queryBuilder.andWhere(`equipment.${field} = :${field}`, {
+          [field]: query[field]!.trim(),
+        });
 
     if (search) {
       if (search.searchType === 'typeCode') {
@@ -107,14 +204,33 @@ export class EquipmentService {
     const deptId = this.requireTrimmedString(dto.deptId, 'deptId');
     const typeCode = this.requireTrimmedString(dto.typeCode, 'typeCode');
 
-    await this.assertSiteExists(userContext.companyId, siteId);
-    await this.assertDepartmentExists(userContext.companyId, deptId);
+    // 사업장·부서는 회사별 선택 목록으로 입력하고 기존 참조에 삭제를 소급하지 않는다.
     await this.assertEquipmentTypeCode(userContext.companyId, typeCode);
 
+    const parentEquipmentId = this.normalizeNullableString(
+      dto.parentEquipmentId,
+    );
+    await this.assertParent(
+      userContext.companyId,
+      equipmentId,
+      siteId,
+      parentEquipmentId,
+    );
     const equipment = this.equipmentRepository.create({
       companyId: userContext.companyId,
       siteId,
       equipmentId,
+      parentEquipmentId,
+      pmTargetYn: this.normalizeFlag(dto.pmTargetYn ?? 'N'),
+      permitTargetYn: this.normalizeFlag(dto.permitTargetYn ?? 'N'),
+      legalInspectionDate: this.normalizeDateOnly(
+        dto.legalInspectionDate,
+        'legalInspectionDate',
+      ),
+      legalNextInspectionDate: this.normalizeDateOnly(
+        dto.legalNextInspectionDate,
+        'legalNextInspectionDate',
+      ),
       name: this.requireTrimmedString(dto.name, 'name'),
       typeCode,
       location: this.normalizeNullableString(dto.location),
@@ -124,8 +240,19 @@ export class EquipmentService {
       serialNo: this.normalizeNullableString(dto.serialNo),
       installDate: this.normalizeDateOnly(dto.installDate),
       deptId,
-      period: this.normalizeNullableInteger(dto.period, 'period'),
-      unit: this.normalizeNullableString(dto.unit),
+      inspectionPeriod: this.normalizeNullableInteger(
+        dto.inspectionPeriod,
+        'inspectionPeriod',
+      ),
+      inspectionUnit: this.normalizeNullableString(dto.inspectionUnit),
+      inspectionDate: this.normalizeDateOnly(
+        dto.inspectionDate,
+        'inspectionDate',
+      ),
+      nextInspectionDate: this.normalizeDateOnly(
+        dto.nextInspectionDate,
+        'nextInspectionDate',
+      ),
       legalInspectionPeriod: this.normalizeNullableInteger(
         dto.legalInspectionPeriod,
         'legalInspectionPeriod',
@@ -139,6 +266,9 @@ export class EquipmentService {
       createdBy: userContext.userId,
     });
 
+    if (!equipment.inspectionPeriod || !equipment.inspectionUnit) {
+      equipment.nextInspectionDate = null;
+    }
     return this.toResponse(await this.equipmentRepository.save(equipment));
   }
 
@@ -152,23 +282,49 @@ export class EquipmentService {
       equipmentId,
     );
 
+    const nextSiteId =
+      dto.siteId === undefined
+        ? equipment.siteId
+        : this.requireTrimmedString(dto.siteId, 'siteId');
+    const nextParentId =
+      dto.parentEquipmentId === undefined
+        ? (equipment.parentEquipmentId ?? null)
+        : this.normalizeNullableString(dto.parentEquipmentId);
+    if (nextSiteId !== equipment.siteId)
+      await this.assertNoChildren(userContext.companyId, equipmentId);
+    await this.assertParent(
+      userContext.companyId,
+      equipmentId,
+      nextSiteId,
+      nextParentId,
+    );
+    equipment.parentEquipmentId = nextParentId;
+    if (dto.pmTargetYn !== undefined)
+      equipment.pmTargetYn = this.normalizeFlag(dto.pmTargetYn);
+    if (dto.permitTargetYn !== undefined)
+      equipment.permitTargetYn = this.normalizeFlag(dto.permitTargetYn);
+    if (dto.legalInspectionDate !== undefined)
+      equipment.legalInspectionDate = this.normalizeDateOnly(
+        dto.legalInspectionDate,
+        'legalInspectionDate',
+      );
+    if (dto.legalNextInspectionDate !== undefined)
+      equipment.legalNextInspectionDate = this.normalizeDateOnly(
+        dto.legalNextInspectionDate,
+        'legalNextInspectionDate',
+      );
     if (dto.siteId !== undefined) {
       equipment.siteId = this.requireTrimmedString(dto.siteId, 'siteId');
-      await this.assertSiteExists(userContext.companyId, equipment.siteId);
     }
     if (dto.deptId !== undefined) {
       equipment.deptId = this.requireTrimmedString(dto.deptId, 'deptId');
-      await this.assertDepartmentExists(
-        userContext.companyId,
-        equipment.deptId,
-      );
     }
     if (dto.typeCode !== undefined) {
-      equipment.typeCode = this.requireTrimmedString(dto.typeCode, 'typeCode');
-      await this.assertEquipmentTypeCode(
-        userContext.companyId,
-        equipment.typeCode,
-      );
+      const typeCode = this.requireTrimmedString(dto.typeCode, 'typeCode');
+      if (typeCode !== equipment.typeCode) {
+        await this.assertEquipmentTypeCode(userContext.companyId, typeCode);
+      }
+      equipment.typeCode = typeCode;
     }
     if (dto.name !== undefined) {
       equipment.name = this.requireTrimmedString(dto.name, 'name');
@@ -191,11 +347,28 @@ export class EquipmentService {
     if (dto.installDate !== undefined) {
       equipment.installDate = this.normalizeDateOnly(dto.installDate);
     }
-    if (dto.period !== undefined) {
-      equipment.period = this.normalizeNullableInteger(dto.period, 'period');
+    if (dto.inspectionPeriod !== undefined) {
+      equipment.inspectionPeriod = this.normalizeNullableInteger(
+        dto.inspectionPeriod,
+        'inspectionPeriod',
+      );
     }
-    if (dto.unit !== undefined) {
-      equipment.unit = this.normalizeNullableString(dto.unit);
+    if (dto.inspectionUnit !== undefined) {
+      equipment.inspectionUnit = this.normalizeNullableString(
+        dto.inspectionUnit,
+      );
+    }
+    if (dto.inspectionDate !== undefined) {
+      equipment.inspectionDate = this.normalizeDateOnly(
+        dto.inspectionDate,
+        'inspectionDate',
+      );
+    }
+    if (dto.nextInspectionDate !== undefined) {
+      equipment.nextInspectionDate = this.normalizeDateOnly(
+        dto.nextInspectionDate,
+        'nextInspectionDate',
+      );
     }
     if (dto.legalInspectionPeriod !== undefined) {
       equipment.legalInspectionPeriod = this.normalizeNullableInteger(
@@ -218,6 +391,9 @@ export class EquipmentService {
     equipment.updatedBy = userContext.userId;
     equipment.updatedAt = new Date();
 
+    if (!equipment.inspectionPeriod || !equipment.inspectionUnit) {
+      equipment.nextInspectionDate = null;
+    }
     return this.toResponse(await this.equipmentRepository.save(equipment));
   }
 
@@ -230,6 +406,7 @@ export class EquipmentService {
       equipmentId,
     );
 
+    await this.assertNoChildren(userContext.companyId, equipmentId);
     equipment.deleteYn = 'Y';
     equipment.updatedBy = userContext.userId;
     equipment.updatedAt = new Date();
@@ -252,36 +429,6 @@ export class EquipmentService {
     }
 
     return equipment;
-  }
-
-  private async assertSiteExists(
-    companyId: string,
-    siteId: string,
-  ): Promise<void> {
-    const site = await this.siteRepository.findOneBy({
-      companyId,
-      siteId,
-      deleteYn: 'N',
-    });
-
-    if (!site) {
-      throw new BadRequestException('siteId is invalid');
-    }
-  }
-
-  private async assertDepartmentExists(
-    companyId: string,
-    deptId: string,
-  ): Promise<void> {
-    const department = await this.departmentRepository.findOneBy({
-      companyId,
-      deptId,
-      deleteYn: 'N',
-    });
-
-    if (!department) {
-      throw new BadRequestException('deptId is invalid');
-    }
   }
 
   private assertEquipmentTypeCode(
@@ -336,6 +483,12 @@ export class EquipmentService {
     return trimmedValue === '' ? null : trimmedValue;
   }
 
+  private normalizeFlag(value: string) {
+    if (value !== 'Y' && value !== 'N')
+      throw new BadRequestException('대상 여부는 Y/N이어야 합니다.');
+    return value;
+  }
+
   private normalizeNullableInteger(
     value: number | null | undefined,
     fieldName: string,
@@ -351,13 +504,29 @@ export class EquipmentService {
     return value;
   }
 
-  private normalizeDateOnly(value: string | null | undefined): string | null {
+  private normalizeDateOnly(
+    value: string | null | undefined,
+    fieldName = 'installDate',
+  ): string | null {
     const normalizedValue = this.normalizeNullableString(value);
     if (normalizedValue === null) {
       return null;
     }
     if (!/^\d{8}$/.test(normalizedValue)) {
-      throw new BadRequestException('installDate must be YYYYMMDD');
+      throw new BadRequestException(`${fieldName} must be YYYYMMDD`);
+    }
+    const year = Number(normalizedValue.slice(0, 4));
+    const month = Number(normalizedValue.slice(4, 6));
+    const day = Number(normalizedValue.slice(6, 8));
+    const date = new Date(
+      `${normalizedValue.slice(0, 4)}-${normalizedValue.slice(4, 6)}-${normalizedValue.slice(6, 8)}T00:00:00Z`,
+    );
+    if (
+      date.getUTCFullYear() !== year ||
+      date.getUTCMonth() + 1 !== month ||
+      date.getUTCDate() !== day
+    ) {
+      throw new BadRequestException(`${fieldName} must be a valid date`);
     }
     return normalizedValue;
   }
@@ -367,6 +536,11 @@ export class EquipmentService {
       companyId: equipment.companyId,
       siteId: equipment.siteId,
       equipmentId: equipment.equipmentId,
+      parentEquipmentId: equipment.parentEquipmentId ?? null,
+      pmTargetYn: equipment.pmTargetYn ?? 'N',
+      permitTargetYn: equipment.permitTargetYn ?? 'N',
+      legalInspectionDate: equipment.legalInspectionDate ?? null,
+      legalNextInspectionDate: equipment.legalNextInspectionDate ?? null,
       name: equipment.name,
       typeCode: equipment.typeCode,
       location: equipment.location,
@@ -376,8 +550,10 @@ export class EquipmentService {
       serialNo: equipment.serialNo,
       installDate: equipment.installDate,
       deptId: equipment.deptId,
-      period: equipment.period,
-      unit: equipment.unit,
+      inspectionPeriod: equipment.inspectionPeriod,
+      inspectionUnit: equipment.inspectionUnit,
+      inspectionDate: equipment.inspectionDate,
+      nextInspectionDate: equipment.nextInspectionDate,
       legalInspectionPeriod: equipment.legalInspectionPeriod,
       legalInspectionUnit: equipment.legalInspectionUnit,
       attachmentId: equipment.attachmentId,

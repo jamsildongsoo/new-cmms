@@ -12,6 +12,12 @@ export class Company extends AuditEntity {
   @Column({ type: 'varchar', length: 50, nullable: true })
   registrationNumber: string | null;
 
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  contactName: string | null;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  phoneNumber: string | null;
+
   @Column({ type: 'text', nullable: true })
   note: string | null;
 

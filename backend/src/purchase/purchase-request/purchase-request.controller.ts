@@ -1,3 +1,6 @@
+import { NumberingService } from '../../numbering/numbering.service';
+import { Headers } from '@nestjs/common';
+import { PurchaseSearchDto } from '../common/purchase.dto';
 import {
   Body,
   Controller,
@@ -6,6 +9,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
@@ -22,12 +26,21 @@ import { PurchaseRequestService } from './purchase-request.service';
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('purchase-request')
 export class PurchaseRequestController {
-  constructor(private readonly service: PurchaseRequestService) {}
+  constructor(
+    private readonly numbering: NumberingService,
+    private readonly service: PurchaseRequestService,
+  ) {}
 
   @RequirePermission(AppModuleKey.PURCHASE_REQUEST, PermissionAction.READ)
   @Get()
-  findAll(@CurrentUser() user: UserContext) {
-    return this.service.findAll(user);
+  findAll(@CurrentUser() user: UserContext, @Query() query: PurchaseSearchDto) {
+    return this.service.findAll(user, query);
+  }
+
+  @RequirePermission(AppModuleKey.PURCHASE_REQUEST, PermissionAction.READ)
+  @Get('options')
+  options(@CurrentUser() user: UserContext) {
+    return this.service.options(user);
   }
 
   @RequirePermission(AppModuleKey.PURCHASE_REQUEST, PermissionAction.READ)
@@ -44,8 +57,20 @@ export class PurchaseRequestController {
   create(
     @CurrentUser() user: UserContext,
     @Body() dto: CreatePurchaseRequestDto,
+    @Headers('idempotency-key') requestKey: string,
   ) {
-    return this.service.create(user, dto);
+    return this.numbering.createDocument(
+      user,
+      AppModuleKey.PURCHASE_REQUEST,
+      requestKey,
+      (documentId) =>
+        this.service.create(
+          user,
+          Object.assign({}, dto, { requestId: documentId }),
+        ),
+      (documentId) => this.service.findOne(user, documentId),
+      dto.attachmentId,
+    );
   }
 
   @RequirePermission(AppModuleKey.PURCHASE_REQUEST, PermissionAction.UPDATE)
@@ -55,7 +80,13 @@ export class PurchaseRequestController {
     @Param('requestId') requestId: string,
     @Body() dto: UpdatePurchaseRequestDto,
   ) {
-    return this.service.update(user, requestId, dto);
+    return this.numbering.saveDocument(
+      user,
+      AppModuleKey.PURCHASE_REQUEST,
+      requestId,
+      dto.attachmentId,
+      () => this.service.update(user, requestId, dto),
+    );
   }
 
   @RequirePermission(AppModuleKey.PURCHASE_REQUEST, PermissionAction.DELETE)

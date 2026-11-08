@@ -9,9 +9,6 @@ export class Department extends AuditEntity {
   @PrimaryColumn({ type: 'varchar', length: 30 })
   deptId: string;
 
-  @Column({ type: 'varchar', length: 30, nullable: true })
-  siteId: string | null;
-
   @Column({ type: 'varchar', length: 100 })
   name: string;
 

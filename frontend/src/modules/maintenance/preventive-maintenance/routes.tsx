@@ -3,7 +3,10 @@ import { PreventiveMaintenanceFormPage } from './PreventiveMaintenanceFormPage'
 import { PreventiveMaintenanceListPage } from './PreventiveMaintenanceListPage'
 
 export const preventiveMaintenanceRoutes: RouteObject[] = [
-  { path: 'preventive-maintenance', element: <PreventiveMaintenanceListPage /> },
+  {
+    path: 'preventive-maintenance',
+    element: <PreventiveMaintenanceListPage />,
+  },
   {
     path: 'preventive-maintenance/new',
     element: <PreventiveMaintenanceFormPage mode="create" />,

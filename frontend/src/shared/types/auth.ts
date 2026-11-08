@@ -3,7 +3,7 @@ export interface UserContext {
   userId: string
   roleId: string
   deptId: string
-  siteId?: string | null
+  siteId: string | null
   accessScope: string
   permissions: string[]
 }
@@ -16,13 +16,6 @@ export interface LoginRequest {
 
 export interface LoginResponse {
   accessToken: string
-  refreshToken?: string
   tokenType: 'Bearer'
   user: UserContext
-}
-
-export interface RefreshResponse {
-  accessToken: string
-  refreshToken?: string
-  tokenType: 'Bearer'
 }

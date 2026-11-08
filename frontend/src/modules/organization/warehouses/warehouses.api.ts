@@ -5,13 +5,13 @@ export interface Warehouse extends AuditFields {
   companyId: string
   deleteYn: string
   warehouseId: string
-  siteId: string | null
+  siteId: string
   name: string
 }
 
 export interface WarehousePayload {
-  warehouseId?: string
-  siteId?: string | null
+  warehouseId: string
+  siteId: string
   name: string
 }
 
@@ -20,8 +20,10 @@ export async function getWarehouses() {
   return response.data
 }
 
-export async function getWarehouse(warehouseId: string) {
-  const response = await http.get<Warehouse>(`/warehouses/${warehouseId}`)
+export async function getWarehouse(siteId: string, warehouseId: string) {
+  const response = await http.get<Warehouse>(
+    `/warehouses/${encodeURIComponent(siteId)}/${encodeURIComponent(warehouseId)}`,
+  )
   return response.data
 }
 
@@ -31,17 +33,20 @@ export async function createWarehouse(payload: WarehousePayload) {
 }
 
 export async function updateWarehouse(
+  siteId: string,
   warehouseId: string,
-  payload: WarehousePayload,
+  payload: { name: string },
 ) {
   const response = await http.patch<Warehouse>(
-    `/warehouses/${warehouseId}`,
+    `/warehouses/${encodeURIComponent(siteId)}/${encodeURIComponent(warehouseId)}`,
     payload,
   )
   return response.data
 }
 
-export async function deleteWarehouse(warehouseId: string) {
-  const response = await http.delete<Warehouse>(`/warehouses/${warehouseId}`)
+export async function deleteWarehouse(siteId: string, warehouseId: string) {
+  const response = await http.delete<Warehouse>(
+    `/warehouses/${encodeURIComponent(siteId)}/${encodeURIComponent(warehouseId)}`,
+  )
   return response.data
 }

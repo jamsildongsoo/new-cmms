@@ -1,5 +1,6 @@
 import { Column, Entity, PrimaryColumn } from 'typeorm';
 
+// 그룹에 속한 개별 파일 메타데이터. 회사·첨부 ID·항목 번호가 복합 기본키다.
 @Entity('attachment_item')
 export class AttachmentItem {
   @PrimaryColumn({ type: 'varchar', length: 30 })

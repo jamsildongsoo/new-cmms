@@ -1,21 +1,22 @@
-import {
-  IsNotEmpty,
-  IsOptional,
-  IsString,
-  IsUUID,
-  Matches,
-} from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsArray, ValidateNested, MaxLength, IsIn } from 'class-validator';
+import { InspectionItemDto } from './inspection-item.dto';
+import { IsNotEmpty, IsOptional, IsString, Matches } from 'class-validator';
 
 export class CreatePreventiveMaintenanceDto {
-  @IsUUID()
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
   pmId: string;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  documentNo: string;
+  @MaxLength(50)
+  documentNo?: string;
 
   @IsString()
   @IsNotEmpty()
+  @MaxLength(200)
   title: string;
 
   @IsString()
@@ -24,7 +25,17 @@ export class CreatePreventiveMaintenanceDto {
 
   @IsOptional()
   @Matches(/^\d{8}$/)
-  plannedDate?: string | null;
+  inspectionDate?: string | null;
+
+  @IsOptional()
+  @Matches(/^\d{8}$/)
+  nextInspectionDate?: string | null;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => InspectionItemDto)
+  items?: InspectionItemDto[];
 
   @IsOptional()
   @IsString()
@@ -36,9 +47,22 @@ export class CreatePreventiveMaintenanceDto {
 
   @IsOptional()
   @IsString()
+  note?: string | null;
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
   attachmentId?: string | null;
+  @IsOptional()
+  @IsIn(['OK', 'NOK'])
+  result?: 'OK' | 'NOK' | null;
 
   @IsOptional()
   @IsString()
-  note?: string | null;
+  @MaxLength(30)
+  inspectionDeptId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  inspectorId?: string | null;
 }

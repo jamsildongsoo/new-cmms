@@ -1,3 +1,17 @@
+import { MaxLength } from 'class-validator';
+import { IsString } from 'class-validator';
+import { NumberingService } from '../../numbering/numbering.service';
+import { Headers } from '@nestjs/common';
+import { PurchaseService } from '../common/purchase.service';
+import { IsArray, ArrayUnique } from 'class-validator';
+class PreviewRequestsDto {
+  @IsArray()
+  @ArrayUnique()
+  @IsString({ each: true })
+  @MaxLength(50, { each: true })
+  requestIds: string[];
+}
+import { PurchaseSearchDto } from '../common/purchase.dto';
 import {
   Body,
   Controller,
@@ -6,6 +20,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
@@ -22,12 +37,27 @@ import { PurchaseOrderService } from './purchase-order.service';
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('purchase-order')
 export class PurchaseOrderController {
-  constructor(private readonly service: PurchaseOrderService) {}
+  constructor(
+    private readonly numbering: NumberingService,
+    private readonly service: PurchaseOrderService,
+    private readonly purchases: PurchaseService,
+  ) {}
 
   @RequirePermission(AppModuleKey.PURCHASE_ORDER, PermissionAction.READ)
   @Get()
-  findAll(@CurrentUser() user: UserContext) {
-    return this.service.findAll(user);
+  findAll(@CurrentUser() user: UserContext, @Query() query: PurchaseSearchDto) {
+    return this.service.findAll(user, query);
+  }
+
+  @RequirePermission(AppModuleKey.PURCHASE_ORDER, PermissionAction.READ)
+  @Post('request-preview')
+  preview(@CurrentUser() user: UserContext, @Body() dto: PreviewRequestsDto) {
+    return this.purchases.preview(user, dto.requestIds);
+  }
+  @RequirePermission(AppModuleKey.PURCHASE_ORDER, PermissionAction.READ)
+  @Get('options')
+  options(@CurrentUser() user: UserContext) {
+    return this.service.options(user);
   }
 
   @RequirePermission(AppModuleKey.PURCHASE_ORDER, PermissionAction.READ)
@@ -41,8 +71,20 @@ export class PurchaseOrderController {
   create(
     @CurrentUser() user: UserContext,
     @Body() dto: CreatePurchaseOrderDto,
+    @Headers('idempotency-key') requestKey: string,
   ) {
-    return this.service.create(user, dto);
+    return this.numbering.createDocument(
+      user,
+      AppModuleKey.PURCHASE_ORDER,
+      requestKey,
+      (documentId) =>
+        this.service.create(
+          user,
+          Object.assign({}, dto, { orderId: documentId }),
+        ),
+      (documentId) => this.service.findOne(user, documentId),
+      dto.attachmentId,
+    );
   }
 
   @RequirePermission(AppModuleKey.PURCHASE_ORDER, PermissionAction.UPDATE)
@@ -52,7 +94,13 @@ export class PurchaseOrderController {
     @Param('orderId') orderId: string,
     @Body() dto: UpdatePurchaseOrderDto,
   ) {
-    return this.service.update(user, orderId, dto);
+    return this.numbering.saveDocument(
+      user,
+      AppModuleKey.PURCHASE_ORDER,
+      orderId,
+      dto.attachmentId,
+      () => this.service.update(user, orderId, dto),
+    );
   }
 
   @RequirePermission(AppModuleKey.PURCHASE_ORDER, PermissionAction.DELETE)

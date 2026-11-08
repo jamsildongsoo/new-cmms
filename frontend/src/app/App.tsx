@@ -1,18 +1,21 @@
+import { boardRoutes } from '@/modules/boards'
+import { purchaseRoutes } from '@/modules/purchase'
+import { vendorRoutes } from '@/modules/purchase/vendor'
+import { inventoryRoutes } from '@/modules/inventory/transactions'
+import { materialRoutes } from '@/modules/inventory/material'
+import { permitRoutes } from '@/modules/maintenance/work-permit'
+import { workRequestRoutes } from '@/modules/maintenance/work-request'
+import { workOrderRoutes } from '@/modules/maintenance/work-order'
 import { Navigate, useRoutes } from 'react-router-dom'
 import { AppLayout } from '@/layout/AppLayout'
+import { identityRoutes } from '@/modules/identity'
 import { approvalRoutes } from '@/modules/approvals'
 import { LoginPage, RequireAuth } from '@/modules/auth'
 import { codeRoutes } from '@/modules/codes'
+import { equipmentRoutes } from '@/modules/maintenance/equipment'
 import { preventiveMaintenanceRoutes } from '@/modules/maintenance/preventive-maintenance'
 import { organizationRoutes } from '@/modules/organization'
-import { PlaceholderPage } from './PlaceholderPage'
-
-const placeholders = ['users', 'roles', 'permissions', 'equipment'].map(
-  (path) => ({
-    path,
-    element: <PlaceholderPage title={path[0].toUpperCase() + path.slice(1)} />,
-  }),
-)
+import { HomePage } from './HomePage'
 
 function App() {
   return useRoutes([
@@ -23,12 +26,21 @@ function App() {
         {
           element: <AppLayout />,
           children: [
-            { index: true, element: <PlaceholderPage title="Home" /> },
+            { index: true, element: <HomePage /> },
             ...organizationRoutes,
+            ...identityRoutes,
             ...codeRoutes,
             ...preventiveMaintenanceRoutes,
+            ...workOrderRoutes,
+            ...workRequestRoutes,
+            ...permitRoutes,
             ...approvalRoutes,
-            ...placeholders,
+            ...boardRoutes,
+            ...equipmentRoutes,
+            ...materialRoutes,
+            ...purchaseRoutes,
+            ...vendorRoutes,
+            ...inventoryRoutes,
             { path: '*', element: <Navigate to="/" replace /> },
           ],
         },

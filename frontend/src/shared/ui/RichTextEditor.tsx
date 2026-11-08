@@ -1,3 +1,4 @@
+/** Tiptap 문서 JSON을 같은 확장으로 편집·조회하여 표와 글자 서식을 보존한다. */
 import type { JSONContent } from '@tiptap/core'
 import { EditorContent, useEditor } from '@tiptap/react'
 import { TableKit } from '@tiptap/extension-table'
@@ -26,7 +27,8 @@ import { useEffect } from 'react'
 
 interface RichTextEditorProps {
   value: unknown
-  onChange: (value: unknown) => void
+  onChange?: (value: unknown) => void
+  readOnly?: boolean
 }
 
 function toEditorContent(value: unknown): JSONContent {
@@ -37,33 +39,6 @@ function toEditorContent(value: unknown): JSONContent {
     value.type === 'doc'
   ) {
     return value as JSONContent
-  }
-  if (
-    typeof value === 'object' &&
-    value !== null &&
-    'text' in value &&
-    typeof value.text === 'string'
-  ) {
-    return {
-      type: 'doc',
-      content: [
-        {
-          type: 'paragraph',
-          content: value.text ? [{ type: 'text', text: value.text }] : [],
-        },
-      ],
-    }
-  }
-  if (typeof value === 'string') {
-    return {
-      type: 'doc',
-      content: [
-        {
-          type: 'paragraph',
-          content: value ? [{ type: 'text', text: value }] : [],
-        },
-      ],
-    }
   }
   return { type: 'doc', content: [{ type: 'paragraph' }] }
 }
@@ -100,13 +75,18 @@ function ToolButton({
   )
 }
 
-export function RichTextEditor({ value, onChange }: RichTextEditorProps) {
+export function RichTextEditor({
+  value,
+  onChange,
+  readOnly = false,
+}: RichTextEditorProps) {
   const editor = useEditor({
+    editable: !readOnly,
     extensions: [
       StarterKit,
       TextStyle,
       FontSize,
-      TableKit.configure({ table: { resizable: true } }),
+      TableKit.configure({ table: { resizable: !readOnly } }),
     ],
     content: toEditorContent(value),
     editorProps: {
@@ -115,8 +95,14 @@ export function RichTextEditor({ value, onChange }: RichTextEditorProps) {
           'min-h-52 border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:border-slate-700',
       },
     },
-    onUpdate: ({ editor: currentEditor }) => onChange(currentEditor.getJSON()),
+    onUpdate: ({ editor: currentEditor }) => {
+      if (!readOnly) onChange?.(currentEditor.getJSON())
+    },
   })
+
+  useEffect(() => {
+    editor?.setEditable(!readOnly)
+  }, [editor, readOnly])
 
   useEffect(() => {
     if (!editor) {
@@ -132,6 +118,11 @@ export function RichTextEditor({ value, onChange }: RichTextEditorProps) {
 
   if (!editor) {
     return null
+  }
+
+  // 작성 화면과 같은 확장으로 JSON을 표시하되 도구 모음과 편집 기능은 제공하지 않는다.
+  if (readOnly) {
+    return <EditorContent editor={editor} />
   }
 
   const addTable = () =>
@@ -150,28 +141,28 @@ export function RichTextEditor({ value, onChange }: RichTextEditorProps) {
     <div className="space-y-2">
       <div className="flex flex-wrap gap-1">
         <ToolButton
-          label="Bold"
+          label="굵게"
           active={editor.isActive('bold')}
           onClick={() => editor.chain().focus().toggleBold().run()}
         >
           <Bold className="h-4 w-4" />
         </ToolButton>
         <ToolButton
-          label="Italic"
+          label="기울임"
           active={editor.isActive('italic')}
           onClick={() => editor.chain().focus().toggleItalic().run()}
         >
           <Italic className="h-4 w-4" />
         </ToolButton>
         <ToolButton
-          label="Bullet list"
+          label="글머리 기호"
           active={editor.isActive('bulletList')}
           onClick={() => editor.chain().focus().toggleBulletList().run()}
         >
           <List className="h-4 w-4" />
         </ToolButton>
         <ToolButton
-          label="Numbered list"
+          label="번호 목록"
           active={editor.isActive('orderedList')}
           onClick={() => editor.chain().focus().toggleOrderedList().run()}
         >
@@ -182,7 +173,7 @@ export function RichTextEditor({ value, onChange }: RichTextEditorProps) {
           return (
             <ToolButton
               key={level}
-              label={`Heading ${level}`}
+              label={`제목 ${level}`}
               active={editor.isActive('heading', { level })}
               onClick={() => chain().toggleHeading({ level }).run()}
             >
@@ -191,8 +182,8 @@ export function RichTextEditor({ value, onChange }: RichTextEditorProps) {
           )
         })}
         <select
-          title="Font size"
-          aria-label="Font size"
+          title="글꼴 크기"
+          aria-label="글꼴 크기"
           value={currentSize}
           onChange={(event) => {
             const size = event.target.value
@@ -209,66 +200,66 @@ export function RichTextEditor({ value, onChange }: RichTextEditorProps) {
           ))}
         </select>
         <ToolButton
-          label="Paragraph"
+          label="본문"
           active={editor.isActive('paragraph')}
           onClick={() => editor.chain().focus().setParagraph().run()}
         >
           <Pilcrow className="h-4 w-4" />
         </ToolButton>
-        <ToolButton label="Insert table" onClick={addTable}>
+        <ToolButton label="표 삽입" onClick={addTable}>
           <Table className="h-4 w-4" />
         </ToolButton>
         <ToolButton
-          label="Add row below"
+          label="아래 행 추가"
           disabled={!inTable}
           onClick={() => chain().addRowAfter().run()}
         >
           <Rows2 className="h-4 w-4" />
         </ToolButton>
         <ToolButton
-          label="Add column right"
+          label="오른쪽 열 추가"
           disabled={!inTable}
           onClick={() => chain().addColumnAfter().run()}
         >
           <Columns2 className="h-4 w-4" />
         </ToolButton>
         <ToolButton
-          label="Delete row"
+          label="행 삭제"
           disabled={!inTable}
           onClick={() => chain().deleteRow().run()}
         >
           <Table2 className="h-4 w-4" />
         </ToolButton>
         <ToolButton
-          label="Merge cells"
+          label="셀 병합"
           disabled={!editor.can().mergeCells()}
           onClick={() => chain().mergeCells().run()}
         >
           <Merge className="h-4 w-4" />
         </ToolButton>
         <ToolButton
-          label="Split cell"
+          label="셀 분할"
           disabled={!editor.can().splitCell()}
           onClick={() => chain().splitCell().run()}
         >
           <Split className="h-4 w-4" />
         </ToolButton>
         <ToolButton
-          label="Delete table"
+          label="표 삭제"
           disabled={!inTable}
           onClick={() => chain().deleteTable().run()}
         >
           <Trash2 className="h-4 w-4" />
         </ToolButton>
         <ToolButton
-          label="Undo"
+          label="실행 취소"
           disabled={!editor.can().undo()}
           onClick={() => editor.chain().focus().undo().run()}
         >
           <Undo2 className="h-4 w-4" />
         </ToolButton>
         <ToolButton
-          label="Redo"
+          label="다시 실행"
           disabled={!editor.can().redo()}
           onClick={() => editor.chain().focus().redo().run()}
         >

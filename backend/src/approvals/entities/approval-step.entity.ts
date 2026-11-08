@@ -3,6 +3,7 @@ import { Column, Entity, PrimaryColumn } from 'typeorm';
 export const ApprovalStepType = {
   SUBMITTER: 'SUBMITTER',
   APPROVER: 'APPROVER',
+  AGREE: 'AGREE',
   REFERENCE: 'REFERENCE',
 } as const;
 

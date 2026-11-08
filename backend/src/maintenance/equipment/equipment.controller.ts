@@ -1,3 +1,4 @@
+import { NumberingService } from '../../numbering/numbering.service';
 import {
   Body,
   Controller,
@@ -24,7 +25,7 @@ import { EquipmentService } from './equipment.service';
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('equipment')
 export class EquipmentController {
-  constructor(private readonly equipmentService: EquipmentService) {}
+  constructor(private readonly numbering: NumberingService, private readonly equipmentService: EquipmentService) {}
 
   // List equipment with optional module-specific search.
   @RequirePermission(AppModuleKey.EQUIPMENT, PermissionAction.READ)
@@ -34,6 +35,18 @@ export class EquipmentController {
     @Query() query: SearchEquipmentDto,
   ) {
     return this.equipmentService.findAll(user, query);
+  }
+
+  @RequirePermission(AppModuleKey.EQUIPMENT, PermissionAction.READ)
+  @Get('options')
+  getOptions(@CurrentUser() user: UserContext) {
+    return this.equipmentService.getOptions(user);
+  }
+
+  @RequirePermission(AppModuleKey.EQUIPMENT, PermissionAction.READ)
+  @Get('tree')
+  tree(@CurrentUser() user: UserContext, @Query('siteId') siteId?: string) {
+    return this.equipmentService.tree(user, siteId);
   }
 
   // Get one equipment master record.
@@ -50,7 +63,7 @@ export class EquipmentController {
   @RequirePermission(AppModuleKey.EQUIPMENT, PermissionAction.CREATE)
   @Post()
   create(@CurrentUser() user: UserContext, @Body() dto: CreateEquipmentDto) {
-    return this.equipmentService.create(user, dto);
+    return this.numbering.saveDocument(user, AppModuleKey.EQUIPMENT, dto.equipmentId.trim(), dto.attachmentId, () => this.equipmentService.create(user, dto));
   }
 
   // Update one equipment master record.
@@ -61,7 +74,7 @@ export class EquipmentController {
     @Param('equipmentId') equipmentId: string,
     @Body() dto: UpdateEquipmentDto,
   ) {
-    return this.equipmentService.update(user, equipmentId, dto);
+    return this.numbering.saveDocument(user, AppModuleKey.EQUIPMENT, equipmentId, dto.attachmentId, () => this.equipmentService.update(user, equipmentId, dto));
   }
 
   // Soft-delete one equipment master record.

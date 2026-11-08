@@ -11,5 +11,13 @@ export class UpdateCompanyDto {
 
   @IsOptional()
   @IsString()
+  contactName?: string | null;
+
+  @IsOptional()
+  @IsString()
+  phoneNumber?: string | null;
+
+  @IsOptional()
+  @IsString()
   note?: string | null;
 }

@@ -1,12 +1,8 @@
-import { Edit3, Eye, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
+import { printDocument } from '@/shared/lib/print'
 import { toMessage } from '@/shared/api/errors'
-import {
-  deleteSite,
-  getSites,
-  type Site,
-} from './sites.api'
+import { getSites, type Site } from './sites.api'
 import { useAuth } from '@/modules/auth'
 import { Button } from '@/shared/ui/Button'
 import { DataTable } from '@/shared/ui/DataTable'
@@ -19,8 +15,6 @@ export function SiteListPage() {
   const [error, setError] = useState<string | null>(null)
 
   const canCreate = hasPermission('site:create')
-  const canUpdate = hasPermission('site:update')
-  const canDelete = hasPermission('site:delete')
 
   useEffect(() => {
     let active = true
@@ -33,30 +27,6 @@ export function SiteListPage() {
     }
   }, [])
 
-  const reload = async () => {
-    setIsLoading(true)
-    setError(null)
-    try {
-      setRows(await getSites())
-    } catch (loadError) {
-      setError(toMessage(loadError))
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const removeRow = async (row: Site) => {
-    if (!window.confirm(`Delete site ${row.siteId}?`)) {
-      return
-    }
-    try {
-      await deleteSite(row.siteId)
-      await reload()
-    } catch (deleteError) {
-      setError(toMessage(deleteError))
-    }
-  }
-
   return (
     <section className="space-y-3">
       <div className="flex items-center justify-between gap-3">
@@ -66,15 +36,19 @@ export function SiteListPage() {
         <div className="flex shrink-0 gap-2">
           <Button
             variant="secondary"
-            onClick={() => void reload()}
             disabled={isLoading}
+            onClick={() =>
+              printDocument({
+                title: '사업장 목록',
+                columns: ['코드', '명칭'],
+                rows: rows.map((row) => [row.siteId, row.name]),
+              })
+            }
           >
-            <RefreshCw className="h-4 w-4" />
-            Refresh
+            인쇄
           </Button>
           <Button onClick={() => navigate('/sites/new')} disabled={!canCreate}>
-            <Plus className="h-4 w-4" />
-            New
+            신규
           </Button>
         </div>
       </div>
@@ -86,46 +60,21 @@ export function SiteListPage() {
       )}
 
       <DataTable<Site>
-        gridTemplateColumns="1fr 1fr 220px"
+        gridTemplateColumns="1fr 1fr"
         columns={[
-          { key: 'siteId', label: 'Site ID', render: (row) => row.siteId },
-          { key: 'name', label: 'Name', render: (row) => row.name },
           {
-            key: 'actions',
-            label: 'Actions',
+            key: 'siteId',
+            label: 'Site ID',
             render: (row) => (
-              <div className="flex gap-1">
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => navigate(`/sites/${encodeURIComponent(row.siteId)}`)}
-                >
-                  <Eye className="h-4 w-4" />
-                  View
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() =>
-                    navigate(`/sites/${encodeURIComponent(row.siteId)}/edit`)
-                  }
-                  disabled={!canUpdate}
-                >
-                  <Edit3 className="h-4 w-4" />
-                  Edit
-                </Button>
-                <Button
-                  size="sm"
-                  variant="danger"
-                  onClick={() => void removeRow(row)}
-                  disabled={!canDelete}
-                >
-                  <Trash2 className="h-4 w-4" />
-                  Delete
-                </Button>
-              </div>
+              <Link
+                className="text-blue-700 underline"
+                to={`/sites/${encodeURIComponent(row.siteId)}`}
+              >
+                {row.siteId}
+              </Link>
             ),
           },
+          { key: 'name', label: 'Name', render: (row) => row.name },
         ]}
         rows={rows}
         emptyText={isLoading ? 'Loading...' : 'No sites'}

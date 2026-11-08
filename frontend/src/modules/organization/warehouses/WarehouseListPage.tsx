@@ -1,12 +1,8 @@
-import { Edit3, Eye, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
+import { printDocument } from '@/shared/lib/print'
 import { toMessage } from '@/shared/api/errors'
-import {
-  deleteWarehouse,
-  getWarehouses,
-  type Warehouse,
-} from './warehouses.api'
+import { getWarehouses, type Warehouse } from './warehouses.api'
 import { useAuth } from '@/modules/auth'
 import { Button } from '@/shared/ui/Button'
 import { DataTable } from '@/shared/ui/DataTable'
@@ -19,8 +15,6 @@ export function WarehouseListPage() {
   const [error, setError] = useState<string | null>(null)
 
   const canCreate = hasPermission('warehouse:create')
-  const canUpdate = hasPermission('warehouse:update')
-  const canDelete = hasPermission('warehouse:delete')
 
   useEffect(() => {
     let active = true
@@ -33,30 +27,6 @@ export function WarehouseListPage() {
     }
   }, [])
 
-  const reload = async () => {
-    setIsLoading(true)
-    setError(null)
-    try {
-      setRows(await getWarehouses())
-    } catch (loadError) {
-      setError(toMessage(loadError))
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const removeRow = async (row: Warehouse) => {
-    if (!window.confirm(`Delete warehouse ${row.warehouseId}?`)) {
-      return
-    }
-    try {
-      await deleteWarehouse(row.warehouseId)
-      await reload()
-    } catch (deleteError) {
-      setError(toMessage(deleteError))
-    }
-  }
-
   return (
     <section className="space-y-3">
       <div className="flex items-center justify-between gap-3">
@@ -66,15 +36,26 @@ export function WarehouseListPage() {
         <div className="flex shrink-0 gap-2">
           <Button
             variant="secondary"
-            onClick={() => void reload()}
             disabled={isLoading}
+            onClick={() =>
+              printDocument({
+                title: '창고 목록',
+                columns: ['코드', '명칭', '사업장'],
+                rows: rows.map((row) => [
+                  row.warehouseId,
+                  row.name,
+                  row.siteId,
+                ]),
+              })
+            }
           >
-            <RefreshCw className="h-4 w-4" />
-            Refresh
+            인쇄
           </Button>
-          <Button onClick={() => navigate('/warehouses/new')} disabled={!canCreate}>
-            <Plus className="h-4 w-4" />
-            New
+          <Button
+            onClick={() => navigate('/warehouses/new')}
+            disabled={!canCreate}
+          >
+            신규
           </Button>
         </div>
       </div>
@@ -86,46 +67,25 @@ export function WarehouseListPage() {
       )}
 
       <DataTable<Warehouse>
-        gridTemplateColumns="1fr 1fr 1fr 220px"
+        gridTemplateColumns="1fr 1fr 1fr"
         columns={[
-          { key: 'warehouseId', label: 'Warehouse ID', render: (row) => row.warehouseId },
-          { key: 'name', label: 'Name', render: (row) => row.name },
-          { key: 'siteId', label: 'Site ID', render: (row) => row.siteId ?? '-' },
           {
-            key: 'actions',
-            label: 'Actions',
+            key: 'warehouseId',
+            label: 'Warehouse ID',
             render: (row) => (
-              <div className="flex gap-1">
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => navigate(`/warehouses/${encodeURIComponent(row.warehouseId)}`)}
-                >
-                  <Eye className="h-4 w-4" />
-                  View
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() =>
-                    navigate(`/warehouses/${encodeURIComponent(row.warehouseId)}/edit`)
-                  }
-                  disabled={!canUpdate}
-                >
-                  <Edit3 className="h-4 w-4" />
-                  Edit
-                </Button>
-                <Button
-                  size="sm"
-                  variant="danger"
-                  onClick={() => void removeRow(row)}
-                  disabled={!canDelete}
-                >
-                  <Trash2 className="h-4 w-4" />
-                  Delete
-                </Button>
-              </div>
+              <Link
+                className="text-blue-700 underline"
+                to={`/warehouses/${encodeURIComponent(row.siteId)}/${encodeURIComponent(row.warehouseId)}`}
+              >
+                {row.warehouseId}
+              </Link>
             ),
+          },
+          { key: 'name', label: 'Name', render: (row) => row.name },
+          {
+            key: 'siteId',
+            label: 'Site ID',
+            render: (row) => row.siteId ?? '-',
           },
         ]}
         rows={rows}

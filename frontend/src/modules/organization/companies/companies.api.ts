@@ -5,6 +5,8 @@ export interface Company extends AuditFields {
   companyId: string
   name: string
   registrationNumber: string | null
+  contactName: string | null
+  phoneNumber: string | null
   note: string | null
   deleteYn: string
 }
@@ -12,16 +14,13 @@ export interface Company extends AuditFields {
 export interface CompanyPayload {
   name: string
   registrationNumber?: string | null
+  contactName?: string | null
+  phoneNumber?: string | null
   note?: string | null
 }
 
 export async function getCompany() {
   const response = await http.get<Company>('/companies')
-  return response.data
-}
-
-export async function createCompany(payload: CompanyPayload) {
-  const response = await http.post<Company>('/companies', payload)
   return response.data
 }
 

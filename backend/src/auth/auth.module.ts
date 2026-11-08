@@ -25,6 +25,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
         return {
           secret: configService.getOrThrow<string>('jwt.accessSecret'),
           signOptions: {
+            algorithm: 'HS256',
             expiresIn,
           },
         };

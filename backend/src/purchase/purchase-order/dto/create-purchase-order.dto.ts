@@ -1,40 +1,7 @@
-import {
-  IsNotEmpty,
-  IsOptional,
-  IsString,
-  IsUUID,
-  Matches,
-} from 'class-validator';
-
-export class CreatePurchaseOrderDto {
-  @IsUUID()
-  orderId: string;
-
-  @IsString()
-  @IsNotEmpty()
-  documentNo: string;
-
-  @IsString()
-  @IsNotEmpty()
-  title: string;
-
-  @IsOptional()
-  @IsString()
-  typeCode?: string | null;
-
-  @IsOptional()
-  @Matches(/^\d{8}$/)
-  expectedDeliveryDate?: string | null;
-
-  @IsOptional()
-  @IsString()
-  content?: string | null;
-
-  @IsOptional()
-  @IsString()
-  attachmentId?: string | null;
-
-  @IsOptional()
-  @IsString()
-  note?: string | null;
+import { IsOptional } from 'class-validator';
+import { MaxLength } from 'class-validator';
+import { IsString } from 'class-validator';
+import { PurchaseSaveDto } from '../../common/purchase.dto';
+export class CreatePurchaseOrderDto extends PurchaseSaveDto {
+  @IsOptional() @IsString() @MaxLength(50) orderId: string;
 }

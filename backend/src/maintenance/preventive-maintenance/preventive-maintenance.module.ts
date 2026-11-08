@@ -9,5 +9,6 @@ import { PreventiveMaintenanceService } from './preventive-maintenance.service';
   imports: [TypeOrmModule.forFeature([PreventiveMaintenance, Equipment])],
   controllers: [PreventiveMaintenanceController],
   providers: [PreventiveMaintenanceService],
+  exports: [PreventiveMaintenanceService],
 })
 export class PreventiveMaintenanceModule {}

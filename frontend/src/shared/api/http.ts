@@ -1,67 +1,27 @@
-import axios, { AxiosError, type InternalAxiosRequestConfig } from 'axios'
-import {
-  clearTokens,
-  getAccessToken,
-  getRefreshToken,
-  setTokens,
-} from './tokenStore'
-import type { RefreshResponse } from '../types/auth'
-
+/** 현재 access token을 요청에 연결하며 해당 토큰의 401만 세션을 해제한다. 403·통신 오류는 보존한다. */
+import axios, { AxiosError } from 'axios'
+import { clearTokens, getAccessToken } from './tokenStore'
 const apiBaseUrl =
   import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000/api'
-const useRefresh = import.meta.env.VITE_AUTH_USE_REFRESH === 'true'
-
-interface RetryableRequestConfig extends InternalAxiosRequestConfig {
-  _retry?: boolean
-}
-
-export const http = axios.create({
-  baseURL: apiBaseUrl,
-  timeout: 15000,
-})
-
+export const http = axios.create({ baseURL: apiBaseUrl, timeout: 15000 })
 http.interceptors.request.use((config) => {
-  const accessToken = getAccessToken()
-  if (accessToken) {
-    config.headers.Authorization = `Bearer ${accessToken}`
-  }
+  const token = getAccessToken()
+  if (token) config.headers.Authorization = `Bearer ${token}`
   return config
 })
-
 http.interceptors.response.use(
   (response) => response,
-  async (error: AxiosError) => {
-    const originalRequest = error.config as RetryableRequestConfig | undefined
-
+  (error: AxiosError) => {
+    const token = getAccessToken(),
+      original = error.config
+    // 이전 세션의 늦은 응답으로 새 로그인을 해제하지 않는다. 권한 거부(403)와 통신 오류도 구분한다.
     if (
-      !useRefresh ||
-      error.response?.status !== 401 ||
-      !originalRequest ||
-      originalRequest._retry
-    ) {
-      return Promise.reject(error)
-    }
-
-    const refreshToken = getRefreshToken()
-    if (!refreshToken) {
+      error.response?.status === 401 &&
+      token &&
+      original?.url !== '/auth/login' &&
+      original?.headers.Authorization === `Bearer ${token}`
+    )
       clearTokens()
-      return Promise.reject(error)
-    }
-
-    originalRequest._retry = true
-
-    try {
-      const response = await axios.post<RefreshResponse>(
-        `${apiBaseUrl}/auth/refresh`,
-        { refreshToken },
-        { timeout: 15000 },
-      )
-      setTokens(response.data.accessToken, response.data.refreshToken)
-      originalRequest.headers.Authorization = `Bearer ${response.data.accessToken}`
-      return http(originalRequest)
-    } catch (refreshError) {
-      clearTokens()
-      return Promise.reject(refreshError)
-    }
+    return Promise.reject(error)
   },
 )

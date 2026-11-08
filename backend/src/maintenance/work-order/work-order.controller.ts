@@ -1,3 +1,6 @@
+import { NumberingService } from '../../numbering/numbering.service';
+import { Headers } from '@nestjs/common';
+import { SearchWorkOrderDto } from './dto/search-work-order.dto';
 import {
   Body,
   Controller,
@@ -6,6 +9,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
@@ -22,12 +26,24 @@ import { WorkOrderService } from './work-order.service';
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('work-order')
 export class WorkOrderController {
-  constructor(private readonly service: WorkOrderService) {}
+  constructor(
+    private readonly numbering: NumberingService,
+    private readonly service: WorkOrderService,
+  ) {}
 
   @RequirePermission(AppModuleKey.WORK_ORDER, PermissionAction.READ)
   @Get()
-  findAll(@CurrentUser() user: UserContext) {
-    return this.service.findAll(user);
+  findAll(
+    @CurrentUser() user: UserContext,
+    @Query() query: SearchWorkOrderDto,
+  ) {
+    return this.service.findAll(user, query);
+  }
+
+  @RequirePermission(AppModuleKey.WORK_ORDER, PermissionAction.READ)
+  @Get('options')
+  getOptions(@CurrentUser() user: UserContext) {
+    return this.service.getOptions(user);
   }
 
   @RequirePermission(AppModuleKey.WORK_ORDER, PermissionAction.READ)
@@ -41,8 +57,23 @@ export class WorkOrderController {
 
   @RequirePermission(AppModuleKey.WORK_ORDER, PermissionAction.CREATE)
   @Post()
-  create(@CurrentUser() user: UserContext, @Body() dto: CreateWorkOrderDto) {
-    return this.service.create(user, dto);
+  create(
+    @CurrentUser() user: UserContext,
+    @Body() dto: CreateWorkOrderDto,
+    @Headers('idempotency-key') requestKey: string,
+  ) {
+    return this.numbering.createDocument(
+      user,
+      AppModuleKey.WORK_ORDER,
+      requestKey,
+      (documentId) =>
+        this.service.create(
+          user,
+          Object.assign({}, dto, { workOrderId: documentId }),
+        ),
+      (documentId) => this.service.findOne(user, documentId),
+      dto.attachmentId,
+    );
   }
 
   @RequirePermission(AppModuleKey.WORK_ORDER, PermissionAction.UPDATE)
@@ -52,7 +83,13 @@ export class WorkOrderController {
     @Param('workOrderId') workOrderId: string,
     @Body() dto: UpdateWorkOrderDto,
   ) {
-    return this.service.update(user, workOrderId, dto);
+    return this.numbering.saveDocument(
+      user,
+      AppModuleKey.WORK_ORDER,
+      workOrderId,
+      dto.attachmentId,
+      () => this.service.update(user, workOrderId, dto),
+    );
   }
 
   @RequirePermission(AppModuleKey.WORK_ORDER, PermissionAction.DELETE)

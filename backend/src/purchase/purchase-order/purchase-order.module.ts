@@ -1,3 +1,4 @@
+import { PurchaseModule } from '../common/purchase.module';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { PurchaseOrder } from './entities/purchase-order.entity';
@@ -5,7 +6,7 @@ import { PurchaseOrderController } from './purchase-order.controller';
 import { PurchaseOrderService } from './purchase-order.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([PurchaseOrder])],
+  imports: [PurchaseModule, TypeOrmModule.forFeature([PurchaseOrder])],
   controllers: [PurchaseOrderController],
   providers: [PurchaseOrderService],
 })

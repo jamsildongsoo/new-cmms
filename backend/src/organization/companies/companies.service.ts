@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -8,7 +7,6 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { UserContext } from '../../auth/types/user-context.type';
 import { CompanyResponseDto } from './dto/company-response.dto';
-import { CreateCompanyDto } from './dto/create-company.dto';
 import { UpdateCompanyDto } from './dto/update-company.dto';
 import { Company } from './entities/company.entity';
 
@@ -21,30 +19,6 @@ export class CompaniesService {
 
   async findMine(userContext: UserContext): Promise<CompanyResponseDto> {
     return this.toResponse(await this.findMineOrThrow(userContext.companyId));
-  }
-
-  async createMine(
-    userContext: UserContext,
-    dto: CreateCompanyDto,
-  ): Promise<CompanyResponseDto> {
-    const existingCompany = await this.companyRepository.findOneBy({
-      companyId: userContext.companyId,
-    });
-
-    if (existingCompany) {
-      throw new ConflictException('Company already exists');
-    }
-
-    const company = this.companyRepository.create({
-      companyId: userContext.companyId,
-      name: this.requireTrimmedString(dto.name, 'name'),
-      registrationNumber: this.normalizeNullableString(dto.registrationNumber),
-      note: this.normalizeNullableString(dto.note),
-      deleteYn: 'N',
-      createdBy: userContext.userId,
-    });
-
-    return this.toResponse(await this.companyRepository.save(company));
   }
 
   async updateMine(
@@ -61,6 +35,10 @@ export class CompaniesService {
         dto.registrationNumber,
       );
     }
+    if (dto.contactName !== undefined)
+      company.contactName = this.normalizeNullableString(dto.contactName);
+    if (dto.phoneNumber !== undefined)
+      company.phoneNumber = this.normalizeNullableString(dto.phoneNumber);
     if (dto.note !== undefined) {
       company.note = this.normalizeNullableString(dto.note);
     }
@@ -119,6 +97,8 @@ export class CompaniesService {
       companyId: company.companyId,
       name: company.name,
       registrationNumber: company.registrationNumber,
+      contactName: company.contactName,
+      phoneNumber: company.phoneNumber,
       note: company.note,
       deleteYn: company.deleteYn,
       createdBy: company.createdBy,

@@ -1,9 +1,7 @@
-import { AccessScope } from '../../identity/users/entities/user.entity';
-
+/** JWT에는 인증 주체만 담고 소속·역할·권한은 요청마다 DB에서 읽는다. */
 export interface JwtPayload {
   sub: string;
   companyId: string;
-  roleId: string;
-  deptId: string;
-  accessScope: AccessScope;
+  exp?: number;
+  iat?: number;
 }

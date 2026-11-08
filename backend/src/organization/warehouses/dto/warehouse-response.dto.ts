@@ -1,7 +1,7 @@
 export interface WarehouseResponseDto {
   companyId: string;
   warehouseId: string;
-  siteId: string | null;
+  siteId: string;
   name: string;
   deleteYn: string;
   createdBy: string;

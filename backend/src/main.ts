@@ -1,3 +1,4 @@
+/** API prefix·CORS·엄격한 DTO 검증을 설정하고 NestJS 서버를 시작한다. */
 import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { ValidationPipe } from '@nestjs/common';
@@ -22,6 +23,8 @@ async function bootstrap() {
       transform: true,
     }),
   );
+
+  app.enableShutdownHooks();
 
   await app.listen(port);
 }

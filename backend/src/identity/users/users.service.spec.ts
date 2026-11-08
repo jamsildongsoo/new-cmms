@@ -1,0 +1,94 @@
+import { Repository } from 'typeorm';
+import { UsersService } from './users.service';
+import { AccessScope, User } from './entities/user.entity';
+import { Site } from '../../organization/sites/entities/site.entity';
+import { UserContext } from '../../auth/types/user-context.type';
+
+const context = { companyId: 'CR', userId: 'admin' } as UserContext;
+
+function fixture() {
+  const user = {
+    companyId: 'CR',
+    userId: 'worker',
+    name: 'Worker',
+    siteId: 'OLD-SITE',
+    deptId: 'OLD-DEPT',
+    roleId: 'WORKER',
+    accessScope: AccessScope.OWN_DEPARTMENT,
+    deleteYn: 'N',
+  } as User;
+  const manager = {
+    findOneBy: jest.fn(async (entity: unknown, _where: unknown) =>
+      entity === Site
+        ? { name: 'Old site', deleteYn: 'Y' }
+        : { name: 'Old department', deleteYn: 'Y' },
+    ),
+    find: jest.fn(async (_entity: unknown, _options: unknown) => []),
+  };
+  const repository = {
+    manager,
+    findOneBy: jest.fn(async () => user as User | null),
+    find: jest.fn(async () => [user]),
+    create: (value: User) => value,
+    save: jest.fn(async (value: User) => value),
+  };
+  return {
+    service: new UsersService(repository as unknown as Repository<User>),
+    user,
+    manager,
+    repository,
+  };
+}
+
+describe('UsersService organization selection', () => {
+  it('keeps deleted site/department links and their names during profile changes', async () => {
+    const { service, manager } = fixture();
+    const saved = await service.update(context, 'worker', { name: 'Renamed' });
+    expect(saved).toMatchObject({
+      name: 'Renamed',
+      siteId: 'OLD-SITE',
+      deptId: 'OLD-DEPT',
+      siteName: 'Old site',
+      siteDeleted: true,
+      deptName: 'Old department',
+      deptDeleted: true,
+    });
+    for (const call of manager.findOneBy.mock.calls) {
+      expect(call[1]).not.toHaveProperty('deleteYn');
+    }
+  });
+
+  it('saves selected IDs without rejecting missing reference rows', async () => {
+    const { service, manager, repository } = fixture();
+    repository.findOneBy.mockResolvedValueOnce(null);
+    manager.findOneBy.mockResolvedValue(null as never);
+    const saved = await service.create(context, {
+      userId: 'new',
+      password: 'test-password',
+      name: 'New user',
+      siteId: 'SELECTED-SITE',
+      deptId: 'SELECTED-DEPT',
+      roleId: 'WORKER',
+      accessScope: AccessScope.OWN_SITE,
+    });
+    expect(saved.siteId).toBe('SELECTED-SITE');
+    expect(saved.deptId).toBe('SELECTED-DEPT');
+    expect(saved).not.toHaveProperty('passwordHash');
+    expect(saved).not.toHaveProperty('password');
+  });
+
+  it('scopes new selection lists to active records of the authenticated company', async () => {
+    const { service, manager } = fixture();
+    expect(await service.findOptions(context)).toEqual({
+      sites: [],
+      departments: [],
+      roles: [],
+    });
+    expect(manager.find).toHaveBeenCalledTimes(3);
+    for (const call of manager.find.mock.calls) {
+      expect(call[1]).toMatchObject({
+        where: { companyId: 'CR', deleteYn: 'N' },
+      });
+    }
+  });
+});

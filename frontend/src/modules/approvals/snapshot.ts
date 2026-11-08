@@ -1,6 +1,9 @@
 // Approval body built from a source document at request time (a snapshot,
 // not a live view). Each source module builds its own snapshot.
 export interface ApprovalDraft {
+  sourceAttachmentIds?: string[]
+  steps?: { type: 'APPROVER'; userId: string }[]
+  attachmentId?: string | null
   refModule: string
   refId: string
   title: string

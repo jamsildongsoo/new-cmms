@@ -1,10 +1,15 @@
-import { Module } from '@nestjs/common';
+import { DocumentRequest } from './entities/document-request.entity';
+import { Attachment } from '../attachments/entities/attachment.entity';
+import { Global, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { NumberSequence } from './entities/number-sequence.entity';
 import { NumberingService } from './numbering.service';
 
+@Global()
 @Module({
-  imports: [TypeOrmModule.forFeature([NumberSequence])],
+  imports: [
+    TypeOrmModule.forFeature([NumberSequence, DocumentRequest, Attachment]),
+  ],
   providers: [NumberingService],
   exports: [NumberingService],
 })

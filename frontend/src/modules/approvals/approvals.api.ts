@@ -24,8 +24,10 @@ export interface ApprovalStep {
 }
 
 export interface Approval extends AuditFields {
+  sourceAttachmentIds?: string[]
   companyId: string
   approvalId: string
+  documentNo: string
   refModule: string | null
   refId: string | null
   title: string
@@ -45,6 +47,7 @@ export interface ApprovalStepPayload {
 }
 
 export interface ApprovalPayload {
+  documentNo?: string
   refModule?: string | null
   refId?: string | null
   title: string
@@ -95,8 +98,13 @@ export async function getApproval(approvalId: string) {
   return response.data
 }
 
-export async function createApproval(payload: ApprovalCreatePayload) {
-  const response = await http.post<Approval>('/approvals', payload)
+export async function createApproval(
+  payload: ApprovalCreatePayload,
+  requestKey: string,
+) {
+  const response = await http.post<Approval>('/approvals', payload, {
+    headers: { 'Idempotency-Key': requestKey },
+  })
   return response.data
 }
 

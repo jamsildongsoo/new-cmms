@@ -1,5 +1,13 @@
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsString, Matches, Min } from 'class-validator';
+import {
+  IsInt,
+  IsOptional,
+  IsString,
+  Matches,
+  Min,
+  IsIn,
+  MaxLength,
+} from 'class-validator';
 
 export class CreateEquipmentDto {
   @IsString()
@@ -45,11 +53,19 @@ export class CreateEquipmentDto {
   @Type(() => Number)
   @IsInt()
   @Min(0)
-  period?: number | null;
+  inspectionPeriod?: number | null;
 
   @IsOptional()
   @IsString()
-  unit?: string | null;
+  inspectionUnit?: string | null;
+
+  @IsOptional()
+  @Matches(/^\d{8}$/)
+  inspectionDate?: string | null;
+
+  @IsOptional()
+  @Matches(/^\d{8}$/)
+  nextInspectionDate?: string | null;
 
   @IsOptional()
   @Type(() => Number)
@@ -68,4 +84,24 @@ export class CreateEquipmentDto {
   @IsOptional()
   @IsString()
   note?: string | null;
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  parentEquipmentId?: string | null;
+
+  @IsOptional()
+  @IsIn(['Y', 'N'])
+  pmTargetYn?: string;
+
+  @IsOptional()
+  @IsIn(['Y', 'N'])
+  permitTargetYn?: string;
+
+  @IsOptional()
+  @Matches(/^\d{8}$/)
+  legalInspectionDate?: string | null;
+
+  @IsOptional()
+  @Matches(/^\d{8}$/)
+  legalNextInspectionDate?: string | null;
 }

@@ -1,8 +1,7 @@
-import { Eye, Plus, RefreshCw } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
-import { useAuth } from '@/modules/auth'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { toMessage } from '@/shared/api/errors'
+import { printDocument } from '@/shared/lib/print'
 import { Button } from '@/shared/ui/Button'
 import { DataTable } from '@/shared/ui/DataTable'
 import { StatusBadge } from '@/shared/ui/StatusBadge'
@@ -14,22 +13,20 @@ import {
 import { formatDate } from './approvalForm'
 
 const boxes: { key: ApprovalBox; label: string }[] = [
-  { key: 'submit', label: 'Submitted' },
-  { key: 'pending', label: 'Pending' },
-  { key: 'processed', label: 'Processed' },
-  { key: 'closed', label: 'Closed' },
-  { key: 'reference', label: 'Reference' },
+  { key: 'submit', label: '상신함' },
+  { key: 'pending', label: '대기함' },
+  { key: 'processed', label: '처리함' },
+  { key: 'closed', label: '종결함' },
+  { key: 'reference', label: '참조함' },
 ]
 
 export function ApprovalListPage() {
   const navigate = useNavigate()
-  const { hasPermission } = useAuth()
   const [params, setParams] = useSearchParams()
   const requested = params.get('box')
   const activeBox: ApprovalBox =
     boxes.find((box) => box.key === requested)?.key ?? 'submit'
   const [rows, setRows] = useState<Approval[]>([])
-  const [reloadKey, setReloadKey] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -42,7 +39,7 @@ export function ApprovalListPage() {
     return () => {
       active = false
     }
-  }, [activeBox, reloadKey])
+  }, [activeBox])
 
   const startLoading = () => {
     setIsLoading(true)
@@ -61,22 +58,32 @@ export function ApprovalListPage() {
         <div className="flex shrink-0 gap-2">
           <Button
             variant="secondary"
-            onClick={() => {
-              startLoading()
-              setReloadKey((current) => current + 1)
-            }}
             disabled={isLoading}
+            onClick={() =>
+              printDocument({
+                title: '결재 목록',
+                columns: [
+                  '작성일',
+                  '문서번호',
+                  '관리번호',
+                  '제목',
+                  '상신자',
+                  '상태',
+                ],
+                rows: rows.map((row) => [
+                  formatDate(row.createdAt),
+                  row.approvalId,
+                  row.documentNo,
+                  row.title,
+                  row.submitterId,
+                  row.status,
+                ]),
+              })
+            }
           >
-            <RefreshCw className="h-4 w-4" />
-            Refresh
+            인쇄
           </Button>
-          <Button
-            onClick={() => navigate('/approvals/new')}
-            disabled={!hasPermission('approval:create')}
-          >
-            <Plus className="h-4 w-4" />
-            New
-          </Button>
+          <Button onClick={() => navigate('/approvals/new')}>신규</Button>
         </div>
       </div>
 
@@ -108,14 +115,35 @@ export function ApprovalListPage() {
       )}
 
       <DataTable<Approval>
-        gridTemplateColumns="150px 1fr 120px 90px 90px"
+        gridTemplateColumns="190px 150px 160px 1fr 120px 90px"
         columns={[
           {
             key: 'createdAt',
             label: 'Created',
             render: (row) => formatDate(row.createdAt),
           },
-          { key: 'title', label: 'Title', render: (row) => row.title },
+          {
+            key: 'systemDocumentId',
+            label: '문서번호',
+            render: (r) => r.approvalId,
+          },
+          {
+            key: 'documentNo',
+            label: '관리번호',
+            render: (row) => row.documentNo || '-',
+          },
+          {
+            key: 'title',
+            label: 'Title',
+            render: (row) => (
+              <Link
+                className="text-blue-700 underline"
+                to={`/approvals/${row.approvalId}`}
+              >
+                {row.title}
+              </Link>
+            ),
+          },
           {
             key: 'submitter',
             label: 'Submitter',
@@ -125,20 +153,6 @@ export function ApprovalListPage() {
             key: 'status',
             label: 'Status',
             render: (row) => <StatusBadge status={row.status} />,
-          },
-          {
-            key: 'actions',
-            label: 'Actions',
-            render: (row) => (
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => navigate(`/approvals/${row.approvalId}`)}
-              >
-                <Eye className="h-3 w-3" />
-                View
-              </Button>
-            ),
           },
         ]}
         rows={rows}

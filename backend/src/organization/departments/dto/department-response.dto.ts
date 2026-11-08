@@ -1,7 +1,6 @@
 export interface DepartmentResponseDto {
   companyId: string;
   deptId: string;
-  siteId: string | null;
   name: string;
   parentDeptId: string | null;
   deleteYn: string;

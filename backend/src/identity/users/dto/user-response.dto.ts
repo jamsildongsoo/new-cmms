@@ -9,6 +9,11 @@ export interface UserResponseDto {
   title: string | null;
   position: string | null;
   roleId: string;
+  siteId: string | null;
+  siteName: string | null;
+  siteDeleted: boolean;
+  deptName: string | null;
+  deptDeleted: boolean;
   deptId: string;
   accessScope: AccessScope;
   deleteYn: string;

@@ -32,6 +32,10 @@ export class UpdateUserDto {
 
   @IsOptional()
   @IsString()
+  siteId?: string;
+
+  @IsOptional()
+  @IsString()
   deptId?: string;
 
   @IsOptional()

@@ -1,18 +1,20 @@
+/** 지정 회사의 초기 관리자와 실제 Controller 권한을 준비한다. 운영 DB 적용은 명시적 명령으로만 수행한다. */
+import { InventoryService } from '../inventory/transactions/inventory.service';
+import { UserContext } from '../auth/types/user-context.type';
 import { config as loadEnv } from 'dotenv';
-import { NestFactory } from '@nestjs/core';
+import { ModulesContainer, NestFactory } from '@nestjs/core';
+import { Type } from '@nestjs/common';
 import { hash } from 'bcrypt';
 import { DataSource, Repository } from 'typeorm';
 import { AppModule } from '../app.module';
-import { AppModuleKey } from '../common/constants/modules';
-import {
-  buildPermissionCode,
-  PermissionAction,
-} from '../common/constants/permissions';
+import { findModule } from '../common/constants/modules';
+import { collectControllerPermissions } from './controller-permissions';
 import { Permission } from '../identity/permissions/entities/permission.entity';
 import { RolePermission } from '../identity/roles/entities/role-permission.entity';
 import { Role } from '../identity/roles/entities/role.entity';
 import { AccessScope, User } from '../identity/users/entities/user.entity';
 import { Company } from '../organization/companies/entities/company.entity';
+import { Site } from '../organization/sites/entities/site.entity';
 import { Department } from '../organization/departments/entities/department.entity';
 
 const PASSWORD_HASH_ROUNDS = 12;
@@ -46,15 +48,49 @@ async function bootstrapAdmin() {
     const userRepository = dataSource.getRepository(User);
 
     await upsertCompany(companyRepository, config);
+    const siteRepository = dataSource.getRepository(Site);
+    const adminSite = await siteRepository.findOneBy({
+      companyId: config.companyId,
+      siteId: 'ADMIN',
+    });
+    if (!adminSite) {
+      await siteRepository.save(
+        siteRepository.create({
+          companyId: config.companyId,
+          siteId: 'ADMIN',
+          name: 'Administration',
+          deleteYn: 'N',
+          createdBy: config.adminUserId,
+        }),
+      );
+    }
     await upsertAdminDepartment(departmentRepository, config);
     await upsertAdminRole(roleRepository, config);
-    const permissionIds = await upsertPermissions(permissionRepository, config);
+    const controllers: Type<unknown>[] = [];
+    for (const module of app.get(ModulesContainer).values())
+      for (const wrapper of module.controllers.values())
+        if (wrapper.metatype)
+          controllers.push(wrapper.metatype as Type<unknown>);
+    const permissionIds = await upsertPermissions(
+      permissionRepository,
+      config,
+      collectControllerPermissions(controllers),
+    );
     await upsertAdminRolePermissions(
       rolePermissionRepository,
       config,
       permissionIds,
     );
     await upsertAdminUser(userRepository, config);
+    await app.get(InventoryService).initializeTypes({
+      companyId: config.companyId,
+      userId: config.adminUserId,
+      roleId: ADMIN_ROLE_ID,
+      siteId: 'ADMIN',
+      deptId: ADMIN_DEPT_ID,
+      accessScope: 'COMPANY_ALL',
+      permissions: [],
+    } as UserContext);
 
     console.log('Bootstrap admin completed.');
     console.log(`Company: ${config.companyId}`);
@@ -185,8 +221,8 @@ async function upsertAdminRole(
 async function upsertPermissions(
   repository: Repository<Permission>,
   config: BootstrapConfig,
+  permissionIds: string[],
 ): Promise<string[]> {
-  const permissionIds = buildBootstrapPermissionIds();
   const existingPermissions = await repository.findBy(
     permissionIds.map((permissionId) => ({ permissionId })),
   );
@@ -225,19 +261,14 @@ async function upsertPermissions(
   return permissionIds;
 }
 
-function buildBootstrapPermissionIds(): string[] {
-  const moduleKeys = Object.values(AppModuleKey);
-  const actions = Object.values(PermissionAction);
-
-  return moduleKeys
-    .flatMap((moduleKey) =>
-      actions.map((action) => buildPermissionCode(moduleKey, action)),
-    )
-    .sort();
-}
-
 function formatPermissionName(module: string, action: string): string {
-  return `${module.replaceAll('_', ' ')} ${action}`;
+  const labels: Record<string, string> = {
+    create: '등록',
+    read: '조회',
+    update: '수정',
+    delete: '삭제',
+  };
+  return `${findModule(module)?.name ?? module} ${labels[action] ?? action}`;
 }
 
 async function upsertAdminRolePermissions(
@@ -291,6 +322,7 @@ async function upsertAdminUser(
         passwordHash: await hash(config.adminPassword, PASSWORD_HASH_ROUNDS),
         name: config.adminName,
         roleId: ADMIN_ROLE_ID,
+        siteId: 'ADMIN',
         deptId: ADMIN_DEPT_ID,
         accessScope: AccessScope.COMPANY_ALL,
         deleteYn: 'N',
@@ -306,6 +338,7 @@ async function upsertAdminUser(
 
   user.name = config.adminName;
   user.roleId = ADMIN_ROLE_ID;
+  user.siteId ??= 'ADMIN';
   user.deptId = ADMIN_DEPT_ID;
   user.accessScope = AccessScope.COMPANY_ALL;
   user.deleteYn = 'N';

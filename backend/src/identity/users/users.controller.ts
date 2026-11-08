@@ -31,6 +31,12 @@ export class UsersController {
     return this.usersService.findAll(user);
   }
 
+  @RequirePermission(AppModuleKey.USER, PermissionAction.READ)
+  @Get('options')
+  findOptions(@CurrentUser() user: UserContext) {
+    return this.usersService.findOptions(user);
+  }
+
   // Get one active user in the authenticated user's company.
   @RequirePermission(AppModuleKey.USER, PermissionAction.READ)
   @Get(':userId')

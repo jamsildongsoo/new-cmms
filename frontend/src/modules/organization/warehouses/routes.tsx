@@ -5,6 +5,12 @@ import { WarehouseListPage } from './WarehouseListPage'
 export const warehousesRoutes: RouteObject[] = [
   { path: 'warehouses', element: <WarehouseListPage /> },
   { path: 'warehouses/new', element: <WarehouseFormPage mode="create" /> },
-  { path: 'warehouses/:warehouseId', element: <WarehouseFormPage mode="view" /> },
-  { path: 'warehouses/:warehouseId/edit', element: <WarehouseFormPage mode="edit" /> },
+  {
+    path: 'warehouses/:siteId/:warehouseId',
+    element: <WarehouseFormPage mode="view" />,
+  },
+  {
+    path: 'warehouses/:siteId/:warehouseId/edit',
+    element: <WarehouseFormPage mode="edit" />,
+  },
 ]

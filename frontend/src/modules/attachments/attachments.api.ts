@@ -5,7 +5,7 @@ export interface Attachment extends AuditFields {
   companyId: string
   attachmentId: string
   refModule: string
-  refId: string
+  refId: string | null
   deleteYn: string
 }
 
@@ -20,7 +20,11 @@ export interface AttachmentItem {
   checksum: string | null
 }
 
-export async function createAttachment(refModule: string, refId: string) {
+// 회사는 서버의 인증 정보로 결정하며, 부모 문서를 식별하는 모듈명과 문서 ID만 보낸다.
+export async function createAttachment(
+  refModule: string,
+  refId: string | null,
+) {
   const response = await http.post<Attachment>('/attachments', {
     refModule,
     refId,
@@ -40,6 +44,7 @@ export async function uploadAttachmentItems(
   files: FileList,
 ) {
   const formData = new FormData()
+  // 백엔드 FilesInterceptor('files')와 같은 필드명으로 여러 파일을 전송한다.
   Array.from(files).forEach((file) => formData.append('files', file))
   const response = await http.post<AttachmentItem[]>(
     `/attachments/${attachmentId}/items`,

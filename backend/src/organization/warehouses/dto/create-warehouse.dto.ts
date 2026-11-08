@@ -1,13 +1,6 @@
-import { IsOptional, IsString } from 'class-validator';
-
+import { IsNotEmpty, IsString, MaxLength } from 'class-validator';
 export class CreateWarehouseDto {
-  @IsString()
-  warehouseId: string;
-
-  @IsOptional()
-  @IsString()
-  siteId?: string | null;
-
-  @IsString()
-  name: string;
+  @IsString() @IsNotEmpty() @MaxLength(30) warehouseId: string;
+  @IsString() @IsNotEmpty() @MaxLength(30) siteId: string;
+  @IsString() @IsNotEmpty() @MaxLength(100) name: string;
 }

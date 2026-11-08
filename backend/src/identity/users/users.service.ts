@@ -1,3 +1,4 @@
+/** 회사별 사용자·소속을 관리하고 비밀번호 해시를 응답에서 제외한다. 기준정보 선택값은 소급 변경하지 않는다. */
 import {
   BadRequestException,
   ConflictException,
@@ -7,6 +8,9 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { hash } from 'bcrypt';
 import { Repository } from 'typeorm';
+import { Site } from '../../organization/sites/entities/site.entity';
+import { Department } from '../../organization/departments/entities/department.entity';
+import { Role } from '../roles/entities/role.entity';
 import { UserContext } from '../../auth/types/user-context.type';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -30,6 +34,33 @@ export class UsersService {
     });
   }
 
+  // 선택 목록만 활성 값으로 제한한다. 저장 시 기준정보를 다시 조회하지 않는다.
+  async findOptions(userContext: UserContext) {
+    const where = { companyId: userContext.companyId, deleteYn: 'N' };
+    const [sites, departments, roles] = await Promise.all([
+      this.userRepository.manager.find(Site, {
+        where,
+        order: { siteId: 'ASC' },
+      }),
+      this.userRepository.manager.find(Department, {
+        where,
+        order: { deptId: 'ASC' },
+      }),
+      this.userRepository.manager.find(Role, {
+        where,
+        order: { roleId: 'ASC' },
+      }),
+    ]);
+    return {
+      sites: sites.map((row) => ({ id: row.siteId, name: row.name })),
+      departments: departments.map((row) => ({
+        id: row.deptId,
+        name: row.name,
+      })),
+      roles: roles.map((row) => ({ id: row.roleId, name: row.name })),
+    };
+  }
+
   async findAll(userContext: UserContext): Promise<UserResponseDto[]> {
     const users = await this.userRepository.find({
       where: {
@@ -41,7 +72,7 @@ export class UsersService {
       },
     });
 
-    return users.map((user) => this.toResponse(user));
+    return Promise.all(users.map((user) => this.toResponse(user)));
   }
 
   async findOne(
@@ -79,6 +110,7 @@ export class UsersService {
       title: validatedDto.title,
       position: validatedDto.position,
       roleId: validatedDto.roleId,
+      siteId: validatedDto.siteId,
       deptId: validatedDto.deptId,
       accessScope: validatedDto.accessScope,
       deleteYn: 'N',
@@ -122,6 +154,9 @@ export class UsersService {
     }
     if (validatedDto.roleId !== undefined) {
       user.roleId = validatedDto.roleId;
+    }
+    if (validatedDto.siteId !== undefined) {
+      user.siteId = validatedDto.siteId;
     }
     if (validatedDto.deptId !== undefined) {
       user.deptId = validatedDto.deptId;
@@ -173,6 +208,7 @@ export class UsersService {
     );
     const name = this.requireTrimmedString(createUserDto.name, 'name');
     const roleId = this.requireTrimmedString(createUserDto.roleId, 'roleId');
+    const siteId = this.requireTrimmedString(createUserDto.siteId, 'siteId');
     const deptId = this.requireTrimmedString(createUserDto.deptId, 'deptId');
     const accessScope = this.requireAccessScope(createUserDto.accessScope);
 
@@ -185,6 +221,7 @@ export class UsersService {
       title: this.normalizeNullableString(createUserDto.title),
       position: this.normalizeNullableString(createUserDto.position),
       roleId,
+      siteId,
       deptId,
       accessScope,
     };
@@ -220,6 +257,10 @@ export class UsersService {
         updateUserDto.roleId === undefined
           ? undefined
           : this.requireTrimmedString(updateUserDto.roleId, 'roleId'),
+      siteId:
+        updateUserDto.siteId === undefined
+          ? undefined
+          : this.requireTrimmedString(updateUserDto.siteId, 'siteId'),
       deptId:
         updateUserDto.deptId === undefined
           ? undefined
@@ -258,7 +299,20 @@ export class UsersService {
     return value;
   }
 
-  private toResponse(user: User): UserResponseDto {
+  private async toResponse(user: User): Promise<UserResponseDto> {
+    // 기존 연결값은 소급 변경하지 않고 삭제된 기준정보의 이름도 조회한다.
+    const [site, department] = await Promise.all([
+      user.siteId
+        ? this.userRepository.manager.findOneBy(Site, {
+            companyId: user.companyId,
+            siteId: user.siteId,
+          })
+        : null,
+      this.userRepository.manager.findOneBy(Department, {
+        companyId: user.companyId,
+        deptId: user.deptId,
+      }),
+    ]);
     return {
       companyId: user.companyId,
       userId: user.userId,
@@ -268,6 +322,11 @@ export class UsersService {
       title: user.title,
       position: user.position,
       roleId: user.roleId,
+      siteId: user.siteId,
+      siteName: site?.name ?? null,
+      siteDeleted: site?.deleteYn === 'Y',
+      deptName: department?.name ?? null,
+      deptDeleted: department?.deleteYn === 'Y',
       deptId: user.deptId,
       accessScope: user.accessScope,
       deleteYn: user.deleteYn,
