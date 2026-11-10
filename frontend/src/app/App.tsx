@@ -1,7 +1,7 @@
 import { boardRoutes } from '@/modules/boards'
 import { purchaseRoutes } from '@/modules/purchase'
 import { vendorRoutes } from '@/modules/purchase/vendor'
-import { inventoryRoutes } from '@/modules/inventory/transactions'
+import { inventoryRoutes } from '@/modules/inventory'
 import { materialRoutes } from '@/modules/inventory/material'
 import { permitRoutes } from '@/modules/maintenance/work-permit'
 import { workRequestRoutes } from '@/modules/maintenance/work-request'

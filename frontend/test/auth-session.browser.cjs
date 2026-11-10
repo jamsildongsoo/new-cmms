@@ -406,7 +406,10 @@ async function main() {
     })
   }
 }
-main().catch((error) => {
-  console.error(error)
-  process.exitCode = 1
-})
+module.exports = { CDP, until }
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error)
+    process.exitCode = 1
+  })
+}

@@ -1,3 +1,12 @@
+import { Global, Module } from '@nestjs/common';
+import { NumberingModule } from '../../numbering/numbering.module';
+import { PurchaseRequestModule } from '../../purchase/purchase-request/purchase-request.module';
+import { PurchaseOrderModule } from '../../purchase/purchase-order/purchase-order.module';
+import { InventoryModule } from './inventory.module';
+import { MonthlyClosingModule } from '../monthly-closing/monthly-closing.module';
+import { StockProcessingService } from '../stock/stock-processing.service';
+import { StockQueryService } from '../stock/stock-query.service';
+import { MonthlyClosingService } from '../monthly-closing/monthly-closing.service';
 import { Test } from '@nestjs/testing';
 import { ExecutionContext, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
@@ -26,15 +35,21 @@ import { MaterialService } from '../material/material.service';
 import { CodeValidationService } from '../../codes/code-validation.service';
 import { PurchaseRequest } from '../../purchase/purchase-request/entities/purchase-request.entity';
 import { PurchaseOrder } from '../../purchase/purchase-order/entities/purchase-order.entity';
-import { PurchaseRequestItem } from '../../purchase/common/purchase-request-item.entity';
-import { PurchaseOrderItem } from '../../purchase/common/purchase-order-item.entity';
-import { PurchaseOrderAllocation } from '../../purchase/common/purchase-order-allocation.entity';
-import { PurchaseService } from '../../purchase/common/purchase.service';
+import { PurchaseRequestItem } from '../../purchase/purchase-request/entities/purchase-request-item.entity';
+import { PurchaseOrderItem } from '../../purchase/purchase-order/entities/purchase-order-item.entity';
+import { PurchaseOrderAllocation } from '../../purchase/purchase-order/entities/purchase-order-allocation.entity';
 import { Vendor } from '../../purchase/vendor/entities/vendor.entity';
 import { VendorService } from '../../purchase/vendor/vendor.service';
 import { InventoryService } from './inventory.service';
 import { SaveInventoryDto } from './dto/inventory.dto';
-import * as inventoryEntities from './entities/inventory.entity';
+import * as transactionEntities from './entities';
+import * as stockEntities from '../stock/entities';
+import * as monthlyEntities from '../monthly-closing/entities';
+const inventoryEntities = {
+  ...transactionEntities,
+  ...stockEntities,
+  ...monthlyEntities,
+};
 
 jest.setTimeout(90000);
 const actor = {
@@ -47,8 +62,11 @@ const actor = {
   permissions: [],
 } as UserContext;
 let db: DataSource,
-  purchases: PurchaseService,
+  requestService: PurchaseRequestService,
+  orderService: PurchaseOrderService,
   inventory: InventoryService,
+  stockQueries: StockQueryService,
+  closing: MonthlyClosingService,
   dispose: () => Promise<void>;
 const entities = [
   NumberSequence,
@@ -72,8 +90,12 @@ beforeAll(async () => {
   const fixture = await postgresTestDatabase(entities);
   db = fixture.dataSource;
   dispose = fixture.close;
-  purchases = new PurchaseService(db);
-  inventory = new InventoryService(db, purchases);
+  requestService = new PurchaseRequestService(db);
+  orderService = new PurchaseOrderService(db, requestService);
+  const processing = new StockProcessingService();
+  stockQueries = new StockQueryService(db);
+  closing = new MonthlyClosingService(db, processing);
+  inventory = new InventoryService(db, orderService, processing);
 });
 afterAll(async () => {
   if (dispose) await dispose();
@@ -163,8 +185,7 @@ async function post(
 }
 async function approvedRequest(quantity: string) {
   const id = randomUUID();
-  await purchases.save(
-    'request',
+  await requestService.save(
     actor,
     id,
     {
@@ -174,32 +195,25 @@ async function approvedRequest(quantity: string) {
     },
     true,
   );
-  await purchases.assertCanSubmit('request', actor, id);
-  await purchases.sync('request', actor.companyId, id, 'P', 'owner');
-  await purchases.sync('request', actor.companyId, id, 'C', 'manager');
-  return purchases.get('request', actor, id);
+  await requestService.assertCanSubmit(actor, id);
+  await requestService.syncApprovalStatus(actor.companyId, id, 'P', 'owner');
+  await requestService.syncApprovalStatus(actor.companyId, id, 'C', 'manager');
+  return requestService.findOne(actor, id);
 }
 
 describe('Purchase and inventory SQL integration', () => {
   it('rejects repeated document UUID creation without changing the saved document', async () => {
     const id = randomUUID();
-    await purchases.save(
-      'request',
-      actor,
-      id,
-      { title: '원본', items: [] },
-      true,
-    );
+    await requestService.save(actor, id, { title: '원본', items: [] }, true);
     await expect(
-      purchases.save(
-        'request',
+      requestService.save(
         actor,
         id,
         { title: '덮어쓰기 시도', items: [] },
         true,
       ),
     ).rejects.toThrow('이미 존재');
-    expect((await purchases.get('request', actor, id)).title).toBe('원본');
+    expect((await requestService.findOne(actor, id)).title).toBe('원본');
   });
   it('manages company-wide vendors with audit fields, pagination and soft deletion', async () => {
     const vendors = new VendorService(db.getRepository(Vendor));
@@ -207,7 +221,7 @@ describe('Purchase and inventory SQL integration', () => {
     const created = await vendors.create(actor, {
       vendorId: 'V1',
       name: '공급업체',
-      registrationNo: '123-45-67890',
+      registrationNumber: '123-45-67890',
     });
     expect(created).toMatchObject({
       companyId: actor.companyId,
@@ -222,12 +236,13 @@ describe('Purchase and inventory SQL integration', () => {
     const manager = { ...actor, userId: 'manager' };
     const updated = await vendors.update(manager, 'V1', {
       name: '새 벤더명',
-      phone: '02-1234-5678',
+      phoneNumber: '02-1234-5678',
     });
     expect(updated.updatedBy).toBe('manager');
-    expect(updated.registrationNo).toBe('123-45-67890');
+    expect(updated.registrationNumber).toBe('123-45-67890');
     expect(
-      (await vendors.update(manager, 'V1', { phone: '02-9999-9999' })).name,
+      (await vendors.update(manager, 'V1', { phoneNumber: '02-9999-9999' }))
+        .name,
     ).toBe('새 벤더명');
     await expect(
       vendors.update(manager, 'V1', { name: '  ' }),
@@ -240,73 +255,117 @@ describe('Purchase and inventory SQL integration', () => {
     ).rejects.toThrow();
     await expect(vendors.get(actor, 'V1')).rejects.toThrow();
   });
-  it('selects a same-company vendor and preserves order snapshots after vendor edits and deletion', async () => {
+  it('reads current vendor details, switches vendors, and retains access after soft deletion', async () => {
     const vendors = new VendorService(db.getRepository(Vendor));
     await vendors.create(actor, {
       vendorId: 'V1',
       name: '최초 공급처',
       contactName: '원 담당자',
-      phone: '111',
+      phoneNumber: '111',
     });
     const id = randomUUID();
     const dto = {
       title: '벤더 발주',
       vendorId: 'V1',
-      supplierName: '입력값',
       orderDate: '20260301',
       items: [{ materialId: 'M1', quantity: '2', unitPrice: '10' }],
     };
-    const order = await purchases.save('order', actor, id, dto, true);
+    const order = await orderService.save(actor, id, dto, true);
     expect(order).toMatchObject({
       vendorId: 'V1',
-      supplierName: '최초 공급처',
-      supplierContactName: '원 담당자',
-      supplierPhone: '111',
-    });
-    await vendors.update(actor, 'V1', { name: '변경 공급처', phone: '222' });
-    await vendors.remove(actor, 'V1');
-    const saved = await purchases.save(
-      'order',
-      actor,
-      id,
-      {
-        ...dto,
-        supplierName: order.supplierName,
-        supplierContactName: order.supplierContactName,
-        supplierPhone: order.supplierPhone,
+      vendor: {
+        name: '최초 공급처',
+        contactName: '원 담당자',
+        phoneNumber: '111',
       },
-      false,
-    );
+    });
+    await vendors.update(actor, 'V1', {
+      name: '변경 공급처',
+      phoneNumber: '222',
+    });
+    expect(await vendors.deletionInfo(actor, 'V1')).toEqual({
+      purchaseOrderCount: 1,
+    });
+    await expect(
+      vendors.deletionInfo({ ...actor, companyId: 'OTHER' }, 'V1'),
+    ).rejects.toThrow();
+    expect((await vendors.remove(actor, 'V1')).purchaseOrderCount).toBe(1);
+    const saved = await orderService.save(actor, id, dto, false);
     expect(saved).toMatchObject({
       vendorId: 'V1',
-      supplierName: '최초 공급처',
-      supplierPhone: '111',
+      vendor: { name: '변경 공급처', phoneNumber: '222', deleteYn: 'Y' },
     });
-    await purchases.assertCanSubmit('order', actor, id);
-    expect((await purchases.options('order', actor)).vendors).toHaveLength(0);
+    expect(await orderService.findAll(actor)).toEqual([
+      expect.objectContaining({
+        vendor: expect.objectContaining({ name: '변경 공급처' }),
+      }),
+    ]);
+    const persisted = await db
+      .getRepository(PurchaseOrder)
+      .findOneByOrFail({ companyId: actor.companyId, orderId: id });
+    expect(
+      Object.keys(persisted).some((key) => key.startsWith('supplier')),
+    ).toBe(false);
+    await orderService.assertCanSubmit(actor, id);
+    expect((await orderService.options(actor)).vendors).toHaveLength(0);
     await expect(
-      purchases.save('order', actor, randomUUID(), dto, true),
+      orderService.save(actor, randomUUID(), dto, true),
     ).rejects.toThrow('벤더');
+    await vendors.create(actor, {
+      vendorId: 'V3',
+      name: '새 업체',
+      phoneNumber: '333',
+    });
+    const changed = await orderService.save(
+      actor,
+      id,
+      { ...dto, vendorId: 'V3' },
+      false,
+    );
+    expect(changed).toMatchObject({
+      vendorId: 'V3',
+      vendor: { name: '새 업체', phoneNumber: '333' },
+    });
     await vendors.create(
       { ...actor, companyId: 'OTHER' },
       { vendorId: 'V2', name: '다른 회사' },
     );
     await expect(
-      purchases.save(
-        'order',
-        actor,
-        randomUUID(),
-        { ...dto, vendorId: 'V2' },
-        true,
-      ),
+      orderService.save(actor, randomUUID(), { ...dto, vendorId: 'V2' }, true),
     ).rejects.toThrow('벤더');
+  });
+  it('rejects unregistered suppliers on save and legacy orders on submission', async () => {
+    const dto = {
+      title: '미등록 업체',
+      orderDate: '20260301',
+      items: [{ materialId: 'M1', quantity: '1', unitPrice: '10' }],
+    };
+    for (const vendorId of [undefined, null, '', 'MISSING'])
+      await expect(
+        orderService.save(actor, randomUUID(), { ...dto, vendorId }, true),
+      ).rejects.toThrow('벤더');
+    await new VendorService(db.getRepository(Vendor)).create(actor, {
+      vendorId: 'V1',
+      name: '등록 업체',
+    });
+    const id = randomUUID();
+    await orderService.save(actor, id, { ...dto, vendorId: 'V1' }, true);
+    await expect(
+      orderService.save(actor, id, { ...dto, vendorId: null }, false),
+    ).rejects.toThrow('벤더');
+    await db
+      .getRepository(PurchaseOrder)
+      .update({ companyId: actor.companyId, orderId: id }, { vendorId: null });
+    await expect(orderService.assertCanSubmit(actor, id)).rejects.toThrow(
+      '벤더',
+    );
   });
   it('stores requests without monetary fields and starts order pricing independently', async () => {
     const request = await approvedRequest('2');
     expect(request).not.toHaveProperty('totalAmount');
     expect(request.items[0]).not.toHaveProperty('unitPrice');
     expect(request.items[0]).not.toHaveProperty('amount');
-    const preview = await purchases.preview(actor, [request.requestId]);
+    const preview = await orderService.preview(actor, [request.requestId]);
     expect(preview.items[0]).toMatchObject({
       quantity: '2',
       unitPrice: null,
@@ -314,7 +373,7 @@ describe('Purchase and inventory SQL integration', () => {
     });
   });
   it('maps receipt cancellation code to an ordinary issue without changing the original receipt', async () => {
-    await inventory.periodAction(actor, '202603', 'open');
+    await closing.periodAction(actor, '202603', 'open');
     const receipt = await post('GENERAL_IN', '4', '10');
     const options = await inventory.options(actor);
     expect(
@@ -327,14 +386,14 @@ describe('Purchase and inventory SQL integration', () => {
     expect(
       (await inventory.get(actor, receipt.inventoryDocumentId)).status,
     ).toBe('C');
-    expect((await inventory.balances(actor)).sites[0]).toMatchObject({
+    expect((await stockQueries.balances(actor)).sites[0]).toMatchObject({
       quantity: '0.000000',
       amount: '0',
     });
     await expect(post('RECEIPT_CANCEL_OUT', '1', '0')).rejects.toThrow();
   });
   it('keeps documents tenant-bound, owner-only while draft, and immutable after posting', async () => {
-    await inventory.periodAction(actor, '202603', 'open');
+    await closing.periodAction(actor, '202603', 'open');
     const draft = await stock('GENERAL_IN', '3');
     const otherCompany = { ...actor, companyId: 'OTHER' };
     const otherOwner = { ...actor, userId: 'other' };
@@ -350,13 +409,13 @@ describe('Purchase and inventory SQL integration', () => {
     ).rejects.toThrow();
     await inventory.confirm(actor, draft.inventoryDocumentId);
     await inventory.confirm(actor, draft.inventoryDocumentId);
-    expect((await inventory.balances(actor)).sites[0].quantity).toBe(
+    expect((await stockQueries.balances(actor)).sites[0].quantity).toBe(
       '3.000000',
     );
     await expect(
       inventory.remove(actor, draft.inventoryDocumentId),
     ).rejects.toThrow();
-    await inventory.periodAction(actor, '202603', 'close');
+    await closing.periodAction(actor, '202603', 'close');
     const blocked = await stock('GENERAL_IN', '2');
     await expect(
       inventory.confirm(actor, blocked.inventoryDocumentId),
@@ -364,7 +423,7 @@ describe('Purchase and inventory SQL integration', () => {
     expect(
       (await inventory.get(actor, blocked.inventoryDocumentId)).status,
     ).toBe('D');
-    expect((await inventory.balances(actor)).sites[0].quantity).toBe(
+    expect((await stockQueries.balances(actor)).sites[0].quantity).toBe(
       '3.000000',
     );
   });
@@ -375,7 +434,7 @@ describe('Purchase and inventory SQL integration', () => {
     );
     await materials.update(actor, 'M1', { baseUnit: 'BOX' });
     await materials.update(actor, 'M1', { baseUnit: 'EA' });
-    await inventory.periodAction(actor, '202603', 'open');
+    await closing.periodAction(actor, '202603', 'open');
     await post('GENERAL_IN', '2');
     await expect(
       materials.update(actor, 'M1', { baseUnit: 'BOX' }),
@@ -397,13 +456,17 @@ describe('Purchase and inventory SQL integration', () => {
     const a = await approvedRequest('10'),
       b = await approvedRequest('5');
     const ids = [a.requestId, b.requestId];
-    const preview = await purchases.preview(actor, ids);
+    const preview = await orderService.preview(actor, ids);
     expect(preview.items[0].quantity).toBe('15');
     expect(preview.hasLinkedOrders).toBe(false);
+    await new VendorService(db.getRepository(Vendor)).create(actor, {
+      vendorId: 'DEFAULT',
+      name: '공급처',
+    });
     const dto = {
       title: '병합 발주',
       orderDate: '20260302',
-      supplierName: '공급처',
+      vendorId: 'DEFAULT',
       requestIds: ids,
       items: preview.items.map((i) => ({
         itemId: randomUUID(),
@@ -413,19 +476,18 @@ describe('Purchase and inventory SQL integration', () => {
       })),
     };
     const id = randomUUID(),
-      saved = await purchases.save('order', actor, id, dto, true);
+      saved = await orderService.save(actor, id, dto, true);
     expect(saved.allocations.map((a) => a.quantity).sort()).toEqual([
       '10.000000',
       '5.000000',
     ]);
     expect(saved.totalAmount).toBe('180');
-    expect((await purchases.preview(actor, ids)).message).toContain(
+    expect((await orderService.preview(actor, ids)).message).toContain(
       '기존 연결',
     );
-    await purchases.save('order', actor, randomUUID(), dto, true);
+    await orderService.save(actor, randomUUID(), dto, true);
     await expect(
-      purchases.save(
-        'order',
+      orderService.save(
         actor,
         randomUUID(),
         { ...dto, items: [{ ...dto.items[0], quantity: '14' }] },
@@ -433,23 +495,26 @@ describe('Purchase and inventory SQL integration', () => {
       ),
     ).rejects.toThrow('수량');
     await expect(
-      purchases.get('request', { ...actor, companyId: 'OTHER' }, a.requestId),
+      requestService.findOne({ ...actor, companyId: 'OTHER' }, a.requestId),
     ).rejects.toThrow();
     await expect(
-      purchases.save('order', { ...actor, userId: 'other' }, id, dto, false),
+      orderService.save({ ...actor, userId: 'other' }, id, dto, false),
     ).rejects.toThrow('작성자');
   });
   it('supports standalone orders, full PO receipt, exact source prices, and duplicate/partial receipt rejection', async () => {
+    await new VendorService(db.getRepository(Vendor)).create(actor, {
+      vendorId: 'DEFAULT',
+      name: '공급처',
+    });
     const orderId = randomUUID();
-    await purchases.save(
-      'order',
+    await orderService.save(
       actor,
       orderId,
       {
         title: '단독 발주',
         documentNo: 'PO-01',
         orderDate: '20260301',
-        supplierName: '공급처',
+        vendorId: 'DEFAULT',
         items: [
           {
             itemId: randomUUID(),
@@ -461,11 +526,21 @@ describe('Purchase and inventory SQL integration', () => {
       },
       true,
     );
-    await purchases.assertCanSubmit('order', actor, orderId);
-    await purchases.sync('order', actor.companyId, orderId, 'P', 'owner');
-    await purchases.sync('order', actor.companyId, orderId, 'C', 'manager');
+    await orderService.assertCanSubmit(actor, orderId);
+    await orderService.syncApprovalStatus(
+      actor.companyId,
+      orderId,
+      'P',
+      'owner',
+    );
+    await orderService.syncApprovalStatus(
+      actor.companyId,
+      orderId,
+      'C',
+      'manager',
+    );
     const ref = await inventory.reference(actor, 'purchase_order', orderId);
-    await inventory.periodAction(actor, '202603', 'open');
+    await closing.periodAction(actor, '202603', 'open');
     const items = ref.items.map((i) => ({
       itemId: randomUUID(),
       materialId: i.materialId,
@@ -487,7 +562,7 @@ describe('Purchase and inventory SQL integration', () => {
       }),
     ).rejects.toThrow('수량');
     await inventory.confirm(actor, row.inventoryDocumentId);
-    expect((await inventory.balances(actor)).sites[0]).toMatchObject({
+    expect((await stockQueries.balances(actor)).sites[0]).toMatchObject({
       quantity: '10.000000',
       amount: '120',
     });
@@ -499,11 +574,11 @@ describe('Purchase and inventory SQL integration', () => {
     await expect(
       inventory.confirm(actor, duplicate.inventoryDocumentId),
     ).rejects.toThrow('이미 입고');
-    expect((await inventory.balances(actor)).sites[0].amount).toBe('120');
+    expect((await stockQueries.balances(actor)).sites[0].amount).toBe('120');
   });
   it('uses multiple open months, posting-date valuation, warehouse-only transfers and transaction rollback', async () => {
-    await inventory.periodAction(actor, '202603', 'open');
-    await inventory.periodAction(actor, '202604', 'open');
+    await closing.periodAction(actor, '202603', 'open');
+    await closing.periodAction(actor, '202604', 'open');
     await post('GENERAL_IN', '10', '10');
     await post('GENERAL_IN', '10', '30', { warehouseId: 'W2' });
     await post('TRANSFER', '3', '0', {
@@ -512,7 +587,7 @@ describe('Purchase and inventory SQL integration', () => {
       postingDate: '20260302',
     });
     await post('GENERAL_OUT', '2', '0', { postingDate: '20260402' });
-    const balances = await inventory.balances(actor);
+    const balances = await stockQueries.balances(actor);
     expect(balances.sites[0]).toMatchObject({
       quantity: '18.000000',
       amount: '360',
@@ -525,8 +600,8 @@ describe('Purchase and inventory SQL integration', () => {
     expect(
       (await inventory.get(actor, shortage.inventoryDocumentId)).status,
     ).toBe('D');
-    expect((await inventory.balances(actor)).sites[0].amount).toBe('360');
-    const march = await inventory.periodAction(actor, '202603', 'close');
+    expect((await stockQueries.balances(actor)).sites[0].amount).toBe('360');
+    const march = await closing.periodAction(actor, '202603', 'close');
     expect(march.sites[0]).toMatchObject({
       openingQuantity: '0.000000',
       closingQuantity: '20.000000',
@@ -536,7 +611,7 @@ describe('Purchase and inventory SQL integration', () => {
     await expect(
       inventory.confirm(actor, locked.inventoryDocumentId),
     ).rejects.toThrow('마감');
-    const april = await inventory.periodAction(actor, '202604', 'close');
+    const april = await closing.periodAction(actor, '202604', 'close');
     expect(april.sites[0]).toMatchObject({
       openingQuantity: '20.000000',
       openingAmount: '400',
@@ -545,8 +620,8 @@ describe('Purchase and inventory SQL integration', () => {
     });
   });
   it('separates cross-site dispatch and receipt by destination scope and carries transit over month end', async () => {
-    await inventory.periodAction(actor, '202603', 'open');
-    await inventory.periodAction(actor, '202604', 'open');
+    await closing.periodAction(actor, '202603', 'open');
+    await closing.periodAction(actor, '202604', 'open');
     await post('GENERAL_IN', '10', '10');
     const sender = {
       ...actor,
@@ -583,7 +658,7 @@ describe('Purchase and inventory SQL integration', () => {
         out.inventoryDocumentId,
       ),
     ).rejects.toThrow('scope');
-    const march = await inventory.periodAction(actor, '202603', 'close');
+    const march = await closing.periodAction(actor, '202603', 'close');
     expect(march.transits[0]).toMatchObject({
       closingQuantity: '4.000000',
       closingAmount: '40',
@@ -616,7 +691,7 @@ describe('Purchase and inventory SQL integration', () => {
       receiver,
     );
     expect((await inventory.incoming(receiver)).length).toBe(0);
-    const april = await inventory.periodAction(actor, '202604', 'close');
+    const april = await closing.periodAction(actor, '202604', 'close');
     expect(april.sites.find((s) => s.siteId === 'S2')).toMatchObject({
       closingQuantity: '4.000000',
       closingAmount: '40',
@@ -628,22 +703,22 @@ describe('Purchase and inventory SQL integration', () => {
     });
   });
   it('unlocks a closed month, revalues later issues and regenerates opening balances in sequence', async () => {
-    await inventory.periodAction(actor, '202603', 'open');
-    await inventory.periodAction(actor, '202604', 'open');
+    await closing.periodAction(actor, '202603', 'open');
+    await closing.periodAction(actor, '202604', 'open');
     await post('GENERAL_IN', '10', '10');
     await post('GENERAL_OUT', '5', '0', { postingDate: '20260402' });
-    await inventory.periodAction(actor, '202603', 'close');
-    await inventory.periodAction(actor, '202604', 'close');
-    await inventory.periodAction(actor, '202603', 'unlock');
+    await closing.periodAction(actor, '202603', 'close');
+    await closing.periodAction(actor, '202604', 'close');
+    await closing.periodAction(actor, '202603', 'unlock');
     await post('GENERAL_IN', '10', '30', { postingDate: '20260310' });
-    expect(
-      (await inventory.monthly(actor, '202604')).period?.summaryDirty,
-    ).toBe(true);
+    expect((await closing.monthly(actor, '202604')).period?.summaryDirty).toBe(
+      true,
+    );
     await expect(
-      inventory.periodAction(actor, '202604', 'close'),
+      closing.periodAction(actor, '202604', 'close'),
     ).rejects.toThrow('전월');
-    await inventory.periodAction(actor, '202603', 'close');
-    const april = await inventory.periodAction(actor, '202604', 'close');
+    await closing.periodAction(actor, '202603', 'close');
+    const april = await closing.periodAction(actor, '202604', 'close');
     expect(april.sites[0]).toMatchObject({
       openingQuantity: '20.000000',
       openingAmount: '400',
@@ -656,25 +731,16 @@ describe('Purchase and inventory SQL integration', () => {
 
 it('connects server-numbered requests, merged order, full receipt and renamed monthly stock entities', async () => {
   const numbering = new NumberingService(db);
-  const requests = new PurchaseRequestController(
-    numbering,
-    new PurchaseRequestService(purchases),
-  );
-  const orders = new PurchaseOrderController(
-    numbering,
-    new PurchaseOrderService(purchases),
-    purchases,
-  );
+  const requests = new PurchaseRequestController(numbering, requestService);
+  const orders = new PurchaseOrderController(numbering, orderService);
   const transactions = new InventoryController(numbering, inventory);
-  const attachment = await db
-    .getRepository(Attachment)
-    .save({
-      companyId: actor.companyId,
-      attachmentId: randomUUID(),
-      refModule: 'purchase_request',
-      refId: null,
-      createdBy: actor.userId,
-    });
+  const attachment = await db.getRepository(Attachment).save({
+    companyId: actor.companyId,
+    attachmentId: randomUUID(),
+    refModule: 'purchase_request',
+    refId: null,
+    createdBy: actor.userId,
+  });
   const key = randomUUID();
   const requestDto = {
     requestId: randomUUID(),
@@ -705,15 +771,13 @@ it('connects server-numbered requests, merged order, full receipt and renamed mo
     randomUUID(),
   );
   for (const row of [first, second]) {
-    await purchases.sync(
-      'request',
+    await requestService.syncApprovalStatus(
       actor.companyId,
       row.requestId!,
       'P',
       actor.userId,
     );
-    await purchases.sync(
-      'request',
+    await requestService.syncApprovalStatus(
       actor.companyId,
       row.requestId!,
       'C',
@@ -721,14 +785,19 @@ it('connects server-numbered requests, merged order, full receipt and renamed mo
     );
   }
   const requestIds = [first.requestId!, second.requestId!];
-  const preview = await purchases.preview(actor, requestIds);
+  const preview = await orderService.preview(actor, requestIds);
   expect(preview.items).toHaveLength(1);
+  await new VendorService(db.getRepository(Vendor)).create(actor, {
+    vendorId: 'DEFAULT',
+    name: '공급처',
+  });
   const order = await orders.create(
     actor,
     {
       orderId: randomUUID(),
       documentNo: '',
       title: '병합 발주',
+      vendorId: 'DEFAULT',
       requestIds,
       items: preview.items.map((i) => ({
         itemId: i.itemId,
@@ -744,21 +813,19 @@ it('connects server-numbered requests, merged order, full receipt and renamed mo
   expect(new Set(order.allocations.map((a) => a.requestId))).toEqual(
     new Set(requestIds),
   );
-  await purchases.sync(
-    'order',
+  await orderService.syncApprovalStatus(
     actor.companyId,
     order.orderId!,
     'P',
     actor.userId,
   );
-  await purchases.sync(
-    'order',
+  await orderService.syncApprovalStatus(
     actor.companyId,
     order.orderId!,
     'C',
     actor.userId,
   );
-  await inventory.periodAction(actor, '202603', 'open');
+  await closing.periodAction(actor, '202603', 'open');
   const source = await inventory.reference(
     actor,
     'purchase_order',
@@ -791,7 +858,7 @@ it('connects server-numbered requests, merged order, full receipt and renamed mo
   await transactions.confirm(actor, receipt.inventoryDocumentId);
   const posted = await inventory.get(actor, receipt.inventoryDocumentId);
   expect(posted.postingSequence).toBe('1');
-  await inventory.periodAction(actor, '202603', 'close');
+  await closing.periodAction(actor, '202603', 'close');
   const balance = await db
     .getRepository(inventoryEntities.MonthlyStockBalance)
     .findOneByOrFail({ companyId: actor.companyId });
@@ -819,13 +886,12 @@ it('validates HTTP create payloads and accepts numbered purchase references with
       { provide: NumberingService, useValue: new NumberingService(db) },
       {
         provide: PurchaseRequestService,
-        useValue: new PurchaseRequestService(purchases),
+        useValue: requestService,
       },
       {
         provide: PurchaseOrderService,
-        useValue: new PurchaseOrderService(purchases),
+        useValue: orderService,
       },
-      { provide: PurchaseService, useValue: purchases },
       { provide: InventoryService, useValue: inventory },
     ],
   })
@@ -877,15 +943,13 @@ it('validates HTTP create payloads and accepts numbered purchase references with
       .set('Idempotency-Key', randomUUID())
       .send({ ...payload, companyId: 'OTHER' })
       .expect(400);
-    await purchases.sync(
-      'request',
+    await requestService.syncApprovalStatus(
       actor.companyId,
       requestId,
       'P',
       actor.userId,
     );
-    await purchases.sync(
-      'request',
+    await requestService.syncApprovalStatus(
       actor.companyId,
       requestId,
       'C',
@@ -900,11 +964,16 @@ it('validates HTTP create payloads and accepts numbered purchase references with
         items: { itemId: string; materialId: string; quantity: string }[];
       }
     ).items;
+    await new VendorService(db.getRepository(Vendor)).create(actor, {
+      vendorId: 'DEFAULT',
+      name: '공급처',
+    });
     const orderResponse = await client
       .post('/purchase-order')
       .set('Idempotency-Key', randomUUID())
       .send({
         title: 'HTTP 병합 발주',
+        vendorId: 'DEFAULT',
         requestIds: [requestId],
         items: previewItems.map((i) => ({
           itemId: i.itemId,
@@ -916,8 +985,18 @@ it('validates HTTP create payloads and accepts numbered purchase references with
       .expect(201);
     const orderId = (orderResponse.body as { orderId: string }).orderId;
     expect(orderId).toMatch(/^PURORD-/);
-    await purchases.sync('order', actor.companyId, orderId, 'P', actor.userId);
-    await purchases.sync('order', actor.companyId, orderId, 'C', actor.userId);
+    await orderService.syncApprovalStatus(
+      actor.companyId,
+      orderId,
+      'P',
+      actor.userId,
+    );
+    await orderService.syncApprovalStatus(
+      actor.companyId,
+      orderId,
+      'C',
+      actor.userId,
+    );
     const source = await inventory.reference(actor, 'purchase_order', orderId);
     const receiptResponse = await client
       .post('/inventory-document')
@@ -947,5 +1026,57 @@ it('validates HTTP create payloads and accepts numbered purchase references with
     );
   } finally {
     await app.close();
+  }
+});
+
+it('wires request, order, transactions, stock and monthly closing modules with their actual providers', async () => {
+  @Global()
+  @Module({
+    providers: [{ provide: DataSource, useValue: db }],
+    exports: [DataSource],
+  })
+  class FixtureDatabaseModule {}
+  const module = await Test.createTestingModule({
+    imports: [
+      FixtureDatabaseModule,
+      NumberingModule,
+      PurchaseRequestModule,
+      PurchaseOrderModule,
+      InventoryModule,
+      MonthlyClosingModule,
+    ],
+  }).compile();
+  try {
+    const requests = module.get(PurchaseRequestService);
+    const orders = module.get(PurchaseOrderService);
+    const transactions = module.get(InventoryService);
+    const months = module.get(MonthlyClosingService);
+    const request = await requests.create(actor, {
+      requestId: randomUUID(),
+      title: '모듈 연결 요청',
+      items: [{ materialId: 'M1', quantity: '2' }],
+    });
+    await requests.syncApprovalStatus(
+      actor.companyId,
+      request.requestId,
+      'P',
+      actor.userId,
+    );
+    await requests.syncApprovalStatus(
+      actor.companyId,
+      request.requestId,
+      'C',
+      actor.userId,
+    );
+    expect(
+      (await orders.preview(actor, [request.requestId])).items[0].quantity,
+    ).toBe('2');
+    expect(await requests.options(actor)).not.toHaveProperty('vendors');
+    await months.periodAction(actor, '202603', 'open');
+    expect((await transactions.options(actor)).periods).toEqual([
+      expect.objectContaining({ yearMonth: '202603', locked: false }),
+    ]);
+  } finally {
+    await module.close();
   }
 });

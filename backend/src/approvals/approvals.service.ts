@@ -1,5 +1,6 @@
 /** 결재 참여자·현재 순번·owner+D를 검사한다. 결재 결과 저장과 원본 상태 동기화는 순차 처리한다. */
-import { PurchaseService } from '../purchase/common/purchase.service';
+import { PurchaseOrderService } from '../purchase/purchase-order/purchase-order.service';
+import { PurchaseRequestService } from '../purchase/purchase-request/purchase-request.service';
 import { WorkPermitService } from '../maintenance/work-permit/work-permit.service';
 import { WorkRequestService } from '../maintenance/work-request/work-request.service';
 import { WorkOrderService } from '../maintenance/work-order/work-order.service';
@@ -54,7 +55,8 @@ export class ApprovalsService {
     private readonly workOrderService: WorkOrderService,
     private readonly workRequestService: WorkRequestService,
     private readonly workPermitService: WorkPermitService,
-    private readonly purchases: PurchaseService,
+    private readonly purchaseRequests: PurchaseRequestService,
+    private readonly purchaseOrders: PurchaseOrderService,
   ) {}
 
   async searchUsers(
@@ -408,11 +410,11 @@ export class ApprovalsService {
       (approval.refModule === 'purchase_request' ||
         approval.refModule === 'purchase_order')
     )
-      await this.purchases.assertCanSubmit(
-        approval.refModule === 'purchase_request' ? 'request' : 'order',
-        userContext,
-        approval.refId,
-      );
+      await (
+        approval.refModule === 'purchase_request'
+          ? this.purchaseRequests
+          : this.purchaseOrders
+      ).assertCanSubmit(userContext, approval.refId);
 
     if (approval.refModule === 'work_permit' && approval.refId) {
       const locked = await this.workPermitService.approvalDraft(
@@ -624,8 +626,11 @@ export class ApprovalsService {
         approval.refModule === 'purchase_request' ||
         approval.refModule === 'purchase_order'
       ) {
-        await this.purchases.sync(
-          approval.refModule === 'purchase_request' ? 'request' : 'order',
+        await (
+          approval.refModule === 'purchase_request'
+            ? this.purchaseRequests
+            : this.purchaseOrders
+        ).syncApprovalStatus(
           approval.companyId,
           approval.refId,
           approval.status,

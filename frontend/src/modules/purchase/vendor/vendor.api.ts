@@ -2,10 +2,10 @@ import { http } from '@/shared/api/http'
 import type { AuditFields } from '@/shared/types/audit'
 export interface VendorFields {
   name: string
-  registrationNo: string | null
-  representative: string | null
+  registrationNumber: string | null
+  representativeName: string | null
   contactName: string | null
-  phone: string | null
+  phoneNumber: string | null
   email: string | null
   address: string | null
   note: string | null
@@ -32,6 +32,12 @@ export const vendorApi = {
   update: async (id: string, fields: VendorFields) =>
     (await http.patch<Vendor>(`/vendor/${encodeURIComponent(id)}`, fields))
       .data,
+  deletionInfo: async (id: string) =>
+    (
+      await http.get<{ purchaseOrderCount: number }>(
+        `/vendor/${encodeURIComponent(id)}/deletion-info`,
+      )
+    ).data,
   remove: async (id: string) =>
     (await http.delete(`/vendor/${encodeURIComponent(id)}`)).data,
 }

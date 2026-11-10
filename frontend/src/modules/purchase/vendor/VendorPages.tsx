@@ -12,20 +12,20 @@ import { Textarea } from '@/shared/ui/Textarea'
 import { vendorApi, type Vendor, type VendorFields } from './vendor.api'
 const fields = [
   ['name', '벤더명', 150],
-  ['registrationNo', '사업자번호', 50],
-  ['representative', '대표자', 100],
+  ['registrationNumber', '사업자번호', 50],
+  ['representativeName', '대표자', 100],
   ['contactName', '담당자', 100],
-  ['phone', '연락처', 100],
+  ['phoneNumber', '연락처', 100],
   ['email', '이메일', 200],
   ['address', '주소', 300],
 ] as const
 const emptyForm = {
   vendorId: '',
   name: '',
-  registrationNo: '',
-  representative: '',
+  registrationNumber: '',
+  representativeName: '',
   contactName: '',
-  phone: '',
+  phoneNumber: '',
   email: '',
   address: '',
   note: '',
@@ -89,9 +89,9 @@ export function VendorListPage() {
                 rows: result.items.map((r) => [
                   r.vendorId,
                   r.name,
-                  r.registrationNo,
+                  r.registrationNumber,
                   r.contactName,
-                  r.phone,
+                  r.phoneNumber,
                   r.email,
                 ]),
               })
@@ -148,12 +148,12 @@ export function VendorListPage() {
           },
           { key: 'name', label: '벤더명', render: (r) => r.name },
           {
-            key: 'registrationNo',
+            key: 'registrationNumber',
             label: '사업자번호',
-            render: (r) => r.registrationNo,
+            render: (r) => r.registrationNumber,
           },
           { key: 'contactName', label: '담당자', render: (r) => r.contactName },
-          { key: 'phone', label: '연락처', render: (r) => r.phone },
+          { key: 'phoneNumber', label: '연락처', render: (r) => r.phoneNumber },
         ]}
       />
       <div className="flex items-center justify-end gap-2 text-xs">
@@ -245,15 +245,16 @@ function VendorEditor({ id }: { id?: string }) {
     }
   }
   async function remove() {
-    if (
-      !id ||
-      busy ||
-      !window.confirm('벤더를 삭제하시겠습니까? 기존 발주 내용은 유지됩니다.')
-    )
-      return
+    if (!id || busy) return
     setBusy(true)
     setError('')
     try {
+      const { purchaseOrderCount } = await vendorApi.deletionInfo(id)
+      const message =
+        purchaseOrderCount > 0
+          ? `이 벤더로 등록된 발주가 ${purchaseOrderCount}건 있습니다. 기존 발주 정보는 유지됩니다. 벤더를 삭제하시겠습니까?`
+          : '벤더를 삭제하시겠습니까?'
+      if (!window.confirm(message)) return
       await vendorApi.remove(id)
       navigate('/vendor')
     } catch (e) {

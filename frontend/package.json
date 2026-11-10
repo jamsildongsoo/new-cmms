@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "node test/auth-session.browser.cjs"
+    "test": "node test/auth-session.browser.cjs",
+    "test:purchase-inventory": "node test/purchase-inventory.browser.cjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",

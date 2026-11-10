@@ -7,16 +7,14 @@ import {
   qty,
   rounded,
 } from '../../common/utils/stock-decimal';
-import {
-  InventoryDocument,
-  InventoryItem,
-  StockBalance,
-  StockLedger,
-  StockValuation,
-  StockInTransit,
-  MonthlyStockBalance,
-  MonthlyStockValuation,
-} from './entities/inventory.entity';
+import { InventoryDocument } from '../transactions/entities/inventory-document.entity';
+import { InventoryItem } from '../transactions/entities/inventory-item.entity';
+import { StockBalance } from './entities/stock-balance.entity';
+import { StockLedger } from './entities/stock-ledger.entity';
+import { StockValuation } from './entities/stock-valuation.entity';
+import { StockInTransit } from './entities/stock-in-transit.entity';
+import { MonthlyStockBalance } from '../monthly-closing/entities/monthly-stock-balance.entity';
+import { MonthlyStockValuation } from '../monthly-closing/entities/monthly-stock-valuation.entity';
 export const STOCK_KINDS = [
   'GENERAL_IN',
   'PURCHASE_IN',

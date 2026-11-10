@@ -4,14 +4,12 @@ import { validate } from 'class-validator';
 import { REQUIRED_PERMISSIONS_KEY } from '../../auth/decorators/require-permissions.decorator';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
-import {
-  InventoryController,
-  StockStatusController,
-  StockLedgerController,
-  MonthlyClosingController,
-} from './inventory.controller';
+import { InventoryController } from './inventory.controller';
+import { StockStatusController } from '../stock/stock-status.controller';
+import { StockLedgerController } from '../stock/stock-ledger.controller';
+import { MonthlyClosingController } from '../monthly-closing/monthly-closing.controller';
 import { SaveInventoryDto } from './dto/inventory.dto';
-import { PurchaseSaveDto } from '../../purchase/common/purchase.dto';
+import { PurchaseOrderSaveDto } from '../../purchase/purchase-order/dto/purchase-order.dto';
 import { CreatePurchaseRequestDto } from '../../purchase/purchase-request/dto/create-purchase-request.dto';
 import { VendorController } from '../../purchase/vendor/vendor.controller';
 import { CreateVendorDto } from '../../purchase/vendor/dto/vendor.dto';
@@ -33,6 +31,7 @@ it.each([
   ['create', 'create'],
   ['update', 'update'],
   ['remove', 'delete'],
+  ['deletionInfo', 'delete'],
 ])('guards vendor %s with its own module permission', (method, action) => {
   expect(
     Reflect.getMetadata(
@@ -108,7 +107,7 @@ it('rejects incoming inventory company/status/processing-kind/audit overrides', 
 it('allows optional purchase order documentNo', async () => {
   expect(
     await validate(
-      plainToInstance(PurchaseSaveDto, {
+      plainToInstance(PurchaseOrderSaveDto, {
         title: '구매발주',
         items: [{ materialId: 'M1', quantity: '1', unitPrice: null }],
       }),
@@ -140,4 +139,60 @@ it('accepts a quantity-only request and rejects prices and amounts in request pa
   expect(JSON.stringify(errors)).toContain('unitPrice');
   expect(JSON.stringify(errors)).toContain('amount');
   expect(errors.some((e) => e.property === 'totalAmount')).toBe(true);
+});
+
+it('rejects removed supplier fields on purchase order payloads', async () => {
+  const removed = [
+    'supplierName',
+    'supplierRegistrationNo',
+    'supplierContactName',
+    'supplierPhone',
+    'supplierEmail',
+  ];
+  const errors = await validate(
+    plainToInstance(PurchaseOrderSaveDto, {
+      title: '발주',
+      vendorId: 'V1',
+      items: [],
+      ...Object.fromEntries(removed.map((key) => [key, 'legacy'])),
+    }),
+    { whitelist: true, forbidNonWhitelisted: true },
+  );
+  expect(errors.map((error) => error.property).sort()).toEqual(removed.sort());
+});
+
+it('keeps request-only and order-only header fields at separate API boundaries', async () => {
+  const settings = { whitelist: true, forbidNonWhitelisted: true };
+  const orderFields = {
+    vendorId: 'V1',
+    orderDate: '20261110',
+    expectedDeliveryDate: '20261111',
+    deliveryLocation: '창고',
+    currency: 'KRW',
+    requestIds: [],
+  };
+  const requestErrors = await validate(
+    plainToInstance(CreatePurchaseRequestDto, {
+      title: '요청',
+      items: [],
+      ...orderFields,
+    }),
+    settings,
+  );
+  expect(requestErrors.map((error) => error.property).sort()).toEqual(
+    Object.keys(orderFields).sort(),
+  );
+  const orderErrors = await validate(
+    plainToInstance(PurchaseOrderSaveDto, {
+      title: '발주',
+      items: [],
+      requestDate: '20261110',
+      requiredDate: '20261111',
+    }),
+    settings,
+  );
+  expect(orderErrors.map((error) => error.property).sort()).toEqual([
+    'requestDate',
+    'requiredDate',
+  ]);
 });

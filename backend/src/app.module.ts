@@ -1,3 +1,4 @@
+import { MonthlyClosingModule } from './inventory/monthly-closing/monthly-closing.module';
 /** 한 애플리케이션의 단일 PostgreSQL 연결과 업무 모듈을 구성한다. 고객별 DB 라우팅은 제공하지 않는다. */
 import { BoardsModule } from './boards/boards.module';
 import { InventoryModule } from './inventory/transactions/inventory.module';
@@ -16,6 +17,7 @@ import { CodesModule } from './codes/codes.module';
 import { appConfig } from './config/app.config';
 import { databaseConfig } from './config/database.config';
 import { validateEnv } from './config/env.schema';
+import { ENV_FILE_PATH } from './config/env-file';
 import { jwtConfig } from './config/jwt.config';
 import { storageConfig } from './config/storage.config';
 import { IdentityModule } from './identity/identity.module';
@@ -32,6 +34,7 @@ import { OrganizationModule } from './organization/organization.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      envFilePath: ENV_FILE_PATH,
       load: [appConfig, databaseConfig, jwtConfig, storageConfig],
       validate: validateEnv,
     }),
@@ -68,6 +71,7 @@ import { OrganizationModule } from './organization/organization.module';
     MaterialModule,
     VendorModule,
     InventoryModule,
+    MonthlyClosingModule,
     PreventiveMaintenanceModule,
     WorkRequestModule,
     WorkOrderModule,

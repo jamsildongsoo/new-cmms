@@ -1,7 +1,7 @@
 import { IsOptional } from 'class-validator';
 import { MaxLength } from 'class-validator';
 import { IsString } from 'class-validator';
-import { PurchaseSaveDto } from '../../common/purchase.dto';
-export class CreatePurchaseOrderDto extends PurchaseSaveDto {
+import { PurchaseOrderSaveDto } from './purchase-order.dto';
+export class CreatePurchaseOrderDto extends PurchaseOrderSaveDto {
   @IsOptional() @IsString() @MaxLength(50) orderId: string;
 }

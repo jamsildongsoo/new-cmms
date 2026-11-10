@@ -1,4 +1,4 @@
-/** 회사 단위 잠금 아래 재고 확정·평가 재생·월 마감을 처리하고 전표 scope와 작성자 조건을 검사한다. */
+/** 재고 거래의 저장·원본 참조·확정을 관리하고 확정 트랜잭션 안에서 재고를 재생한다. */
 import {
   BadRequestException,
   ConflictException,
@@ -7,14 +7,10 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { DataSource, EntityManager, EntityTarget, IsNull } from 'typeorm';
+import { DataSource, EntityManager, IsNull } from 'typeorm';
 import { UserContext } from '../../auth/types/user-context.type';
 import { applyDocumentScope } from '../../common/utils/document-scope.util';
-import {
-  businessDate,
-  monthAfter,
-  monthValue,
-} from '../../common/utils/posting-date';
+import { businessDate } from '../../common/utils/posting-date';
 import {
   decimal,
   lineAmount,
@@ -26,35 +22,27 @@ import { Site } from '../../organization/sites/entities/site.entity';
 import { Department } from '../../organization/departments/entities/department.entity';
 import { Material } from '../material/entities/material.entity';
 import { CodeItem } from '../../codes/code-items/entities/code-item.entity';
-import { PurchaseService } from '../../purchase/common/purchase.service';
-import {
-  InventoryDocument,
-  InventoryItem,
-  InventoryTypeRule,
-  InventoryControl,
-  InventoryPeriodLock,
-  StockBalance,
-  StockValuation,
-  StockLedger,
-  StockInTransit,
-  MonthlyStockBalance,
-  MonthlyStockValuation,
-  MonthlyStockInTransit,
-} from './entities/inventory.entity';
+import { PurchaseOrderService } from '../../purchase/purchase-order/purchase-order.service';
+import { InventoryDocument } from './entities/inventory-document.entity';
+import { InventoryItem } from './entities/inventory-item.entity';
+import { InventoryTypeRule } from './entities/inventory-type-rule.entity';
+import { InventoryControl } from '../stock/entities/inventory-control.entity';
+import { InventoryPeriodLock } from '../monthly-closing/entities/inventory-period-lock.entity';
+import { StockInTransit } from '../stock/entities/stock-in-transit.entity';
 import { SaveInventoryDto, InventorySearchDto } from './dto/inventory.dto';
 import {
-  monthlyStocks,
-  replayStock,
   STOCK_TYPE_DEFAULTS,
   STOCK_KINDS,
   StockKind,
-} from './stock-engine';
+} from '../stock/stock-engine';
+import { StockProcessingService } from '../stock/stock-processing.service';
 const CODE = 'INVENTORY_TRANSACTION_TYPE';
 @Injectable()
 export class InventoryService {
   constructor(
     private readonly db: DataSource,
-    private readonly purchases: PurchaseService,
+    private readonly purchases: PurchaseOrderService,
+    private readonly stock: StockProcessingService,
   ) {}
   private scoped(user: UserContext, manager = this.db.manager) {
     return applyDocumentScope(
@@ -206,7 +194,7 @@ export class InventoryService {
       this.db
         .getRepository(Department)
         .find({ where: { companyId, deleteYn: 'N' } }),
-      this.purchases.list('order', user, { status: 'C' }),
+      this.purchases.findAll(user, { status: 'C' }),
       this.db
         .getRepository(InventoryPeriodLock)
         .find({ where: { companyId }, order: { yearMonth: 'DESC' } }),
@@ -280,7 +268,7 @@ export class InventoryService {
     manager = this.db.manager,
   ) {
     if (module === 'purchase_order') {
-      const order = await this.purchases.get('order', user, id, manager);
+      const order = await this.purchases.findOne(user, id, manager);
       if (order.status !== 'C' || !order.items.length)
         throw new BadRequestException('완결 발주만 입고할 수 있습니다.');
       return {
@@ -542,72 +530,9 @@ export class InventoryService {
       );
     return row;
   }
-  private async companyLock(manager: EntityManager, companyId: string) {
-    await manager.query(
-      'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
-      [`inventory:${companyId}`],
-    );
-  }
-  private async posted(manager: EntityManager, companyId: string) {
-    const docs = await manager.getRepository(InventoryDocument).find({
-      where: { companyId, status: 'C', deleteYn: 'N' },
-      order: { postingDate: 'ASC', postingSequence: 'ASC' },
-    });
-    const items = await manager
-      .getRepository(InventoryItem)
-      .find({ where: { companyId }, order: { sortOrder: 'ASC' } });
-    return docs.map((d) =>
-      Object.assign({}, d, {
-        items: items.filter(
-          (i) => i.inventoryDocumentId === d.inventoryDocumentId,
-        ),
-      }),
-    );
-  }
-  private async replace<T extends object>(
-    manager: EntityManager,
-    target: EntityTarget<T>,
-    companyId: string,
-    rows: T[],
-  ) {
-    await manager.getRepository(target).delete({ companyId } as never);
-    if (rows.length) await manager.getRepository(target).save(rows);
-  }
-  private async rebuild(manager: EntityManager, companyId: string) {
-    const replay = replayStock(await this.posted(manager, companyId));
-    await this.replace(manager, StockBalance, companyId, replay.balances);
-    await this.replace(manager, StockValuation, companyId, replay.valuations);
-    await this.replace(manager, StockLedger, companyId, replay.ledger);
-    await this.replace(manager, StockInTransit, companyId, replay.transits);
-    // 입고 원가는 입력 snapshot을 유지하고 출고/이동입고의 평가 결과만 갱신한다.
-    const docs = await manager
-      .getRepository(InventoryDocument)
-      .find({ where: { companyId, status: 'C', deleteYn: 'N' } });
-    for (const cost of replay.costs) {
-      const doc = docs.find(
-        (d) => d.inventoryDocumentId === cost.inventoryDocumentId,
-      )!;
-      await manager.getRepository(InventoryItem).update(
-        {
-          companyId,
-          inventoryDocumentId: cost.inventoryDocumentId,
-          itemId: cost.itemId,
-        },
-        {
-          amount: cost.amount,
-          ...(['GENERAL_OUT', 'SITE_OUT', 'SITE_IN'].includes(
-            doc.processingKind,
-          )
-            ? { unitPrice: cost.unitPrice }
-            : {}),
-        },
-      );
-    }
-    return replay;
-  }
   async confirm(user: UserContext, id: string) {
     await this.db.transaction(async (manager) => {
-      await this.companyLock(manager, user.companyId);
+      await this.stock.companyLock(manager, user.companyId);
       const row = await this.get(user, id, manager);
       if (row.status === 'C') return;
       this.editable(user, row);
@@ -698,7 +623,7 @@ export class InventoryService {
           updatedAt: new Date(),
         },
       );
-      await this.rebuild(manager, user.companyId);
+      await this.stock.rebuild(manager, user.companyId);
       await manager
         .getRepository(InventoryPeriodLock)
         .createQueryBuilder()
@@ -709,289 +634,5 @@ export class InventoryService {
         .execute();
     });
     return this.get(user, id);
-  }
-  async balances(user: UserContext, filter: InventorySearchDto = {}) {
-    const where = {
-      companyId: user.companyId,
-      ...(filter.siteId ? { siteId: filter.siteId } : {}),
-      ...(filter.warehouseId ? { warehouseId: filter.warehouseId } : {}),
-      ...(filter.materialId ? { materialId: filter.materialId } : {}),
-    };
-    const [warehouses, sites] = await Promise.all([
-      this.db.getRepository(StockBalance).find({
-        where,
-        order: { siteId: 'ASC', warehouseId: 'ASC', materialId: 'ASC' },
-      }),
-      this.db.getRepository(StockValuation).find({
-        where: {
-          companyId: user.companyId,
-          ...(filter.siteId ? { siteId: filter.siteId } : {}),
-          ...(filter.materialId ? { materialId: filter.materialId } : {}),
-        },
-        order: { siteId: 'ASC', materialId: 'ASC' },
-      }),
-    ]);
-    return { warehouses, sites };
-  }
-  async ledger(user: UserContext, filter: InventorySearchDto = {}) {
-    const q = this.db
-      .getRepository(StockLedger)
-      .createQueryBuilder('l')
-      .where('l.companyId=:companyId', { companyId: user.companyId })
-      .orderBy('l.postingDate', 'ASC')
-      .addOrderBy('l.postingSequence', 'ASC')
-      .addOrderBy('l.entryOrder', 'ASC');
-    for (const field of [
-      'siteId',
-      'warehouseId',
-      'materialId',
-      'typeCode',
-    ] as const)
-      if (filter[field])
-        q.andWhere(`l.${field}=:${field}`, { [field]: filter[field] });
-    if (filter.from)
-      q.andWhere('l."postingDate" >= :from', {
-        from: businessDate(filter.from),
-      });
-    if (filter.to)
-      q.andWhere('l."postingDate" <= :to', { to: businessDate(filter.to) });
-    return q.getMany();
-  }
-  async periods(user: UserContext) {
-    return this.db.getRepository(InventoryPeriodLock).find({
-      where: { companyId: user.companyId },
-      order: { yearMonth: 'DESC' },
-    });
-  }
-  async periodAction(
-    user: UserContext,
-    month: string,
-    action: 'open' | 'unlock' | 'close',
-  ) {
-    monthValue(month);
-    await this.db.transaction(async (manager) => {
-      await this.companyLock(manager, user.companyId);
-      const repo = manager.getRepository(InventoryPeriodLock);
-      let row = await repo.findOneBy({
-        companyId: user.companyId,
-        yearMonth: month,
-      });
-      if (action === 'close') {
-        if (!row) throw new ConflictException('Open된 월이 아닙니다.');
-        const earlier = await repo
-          .createQueryBuilder('p')
-          .where('p.companyId=:companyId', { companyId: user.companyId })
-          .andWhere('p."yearMonth" < :month', { month })
-          .orderBy('p.yearMonth', 'DESC')
-          .getOne();
-        if (earlier && (!earlier.locked || earlier.summaryDirty))
-          throw new ConflictException(
-            '전월부터 순서대로 수불을 재생성·마감하십시오.',
-          );
-        if (earlier && earlier.yearMonth !== monthAfter(month, -1))
-          throw new ConflictException(
-            '전월 수불이 필요합니다. 누락 월을 Open하고 마감하십시오.',
-          );
-        const drafts = await manager
-          .getRepository(InventoryDocument)
-          .createQueryBuilder('d')
-          .where('d.companyId=:companyId', { companyId: user.companyId })
-          .andWhere("d.status='D' AND d.deleteYn='N'")
-          .andWhere('d.postingDate LIKE :month', { month: `${month}%` })
-          .getCount();
-        const all = await this.posted(manager, user.companyId),
-          replay = replayStock(all);
-        const previousMonth = monthAfter(month, -1),
-          previousWarehouses = await manager
-            .getRepository(MonthlyStockBalance)
-            .find({
-              where: { companyId: user.companyId, yearMonth: previousMonth },
-            }),
-          previousSites = await manager
-            .getRepository(MonthlyStockValuation)
-            .find({
-              where: { companyId: user.companyId, yearMonth: previousMonth },
-            });
-        const summary = monthlyStocks(
-          user.companyId,
-          month,
-          replay.ledger,
-          previousWarehouses,
-          previousSites,
-        );
-        const asOf = replayStock(
-          all.filter((d) => d.postingDate.slice(0, 6) <= month),
-        );
-        for (const site of summary.sites) {
-          const actual = asOf.valuations.find(
-            (v) => v.siteId === site.siteId && v.materialId === site.materialId,
-          );
-          if (
-            qty(actual?.quantity ?? '0') !== qty(site.closingQuantity) ||
-            BigInt(actual?.amount ?? '0') !== BigInt(site.closingAmount)
-          )
-            throw new ConflictException(
-              '월 수불과 Posting 평가 잔액이 일치하지 않습니다.',
-            );
-        }
-        for (const w of summary.warehouses) {
-          const actual = asOf.balances.find(
-            (b) =>
-              b.siteId === w.siteId &&
-              b.warehouseId === w.warehouseId &&
-              b.materialId === w.materialId,
-          );
-          if (qty(actual?.quantity ?? '0') !== qty(w.closingQuantity))
-            throw new ConflictException('월 창고 수량 불일치입니다.');
-        }
-        for (const entity of [
-          MonthlyStockBalance,
-          MonthlyStockValuation,
-          MonthlyStockInTransit,
-        ])
-          await manager
-            .getRepository(entity)
-            .delete({ companyId: user.companyId, yearMonth: month });
-        if (summary.warehouses.length)
-          await manager
-            .getRepository(MonthlyStockBalance)
-            .save(summary.warehouses);
-        if (summary.sites.length)
-          await manager
-            .getRepository(MonthlyStockValuation)
-            .save(summary.sites);
-        // 이동 중 재고도 다른 월 수불과 동일하게 전월 기말을 기초로 이월한다.
-        const previousTransits = await manager
-          .getRepository(MonthlyStockInTransit)
-          .find({
-            where: { companyId: user.companyId, yearMonth: previousMonth },
-          });
-        const keys = new Set(
-          [...previousTransits, ...asOf.transits].map(
-            (t) => `${t.outDocumentId}:${t.outItemId}`,
-          ),
-        );
-        const monthlyTransits: MonthlyStockInTransit[] = [];
-        for (const key of keys) {
-          const [outDocumentId, outItemId] = key.split(':');
-          const previous = previousTransits.find(
-              (t) =>
-                t.outDocumentId === outDocumentId && t.outItemId === outItemId,
-            ),
-            current = asOf.transits.find(
-              (t) =>
-                t.outDocumentId === outDocumentId && t.outItemId === outItemId,
-            );
-          if (!current)
-            throw new ConflictException(
-              '전월 이동 중 재고와 출고 이력이 불일치합니다.',
-            );
-          const open = qty(previous?.closingQuantity ?? '0'),
-            close = !current.receivedDocumentId ? qty(current.quantity) : 0n,
-            openA = BigInt(previous?.closingAmount ?? '0'),
-            closeA = !current.receivedDocumentId ? BigInt(current.amount) : 0n,
-            dispatched = current.postingDate.startsWith(month)
-              ? qty(current.quantity)
-              : 0n,
-            dispatchedA = current.postingDate.startsWith(month)
-              ? BigInt(current.amount)
-              : 0n;
-          monthlyTransits.push(
-            Object.assign(new MonthlyStockInTransit(), {
-              companyId: user.companyId,
-              yearMonth: month,
-              outDocumentId,
-              outItemId,
-              siteId: current.siteId,
-              toSiteId: current.toSiteId,
-              materialId: current.materialId,
-              openingQuantity: decimal(open),
-              dispatchedQuantity: decimal(dispatched),
-              receivedQuantity: decimal(open + dispatched - close),
-              closingQuantity: decimal(close),
-              openingAmount: openA.toString(),
-              dispatchedAmount: dispatchedA.toString(),
-              receivedAmount: (openA + dispatchedA - closeA).toString(),
-              closingAmount: closeA.toString(),
-            }),
-          );
-        }
-        if (monthlyTransits.length)
-          await manager
-            .getRepository(MonthlyStockInTransit)
-            .save(monthlyTransits);
-        row.locked = true;
-        row.summaryDirty = false;
-        row.updatedBy = user.userId;
-        row.updatedAt = new Date();
-        await repo.save(row);
-        void drafts;
-      } else {
-        if (action === 'open' && row?.locked)
-          throw new ConflictException(
-            '마감 월은 Lock 해제 기능을 사용하십시오.',
-          );
-        if (!row)
-          row = Object.assign(new InventoryPeriodLock(), {
-            companyId: user.companyId,
-            yearMonth: month,
-            locked: false,
-            summaryDirty: true,
-            createdBy: user.userId,
-          });
-        else {
-          row.locked = false;
-          row.summaryDirty = true;
-          row.updatedBy = user.userId;
-          row.updatedAt = new Date();
-        }
-        await repo.save(row);
-        await repo
-          .createQueryBuilder()
-          .update()
-          .set({ summaryDirty: true })
-          .where('"companyId"=:companyId', { companyId: user.companyId })
-          .andWhere('"yearMonth">=:month', { month })
-          .execute();
-      }
-    });
-    return this.monthly(user, month);
-  }
-  async monthly(user: UserContext, month: string) {
-    monthValue(month);
-    const companyId = user.companyId;
-    const [period, warehouses, sites, transits, draftCount] = await Promise.all(
-      [
-        this.db
-          .getRepository(InventoryPeriodLock)
-          .findOneBy({ companyId, yearMonth: month }),
-        this.db.getRepository(MonthlyStockBalance).find({
-          where: { companyId, yearMonth: month },
-          order: { siteId: 'ASC', warehouseId: 'ASC', materialId: 'ASC' },
-        }),
-        this.db.getRepository(MonthlyStockValuation).find({
-          where: { companyId, yearMonth: month },
-          order: { siteId: 'ASC', materialId: 'ASC' },
-        }),
-        this.db
-          .getRepository(MonthlyStockInTransit)
-          .find({ where: { companyId, yearMonth: month } }),
-        this.db
-          .getRepository(InventoryDocument)
-          .createQueryBuilder('d')
-          .where('d.companyId=:companyId', { companyId })
-          .andWhere("d.status='D' AND d.deleteYn='N'")
-          .andWhere('d.postingDate LIKE :month', { month: `${month}%` })
-          .getCount(),
-      ],
-    );
-    return {
-      period,
-      warehouses,
-      sites,
-      transits,
-      draftCount,
-      nextMonth: monthAfter(month),
-    };
   }
 }

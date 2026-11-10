@@ -22,6 +22,10 @@
 
 Controller는 인증·RBAC·DTO 경계, Service는 회사·scope·owner·상태·업무 조건을 담당한다. 프런트 Context와 버튼 숨김은 서버 접근 검사를 대체하지 않는다.
 
+구매는 `purchase-request`와 `purchase-order`가 각자의 Controller·Service·DTO·Entity를 소유한다. 요청 Item은 요청 내부에, 발주 Item과 Allocation은 발주 내부에 둔다. 발주 Service는 요청 Service로 확정 요청을 조회하고, 발주·품목·Allocation을 하나의 트랜잭션으로 저장한다. `purchase/common`에는 공통 문서 필드와 검색 DTO만 둔다. 결재는 업무별 Service의 상신 검증·상태 반영을 호출하고, 재고의 구매입고 분기는 발주 Service로 원본을 조회한다.
+
+재고는 `transactions`(거래 문서·품목·확정), `monthly-closing`(기간 Open/Lock·월별 수불), `stock`(현재 잔고·평가·수불부·이동 중 재고)으로 나눈다. 거래와 월마감은 `StockProcessingService`의 회사 advisory lock과 확정 이력 조회를 공유하며 호출자의 EntityManager를 사용한다. 재고 재생은 거래 확정 트랜잭션 안에서 수행한다. 월마감은 같은 잠금 아래 월 수불을 산출·검증·저장한다. 재고 현황·수불부 조회는 `StockQueryService`가 담당한다. 프런트도 같은 업무별 폴더에 화면·API·타입을 두고 보고서 표와 날짜 함수만 공유한다.
+
 ## 2. 인증과 Context
 
 1. 로그인은 회사+사용자로 활성 User를 조회하고 bcrypt 비밀번호를 비교한다.
@@ -143,7 +147,7 @@ MODULES는 backend/src/common/constants/modules.ts에 key/name/rbac/documentPref
 
 ## 10. 런타임·검증
 
-- Node.js 24, npm ci, NestJS/TypeORM/PostgreSQL, React/Vite를 사용한다. Docker는 backend+nginx이며 파일은 UID/GID 1000의 호스트 디렉터리에 bind mount한다.
+- Node.js 24, npm ci, NestJS/TypeORM/PostgreSQL, React/Vite를 사용한다. 운영 Docker는 backend+nginx, 개발 Docker는 backend watch+frontend Vite+nginx이며 파일은 UID/GID 1000의 호스트 디렉터리에 bind mount한다. 루트의 `start.sh` / `stop.sh`가 `backend/.env`의 COMPOSE_FILE로 YAML을 선택하고 new-cmms 프로젝트를 실행·종료한다. NestJS·관리자 bootstrap은 backend/.env, Vite는 frontend/.env를 읽으며 루트 환경 파일은 두지 않는다. Vite는 VITE_ 공개 설정만 프런트로 노출하고 개별 개발의 /api를 NestJS로 프록시한다. 개발 DB는 synchronize=true, 운영 DB는 false이며 두 환경 모두 외부 DB를 사용한다.
 - Nginx는 /api prefix를 유지하고 SPA 경로는 index.html로 복원한다. API no-store, 해시 자산 immutable, index no-cache이며 본문 제한은 60 MiB다.
 - /api/health는 SELECT 1의 성공/503만 제공한다. 스키마·관리자 준비나 전체 업무 정상성을 보장하는 검사는 아니다.
 - 환경변수는 env.schema.ts와 .env 예시가 기준이다. 운영 DB_SYNCHRONIZE=true는 거부한다. JWT_ACCESS_SECRET/EXPIRES_IN과 local 업로드 설정을 사용한다.

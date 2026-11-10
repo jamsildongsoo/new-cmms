@@ -1,3 +1,5 @@
+import { PurchaseRequestController } from '../purchase/purchase-request/purchase-request.controller';
+import { PurchaseOrderController } from '../purchase/purchase-order/purchase-order.controller';
 import { Controller, Get } from '@nestjs/common';
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { Reflector } from '@nestjs/core';
@@ -12,12 +14,10 @@ import {
   MODULES,
 } from '../common/constants/modules';
 import { CompaniesController } from '../organization/companies/companies.controller';
-import {
-  InventoryController,
-  StockStatusController,
-  StockLedgerController,
-  MonthlyClosingController,
-} from '../inventory/transactions/inventory.controller';
+import { InventoryController } from '../inventory/transactions/inventory.controller';
+import { StockStatusController } from '../inventory/stock/stock-status.controller';
+import { StockLedgerController } from '../inventory/stock/stock-ledger.controller';
+import { MonthlyClosingController } from '../inventory/monthly-closing/monthly-closing.controller';
 import { VendorController } from '../purchase/vendor/vendor.controller';
 import { ApprovalsController } from '../approvals/approvals.controller';
 import { AttachmentsController } from '../attachments/attachments.controller';
@@ -125,3 +125,41 @@ it('keeps the persisted module keys stable and records policy without duplicated
     expect(module).not.toHaveProperty('actions');
   }
 });
+
+it.each([
+  [PurchaseRequestController, 'purchase_request', 'purchase_order'],
+  [PurchaseOrderController, 'purchase_order', 'purchase_request'],
+] as const)(
+  'enforces the independent CRUD boundary of %s',
+  (controller, moduleKey, otherModule) => {
+    expect(collectControllerPermissions([controller])).toEqual([
+      `${moduleKey}:create`,
+      `${moduleKey}:delete`,
+      `${moduleKey}:read`,
+      `${moduleKey}:update`,
+    ]);
+    expect(Reflect.getMetadata(GUARDS_METADATA, controller)).toEqual([
+      JwtAuthGuard,
+      PermissionsGuard,
+    ]);
+    for (const [method, action] of [
+      ['findAll', 'read'],
+      ['options', 'read'],
+      ['findOne', 'read'],
+      ['create', 'create'],
+      ['update', 'update'],
+      ['remove', 'delete'],
+    ] as const) {
+      let permissions = [`${otherModule}:${action}`];
+      const context = {
+        getHandler: () => controller.prototype[method],
+        getClass: () => controller,
+        switchToHttp: () => ({ getRequest: () => ({ user: { permissions } }) }),
+      } as unknown as ExecutionContext;
+      const guard = new PermissionsGuard(new Reflector());
+      expect(guard.canActivate(context)).toBe(false);
+      permissions = [`${moduleKey}:${action}`];
+      expect(guard.canActivate(context)).toBe(true);
+    }
+  },
+);

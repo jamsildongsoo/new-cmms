@@ -14,21 +14,16 @@ import { Textarea } from '@/shared/ui/Textarea'
 import { DataTable } from '@/shared/ui/DataTable'
 import { StatusBadge } from '@/shared/ui/StatusBadge'
 import {
-  purchaseApi,
-  purchaseBase,
-  type PurchaseKind,
-  type PurchaseRecord,
-  type PurchaseItem,
-  type PurchaseOptions,
-} from './purchase.api'
-import {
-  purchaseLabel,
-  purchaseDraft,
-  previewAmount,
-  inputDate,
-  today,
-} from './purchaseForm'
-const emptyOptions: PurchaseOptions = {
+  purchaseOrderApi,
+  purchaseOrderBase as base,
+  purchaseOrderLabel,
+  type PurchaseOrderRecord,
+  type PurchaseOrderItem,
+  type PurchaseOrderOptions,
+} from './purchase-order.api'
+import { purchaseOrderDraft } from './purchase-order.form'
+import { previewAmount, inputDate, today } from '../common/purchase.utils'
+const emptyOptions: PurchaseOrderOptions = {
   materials: [],
   sites: [],
   departments: [],
@@ -37,12 +32,11 @@ const emptyOptions: PurchaseOptions = {
   requests: [],
   vendors: [],
 }
-export function PurchaseList({ kind }: { kind: PurchaseKind }) {
+export function PurchaseOrderList() {
   const { hasPermission } = useAuth(),
     navigate = useNavigate(),
-    base = purchaseBase(kind),
-    module = kind === 'request' ? 'purchase_request' : 'purchase_order'
-  const [rows, setRows] = useState<PurchaseRecord[]>([]),
+    module = 'purchase_order'
+  const [rows, setRows] = useState<PurchaseOrderRecord[]>([]),
     [filter, setFilter] = useState({
       search: '',
       status: '',
@@ -54,41 +48,41 @@ export function PurchaseList({ kind }: { kind: PurchaseKind }) {
     [loading, setLoading] = useState(true)
   useEffect(() => {
     let active = true
-    purchaseApi
-      .list(kind, query)
+    purchaseOrderApi
+      .list(query)
       .then((r) => active && setRows(r))
       .catch((e) => active && setError(toMessage(e)))
       .finally(() => active && setLoading(false))
     return () => {
       active = false
     }
-  }, [kind, query])
+  }, [query])
   if (!hasPermission(`${module}:read`)) return <Navigate to="/" replace />
   return (
     <section className="space-y-3">
       <div className="flex justify-between">
-        <h1 className="text-base font-semibold">{purchaseLabel(kind)}</h1>
+        <h1 className="text-base font-semibold">{purchaseOrderLabel}</h1>
         <div className="flex gap-2">
           <Button
             variant="secondary"
             disabled={loading}
             onClick={() =>
               printDocument({
-                title: purchaseLabel(kind) + ' 목록',
+                title: purchaseOrderLabel + ' 목록',
                 columns: [
                   '문서번호',
                   '관리번호',
                   '제목',
                   '일자',
-                  ...(kind === 'order' ? ['금액'] : []),
+                  '금액',
                   '상태',
                 ],
                 rows: rows.map((r) => [
-                  r.requestId ?? r.orderId,
+                  r.orderId,
                   r.documentNo,
                   r.title,
-                  inputDate(kind === 'request' ? r.requestDate : r.orderDate),
-                  ...(kind === 'order' ? [r.totalAmount] : []),
+                  inputDate(r.orderDate),
+                  r.totalAmount,
                   r.status,
                 ]),
               })
@@ -158,16 +152,12 @@ export function PurchaseList({ kind }: { kind: PurchaseKind }) {
       <DataTable
         rows={rows}
         emptyText={loading ? '조회 중...' : '등록된 문서가 없습니다.'}
-        gridTemplateColumns={
-          kind === 'order'
-            ? '190px 120px 1fr 120px 140px 90px'
-            : '190px 120px 1fr 120px 90px'
-        }
+        gridTemplateColumns={'190px 120px 1fr 120px 140px 90px'}
         columns={[
           {
             key: 'systemDocumentId',
             label: '문서번호',
-            render: (r) => r.requestId ?? r.orderId,
+            render: (r) => r.orderId,
           },
           { key: 'documentNo', label: '관리번호', render: (r) => r.documentNo },
           {
@@ -176,7 +166,7 @@ export function PurchaseList({ kind }: { kind: PurchaseKind }) {
             render: (r) => (
               <Link
                 className="text-blue-700 underline"
-                to={`${base}/${r.requestId ?? r.orderId}`}
+                to={`${base}/${r.orderId}`}
               >
                 {r.title}
               </Link>
@@ -185,18 +175,13 @@ export function PurchaseList({ kind }: { kind: PurchaseKind }) {
           {
             key: 'date',
             label: '일자',
-            render: (r) =>
-              inputDate(kind === 'request' ? r.requestDate : r.orderDate),
+            render: (r) => inputDate(r.orderDate),
           },
-          ...(kind === 'order'
-            ? [
-                {
-                  key: 'total',
-                  label: '발주금액',
-                  render: (r: PurchaseRecord) => r.totalAmount,
-                },
-              ]
-            : []),
+          {
+            key: 'total',
+            label: '발주금액',
+            render: (r: PurchaseOrderRecord) => r.totalAmount,
+          },
           {
             key: 'status',
             label: '상태',
@@ -207,17 +192,16 @@ export function PurchaseList({ kind }: { kind: PurchaseKind }) {
     </section>
   )
 }
-export function PurchaseForm({ kind }: { kind: PurchaseKind }) {
+export function PurchaseOrderForm() {
   const { id } = useParams()
-  return <PurchaseEditor key={`${kind}:${id ?? ''}`} kind={kind} id={id} />
+  return <PurchaseOrderEditor key={`order:${id ?? ''}`} id={id} />
 }
-function PurchaseEditor({ kind, id }: { kind: PurchaseKind; id?: string }) {
+function PurchaseOrderEditor({ id }: { id?: string }) {
   const { user, hasPermission } = useAuth(),
     navigate = useNavigate(),
-    base = purchaseBase(kind),
-    module = kind === 'request' ? 'purchase_request' : 'purchase_order'
+    module = 'purchase_order'
   const [requestKey] = useState(() => crypto.randomUUID()),
-    [record, setRecord] = useState<PurchaseRecord | null>(null),
+    [record, setRecord] = useState<PurchaseOrderRecord | null>(null),
     [options, setOptions] = useState(emptyOptions)
   const [form, setForm] = useState({
     documentNo: '',
@@ -231,14 +215,9 @@ function PurchaseEditor({ kind, id }: { kind: PurchaseKind; id?: string }) {
     content: '',
     note: '',
     vendorId: '',
-    supplierName: '',
-    supplierRegistrationNo: '',
-    supplierContactName: '',
-    supplierPhone: '',
-    supplierEmail: '',
     deliveryLocation: '',
   })
-  const [items, setItems] = useState<PurchaseItem[]>([]),
+  const [items, setItems] = useState<PurchaseOrderItem[]>([]),
     [requestIds, setRequestIds] = useState<string[]>([]),
     [attachmentId, setAttachmentId] = useState<string | null>(null),
     [busy, setBusy] = useState(false),
@@ -255,8 +234,8 @@ function PurchaseEditor({ kind, id }: { kind: PurchaseKind; id?: string }) {
   useEffect(() => {
     let active = true
     Promise.all([
-      purchaseApi.options(kind),
-      id ? purchaseApi.get(kind, id) : Promise.resolve(null),
+      purchaseOrderApi.options(),
+      id ? purchaseOrderApi.get(id) : Promise.resolve(null),
     ])
       .then(([opt, row]) => {
         if (!active) return
@@ -265,12 +244,8 @@ function PurchaseEditor({ kind, id }: { kind: PurchaseKind; id?: string }) {
           const loaded = {
             documentNo: row.documentNo,
             title: row.title,
-            date: inputDate(
-              kind === 'request' ? row.requestDate : row.orderDate,
-            ),
-            dueDate: inputDate(
-              kind === 'request' ? row.requiredDate : row.expectedDeliveryDate,
-            ),
+            date: inputDate(row.orderDate),
+            dueDate: inputDate(row.expectedDeliveryDate),
             siteId: row.siteId ?? '',
             deptId: row.deptId ?? '',
             requesterId: row.requesterId,
@@ -278,11 +253,6 @@ function PurchaseEditor({ kind, id }: { kind: PurchaseKind; id?: string }) {
             content: row.content ?? '',
             note: row.note ?? '',
             vendorId: row.vendorId ?? '',
-            supplierName: row.supplierName ?? '',
-            supplierRegistrationNo: row.supplierRegistrationNo ?? '',
-            supplierContactName: row.supplierContactName ?? '',
-            supplierPhone: row.supplierPhone ?? '',
-            supplierEmail: row.supplierEmail ?? '',
             deliveryLocation: row.deliveryLocation ?? '',
           }
           setForm(loaded)
@@ -305,7 +275,7 @@ function PurchaseEditor({ kind, id }: { kind: PurchaseKind; id?: string }) {
     return () => {
       active = false
     }
-  }, [kind, id]) // Initial form is scoped to the keyed editor.
+  }, [id]) // Initial form is scoped to the keyed editor.
   const readOnly = id
       ? !(
           record?.status === 'D' &&
@@ -315,10 +285,14 @@ function PurchaseEditor({ kind, id }: { kind: PurchaseKind; id?: string }) {
       : !hasPermission(`${module}:create`),
     blocked = !ready || busy || saving,
     disabled = readOnly || blocked,
-    linked = kind === 'order' && requestIds.length > 0
+    linked = requestIds.length > 0
   const change = (key: keyof typeof form, value: string) =>
     setForm((f) => ({ ...f, [key]: value }))
-  const editItem = (index: number, key: keyof PurchaseItem, value: string) =>
+  const editItem = (
+    index: number,
+    key: keyof PurchaseOrderItem,
+    value: string,
+  ) =>
     setItems((rows) =>
       rows.map((r, i) => (i === index ? { ...r, [key]: value } : r)),
     )
@@ -333,7 +307,7 @@ function PurchaseEditor({ kind, id }: { kind: PurchaseKind; id?: string }) {
         setWarning('')
         return
       }
-      const preview = await purchaseApi.preview(ids)
+      const preview = await purchaseOrderApi.preview(ids)
       setRequestIds(ids)
       setItems(preview.items)
       setWarning(preview.message ?? '')
@@ -351,31 +325,26 @@ function PurchaseEditor({ kind, id }: { kind: PurchaseKind; id?: string }) {
       const { date, dueDate, ...rest } = form
       const payload = {
         ...rest,
-        [kind === 'request' ? 'requestDate' : 'orderDate']: date.replaceAll(
-          '-',
-          '',
-        ),
-        [kind === 'request' ? 'requiredDate' : 'expectedDeliveryDate']:
-          dueDate.replaceAll('-', '') || null,
+        orderDate: date.replaceAll('-', ''),
+        expectedDeliveryDate: dueDate.replaceAll('-', '') || null,
         attachmentId,
         requestIds,
         items: items.map((i) => ({
           itemId: i.itemId,
           materialId: i.materialId,
           quantity: i.quantity,
-          ...(kind === 'order' ? { unitPrice: i.unitPrice || null } : {}),
+          ...{ unitPrice: i.unitPrice || null },
           note: i.note,
         })),
       }
-      const row = await purchaseApi.save(kind, id ?? requestKey, payload, !id)
+      const row = await purchaseOrderApi.save(id ?? requestKey, payload, !id)
       setRecord(row)
       setBaseline(state)
       if (submit)
         navigate('/approvals/new', {
-          state: { prefill: purchaseDraft(kind, row) },
+          state: { prefill: purchaseOrderDraft(row) },
         })
-      else if (!id)
-        navigate(`${base}/${row.requestId ?? row.orderId}`, { replace: true })
+      else if (!id) navigate(`${base}/${row.orderId}`, { replace: true })
       else {
         setItems(row.items)
         setBaseline(
@@ -398,7 +367,7 @@ function PurchaseEditor({ kind, id }: { kind: PurchaseKind; id?: string }) {
       return
     setSaving(true)
     try {
-      await purchaseApi.remove(kind, id)
+      await purchaseOrderApi.remove(id)
       navigate(base)
     } catch (e) {
       setError(toMessage(e))
@@ -413,44 +382,34 @@ function PurchaseEditor({ kind, id }: { kind: PurchaseKind; id?: string }) {
       0n,
     )
     .toString()
+  const selectedVendor =
+    options.vendors.find((v) => v.vendorId === form.vendorId) ??
+    (record?.vendorId === form.vendorId ? record.vendor : null)
   const print = () =>
     printDocument({
-      title: purchaseLabel(kind),
+      title: purchaseOrderLabel,
       fields: [
-        ['문서번호', record?.requestId ?? record?.orderId],
+        ['문서번호', record?.orderId],
         ['관리번호', form.documentNo],
         ['제목', form.title],
         ['일자', form.date],
         ['필요일/납기', form.dueDate],
         ['담당자', form.requesterId],
-        ['공급처', form.supplierName],
-        ...(kind === 'order'
-          ? [['벤더번호', form.vendorId] as [string, string]]
-          : []),
+        ['공급처', selectedVendor?.name ?? ''],
+        ['벤더번호', form.vendorId] as [string, string],
         ['납품 장소', form.deliveryLocation],
-        ...(kind === 'order' ? [['합계', total] as [string, string]] : []),
+        ['합계', total] as [string, string],
         ['비고', form.note],
       ],
-      columns: [
-        '자재번호',
-        '명칭',
-        '규격',
-        '단위',
-        '수량',
-        ...(kind === 'order' ? ['단가', '금액'] : []),
-      ],
+      columns: ['자재번호', '명칭', '규격', '단위', '수량', '단가', '금액'],
       rows: items.map((i) => [
         i.materialId,
         i.materialName,
         i.spec,
         i.baseUnit,
         i.quantity,
-        ...(kind === 'order'
-          ? [
-              i.unitPrice ?? '미산정',
-              previewAmount(i.quantity, i.unitPrice) || '미산정',
-            ]
-          : []),
+        i.unitPrice ?? '미산정',
+        previewAmount(i.quantity, i.unitPrice) || '미산정',
       ]),
       text: form.content,
     })
@@ -463,10 +422,10 @@ function PurchaseEditor({ kind, id }: { kind: PurchaseKind; id?: string }) {
       }}
       className="space-y-3 border bg-white p-3"
     >
-      <DocumentIdField value={record?.requestId ?? record?.orderId} />
+      <DocumentIdField value={record?.orderId} />
       <div className="flex flex-wrap justify-between gap-2">
         <h1 className="text-base font-semibold">
-          {purchaseLabel(kind)}{' '}
+          {purchaseOrderLabel}{' '}
           {record && <StatusBadge status={record.status} />}
         </h1>
         <div className="flex gap-2">
@@ -524,9 +483,9 @@ function PurchaseEditor({ kind, id }: { kind: PurchaseKind; id?: string }) {
         {(
           [
             ['documentNo', '관리번호'],
-            ['title', kind === 'request' ? '요청명' : '발주명'],
-            ['date', kind === 'request' ? '요청일' : '발주일'],
-            ['dueDate', kind === 'request' ? '필요일' : '납기일'],
+            ['title', '발주명'],
+            ['date', '발주일'],
+            ['dueDate', '납기일'],
           ] as const
         ).map(([key, label]) => (
           <Field key={key} label={label} required={key === 'title'}>
@@ -566,35 +525,19 @@ function PurchaseEditor({ kind, id }: { kind: PurchaseKind; id?: string }) {
             </Select>
           </Field>
         ))}
-        {kind === 'order' && (
-          <Field label="벤더">
+        {
+          <Field label="벤더" required>
             <Select
+              required
               value={form.vendorId}
               disabled={disabled}
-              onChange={(e) => {
-                const vendor = options.vendors.find(
-                  (v) => v.vendorId === e.target.value,
-                )
-                setForm((f) => ({
-                  ...f,
-                  vendorId: e.target.value,
-                  ...(vendor
-                    ? {
-                        supplierName: vendor.name,
-                        supplierRegistrationNo: vendor.registrationNo ?? '',
-                        supplierContactName: vendor.contactName ?? '',
-                        supplierPhone: vendor.phone ?? '',
-                        supplierEmail: vendor.email ?? '',
-                      }
-                    : {}),
-                }))
-              }}
+              onChange={(e) => change('vendorId', e.target.value)}
             >
-              <option value="">미선택 (공급처 직접 입력)</option>
+              <option value="">벤더를 선택하십시오</option>
               {form.vendorId &&
                 !options.vendors.some((v) => v.vendorId === form.vendorId) && (
                   <option value={form.vendorId}>
-                    {form.vendorId} · {form.supplierName} (기존 값)
+                    {form.vendorId} · {selectedVendor?.name} (기존 값)
                   </option>
                 )}
               {options.vendors.map((v) => (
@@ -604,39 +547,34 @@ function PurchaseEditor({ kind, id }: { kind: PurchaseKind; id?: string }) {
               ))}
             </Select>
           </Field>
-        )}
-        {kind === 'order' &&
-          (
-            [
-              ['supplierName', '공급처'],
-              ['supplierRegistrationNo', '사업자번호'],
-              ['supplierContactName', '공급처 담당자'],
-              ['supplierPhone', '연락처'],
-              ['supplierEmail', '이메일'],
-              ['deliveryLocation', '납품 장소'],
-            ] as const
-          ).map(([key, label]) => (
-            <Field key={key} label={label}>
+        }
+        {
+          <>
+            {(
+              [
+                ['name', '공급처'],
+                ['registrationNumber', '사업자번호'],
+                ['contactName', '공급처 담당자'],
+                ['phoneNumber', '연락처'],
+                ['email', '이메일'],
+              ] as const
+            ).map(([key, label]) => (
+              <Field key={key} label={label}>
+                <Input value={selectedVendor?.[key] ?? ''} readOnly />
+              </Field>
+            ))}
+            <Field label="납품 장소">
               <Input
-                value={form[key]}
+                value={form.deliveryLocation}
                 disabled={disabled}
-                maxLength={
-                  key === 'deliveryLocation'
-                    ? 300
-                    : key === 'supplierName'
-                      ? 150
-                      : key === 'supplierEmail'
-                        ? 200
-                        : key === 'supplierRegistrationNo'
-                          ? 50
-                          : 100
-                }
-                onChange={(e) => change(key, e.target.value)}
+                maxLength={300}
+                onChange={(e) => change('deliveryLocation', e.target.value)}
               />
             </Field>
-          ))}
+          </>
+        }
       </div>
-      {kind === 'order' && (
+      {
         <section className="space-y-2 border p-2">
           <h2 className="text-sm font-semibold">
             확정 구매요청 선택 (미선택 시 단독 발주)
@@ -694,7 +632,7 @@ function PurchaseEditor({ kind, id }: { kind: PurchaseKind; id?: string }) {
             <p className="text-xs">요청 전체 품목·수량은 변경할 수 없습니다.</p>
           )}
         </section>
-      )}
+      }
       <section className="space-y-2">
         <div className="flex justify-between">
           <h2 className="text-sm font-semibold">품목</h2>
@@ -733,7 +671,8 @@ function PurchaseEditor({ kind, id }: { kind: PurchaseKind; id?: string }) {
                   '규격',
                   '단위',
                   '수량',
-                  ...(kind === 'order' ? ['단가', '금액'] : []),
+                  '단가',
+                  '금액',
                   '비고',
                   '',
                 ].map((v, i) => (
@@ -746,10 +685,7 @@ function PurchaseEditor({ kind, id }: { kind: PurchaseKind; id?: string }) {
             <tbody>
               {!items.length ? (
                 <tr>
-                  <td
-                    colSpan={kind === 'order' ? 8 : 6}
-                    className="border p-3 text-center"
-                  >
+                  <td colSpan={8} className="border p-3 text-center">
                     등록된 품목이 없습니다.
                   </td>
                 </tr>
@@ -810,7 +746,7 @@ function PurchaseEditor({ kind, id }: { kind: PurchaseKind; id?: string }) {
                         }
                       />
                     </td>
-                    {kind === 'order' && (
+                    {
                       <>
                         <td className="border p-1">
                           <Input
@@ -828,7 +764,7 @@ function PurchaseEditor({ kind, id }: { kind: PurchaseKind; id?: string }) {
                             '미산정'}
                         </td>
                       </>
-                    )}
+                    }
                     <td className="border p-1">
                       <Input
                         aria-label={`${index + 1}행 비고`}
@@ -861,12 +797,7 @@ function PurchaseEditor({ kind, id }: { kind: PurchaseKind; id?: string }) {
             </tbody>
           </table>
         </div>
-        {kind === 'order' && (
-          <p className="text-right text-xs">발주금액: {total}원</p>
-        )}
-        {kind === 'request' && (
-          <p className="text-xs">필요한 비교 견적은 첨부파일로 등록하십시오.</p>
-        )}
+        {<p className="text-right text-xs">발주금액: {total}원</p>}
       </section>
       {record && record.allocations.length > 0 && (
         <section className="text-xs">
@@ -884,7 +815,7 @@ function PurchaseEditor({ kind, id }: { kind: PurchaseKind; id?: string }) {
           ))}
         </section>
       )}
-      <Field label={kind === 'request' ? '구매 사유' : '발주 내용'}>
+      <Field label={'발주 내용'}>
         <Textarea
           rows={3}
           disabled={disabled}

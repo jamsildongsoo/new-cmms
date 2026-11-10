@@ -1,2 +1,2 @@
-import { PurchaseRequestSaveDto } from '../../common/purchase.dto';
+import { PurchaseRequestSaveDto } from './purchase-request.dto';
 export class UpdatePurchaseRequestDto extends PurchaseRequestSaveDto {}

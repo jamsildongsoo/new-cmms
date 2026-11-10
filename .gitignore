@@ -1,7 +1,7 @@
 # 배포 비밀값과 애플리케이션 서버 영구 데이터
 .env
 .env.*
-!.env.docker.example
+!.env.example
 **/*.swp
 **/*.swo
 /data/

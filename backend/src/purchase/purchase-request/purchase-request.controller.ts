@@ -1,6 +1,6 @@
 import { NumberingService } from '../../numbering/numbering.service';
 import { Headers } from '@nestjs/common';
-import { PurchaseSearchDto } from '../common/purchase.dto';
+import { PurchaseSearchDto } from '../common/purchase-search.dto';
 import {
   Body,
   Controller,

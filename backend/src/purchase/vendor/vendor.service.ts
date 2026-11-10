@@ -9,16 +9,17 @@ import { QueryFailedError, Repository } from 'typeorm';
 import { UserContext } from '../../auth/types/user-context.type';
 import { normalizePaginationQuery } from '../../common/utils/pagination.util';
 import { Vendor } from './entities/vendor.entity';
+import { PurchaseOrder } from '../purchase-order/entities/purchase-order.entity';
 import {
   CreateVendorDto,
   UpdateVendorDto,
   SearchVendorDto,
 } from './dto/vendor.dto';
 const optionalFields = [
-  'registrationNo',
-  'representative',
+  'registrationNumber',
+  'representativeName',
   'contactName',
-  'phone',
+  'phoneNumber',
   'email',
   'address',
   'note',
@@ -47,7 +48,7 @@ export class VendorService {
       .andWhere("v.deleteYn='N'");
     if (dto.search?.trim())
       query.andWhere(
-        '(v.vendorId ILIKE :value OR v.name ILIKE :value OR v.registrationNo ILIKE :value)',
+        '(v.vendorId ILIKE :value OR v.name ILIKE :value OR v.registrationNumber ILIKE :value)',
         { value: `%${dto.search.trim()}%` },
       );
     const [items, total] = await query
@@ -95,12 +96,25 @@ export class VendorService {
     row.updatedAt = new Date();
     return this.repo.save(row);
   }
+  async deletionInfo(user: UserContext, id: string) {
+    await this.get(user, id);
+    const purchaseOrderCount = await this.repo.manager
+      .getRepository(PurchaseOrder)
+      .countBy({
+        companyId: user.companyId,
+        vendorId: id,
+        deleteYn: 'N',
+      });
+    return { purchaseOrderCount };
+  }
   async remove(user: UserContext, id: string) {
     const row = await this.get(user, id);
-    // 기존 발주의 벤더 참조와 공급처 snapshot은 소급 변경하지 않는다.
+    const { purchaseOrderCount } = await this.deletionInfo(user, id);
+    // 기존 발주의 벤더 참조를 유지하여 삭제 후에도 업체 정보를 조회한다.
     row.deleteYn = 'Y';
     row.updatedBy = user.userId;
     row.updatedAt = new Date();
-    return this.repo.save(row);
+    const saved = await this.repo.save(row);
+    return Object.assign({}, saved, { purchaseOrderCount });
   }
 }

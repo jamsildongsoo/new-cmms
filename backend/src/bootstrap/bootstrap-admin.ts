@@ -2,6 +2,7 @@
 import { InventoryService } from '../inventory/transactions/inventory.service';
 import { UserContext } from '../auth/types/user-context.type';
 import { config as loadEnv } from 'dotenv';
+import { ENV_FILE_PATH } from '../config/env-file';
 import { ModulesContainer, NestFactory } from '@nestjs/core';
 import { Type } from '@nestjs/common';
 import { hash } from 'bcrypt';
@@ -21,7 +22,7 @@ const PASSWORD_HASH_ROUNDS = 12;
 const ADMIN_ROLE_ID = 'ADMIN';
 const ADMIN_DEPT_ID = 'ADMIN';
 
-loadEnv({ quiet: true });
+loadEnv({ path: ENV_FILE_PATH, quiet: true });
 
 interface BootstrapConfig {
   companyId: string;

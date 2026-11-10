@@ -1,4 +1,7 @@
-import { PurchaseService } from '../purchase/common/purchase.service';
+import { PurchaseRequest } from '../purchase/purchase-request/entities/purchase-request.entity';
+import { PurchaseOrder } from '../purchase/purchase-order/entities/purchase-order.entity';
+import { PurchaseOrderService } from '../purchase/purchase-order/purchase-order.service';
+import { PurchaseRequestService } from '../purchase/purchase-request/purchase-request.service';
 import { WorkPermitService } from '../maintenance/work-permit/work-permit.service';
 import { WorkRequest } from '../maintenance/work-request/entities/work-request.entity';
 import { WorkRequestService } from '../maintenance/work-request/work-request.service';
@@ -101,9 +104,13 @@ function fixture() {
     relatedAttachmentIds: jest.fn(async () => []),
     syncApprovalStatus: jest.fn(async () => undefined),
   };
-  const purchases = {
+  const purchaseRequests = {
     assertCanSubmit: jest.fn(async () => undefined),
-    sync: jest.fn(async () => undefined),
+    syncApprovalStatus: jest.fn(async () => undefined),
+  };
+  const purchaseOrders = {
+    assertCanSubmit: jest.fn(async () => undefined),
+    syncApprovalStatus: jest.fn(async () => undefined),
   };
   const service = new ApprovalsService(
     headers as unknown as Repository<Approval>,
@@ -114,7 +121,8 @@ function fixture() {
     workOrder as unknown as WorkOrderService,
     workRequest as unknown as WorkRequestService,
     workPermit as unknown as WorkPermitService,
-    purchases as unknown as PurchaseService,
+    purchaseRequests as unknown as PurchaseRequestService,
+    purchaseOrders as unknown as PurchaseOrderService,
   );
   const create = (
     line: { type: 'APPROVER' | 'AGREE' | 'REFERENCE'; userId: string }[],
@@ -136,7 +144,8 @@ function fixture() {
     workOrder,
     workRequest,
     workPermit,
-    purchases,
+    purchaseRequests,
+    purchaseOrders,
   };
 }
 
@@ -204,6 +213,8 @@ describe('ApprovalsService agreement flow', () => {
     ['preventive_maintenance', PreventiveMaintenance, 'pmId'],
     ['work_order', WorkOrder, 'workOrderId'],
     ['work_request', WorkRequest, 'workRequestId'],
+    ['purchase_request', PurchaseRequest, 'requestId'],
+    ['purchase_order', PurchaseOrder, 'orderId'],
   ] as const)(
     'links %s attachments from the authenticated company source, ignoring client IDs',
     async (refModule, entity, idField) => {
@@ -653,7 +664,11 @@ describe('Purchase approval linking', () => {
   it.each(['purchase_request', 'purchase_order'])(
     'validates and syncs %s separately from approval storage',
     async (refModule) => {
-      const { service, purchases } = fixture();
+      const { service, purchaseRequests, purchaseOrders } = fixture();
+      const purchases =
+        refModule === 'purchase_request' ? purchaseRequests : purchaseOrders;
+      const unrelated =
+        refModule === 'purchase_request' ? purchaseOrders : purchaseRequests;
       const row = await service.create(actor('author'), {
         approvalId: 'APPROV-202611-00001',
         title: '구매 결재',
@@ -664,21 +679,20 @@ describe('Purchase approval linking', () => {
         submit: true,
       });
       expect(purchases.assertCanSubmit).toHaveBeenCalledWith(
-        refModule === 'purchase_request' ? 'request' : 'order',
         actor('author'),
         'source',
       );
-      expect(purchases.sync).toHaveBeenLastCalledWith(
-        refModule === 'purchase_request' ? 'request' : 'order',
+      expect(purchases.syncApprovalStatus).toHaveBeenLastCalledWith(
         'CR',
         'source',
         'P',
         'author',
       );
+      expect(unrelated.assertCanSubmit).not.toHaveBeenCalled();
+      expect(unrelated.syncApprovalStatus).not.toHaveBeenCalled();
       expect(row.attachmentId).toBe('source-files');
       await service.approve(actor('manager'), row.approvalId, {});
-      expect(purchases.sync).toHaveBeenLastCalledWith(
-        refModule === 'purchase_request' ? 'request' : 'order',
+      expect(purchases.syncApprovalStatus).toHaveBeenLastCalledWith(
         'CR',
         'source',
         'C',

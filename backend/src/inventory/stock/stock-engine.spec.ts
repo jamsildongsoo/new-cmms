@@ -6,7 +6,11 @@ import {
   qty,
 } from '../../common/utils/stock-decimal';
 import { businessDate, monthAfter } from '../../common/utils/posting-date';
-import { monthlyStocks, PostedDocument, replayStock } from './stock-engine';
+import {
+  monthlyStocks,
+  PostedDocument,
+  replayStock,
+} from '../stock/stock-engine';
 function doc(
   kind: string,
   quantity: string,

@@ -2,7 +2,7 @@
 import axios, { AxiosError } from 'axios'
 import { clearTokens, getAccessToken } from './tokenStore'
 const apiBaseUrl =
-  import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000/api'
+  import.meta.env.VITE_API_BASE_URL ?? '/api'
 export const http = axios.create({ baseURL: apiBaseUrl, timeout: 15000 })
 http.interceptors.request.use((config) => {
   const token = getAccessToken()

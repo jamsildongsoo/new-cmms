@@ -1,2 +1,2 @@
-import { PurchaseSaveDto } from '../../common/purchase.dto';
-export class UpdatePurchaseOrderDto extends PurchaseSaveDto {}
+import { PurchaseOrderSaveDto } from './purchase-order.dto';
+export class UpdatePurchaseOrderDto extends PurchaseOrderSaveDto {}

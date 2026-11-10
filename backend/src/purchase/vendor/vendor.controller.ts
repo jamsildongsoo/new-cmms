@@ -49,6 +49,12 @@ export class VendorController {
   ) {
     return this.service.update(user, id, dto);
   }
+  @Get(':id/deletion-info') @RequirePermission('vendor', 'delete') deletionInfo(
+    @CurrentUser() user: UserContext,
+    @Param('id') id: string,
+  ) {
+    return this.service.deletionInfo(user, id);
+  }
   @Delete(':id') @RequirePermission('vendor', 'delete') remove(
     @CurrentUser() user: UserContext,
     @Param('id') id: string,

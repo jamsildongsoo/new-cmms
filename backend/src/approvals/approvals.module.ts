@@ -1,4 +1,5 @@
-import { PurchaseModule } from '../purchase/common/purchase.module';
+import { PurchaseOrderModule } from '../purchase/purchase-order/purchase-order.module';
+import { PurchaseRequestModule } from '../purchase/purchase-request/purchase-request.module';
 import { WorkPermitRequestModule } from '../maintenance/work-permit-request/work-permit-request.module';
 import { WorkPermitModule } from '../maintenance/work-permit/work-permit.module';
 import { WorkRequestModule } from '../maintenance/work-request/work-request.module';
@@ -15,7 +16,8 @@ import { Approval } from './entities/approval.entity';
 
 @Module({
   imports: [
-    PurchaseModule,
+    PurchaseOrderModule,
+    PurchaseRequestModule,
     PreventiveMaintenanceModule,
     WorkOrderModule,
     WorkPermitRequestModule,

@@ -4,14 +4,15 @@ import { AuditEntity } from '../../../common/entities/audit.entity';
 
 @Entity('purchase_order')
 export class PurchaseOrder extends AuditEntity {
-  @Column({ type: 'varchar', length: 50, nullable: true }) vendorId:
-    string | null;
   @PrimaryColumn({ type: 'varchar', length: 30 })
   companyId: string;
 
   // 최초 저장 시 서버에서 공통 채번하며 이후 변경하지 않는 문서 ID.
   @PrimaryColumn({ type: 'varchar', length: 50 })
   orderId: string;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  vendorId: string | null;
 
   @Column({ type: 'varchar', length: 50 })
   documentNo: string;
@@ -43,23 +44,18 @@ export class PurchaseOrder extends AuditEntity {
   @Column({ type: 'char', length: 1, default: 'N' })
   deleteYn: string;
 
-  @Column({ type: 'varchar', length: 30, nullable: true }) siteId:
-    string | null;
-  @Column({ type: 'varchar', length: 30, nullable: true }) deptId:
-    string | null;
-  @Column({ type: 'char', length: 8, nullable: true }) orderDate: string | null;
+  @Column({ type: 'varchar', length: 30, nullable: true })
+  siteId: string | null;
+
+  @Column({ type: 'varchar', length: 30, nullable: true })
+  deptId: string | null;
+
+  @Column({ type: 'char', length: 8, nullable: true })
+  orderDate: string | null;
+
   @Column({ type: 'numeric', precision: 24, scale: 0, default: 0 })
   totalAmount: string;
-  @Column({ type: 'varchar', length: 150, nullable: true }) supplierName:
-    string | null;
-  @Column({ type: 'varchar', length: 50, nullable: true })
-  supplierRegistrationNo: string | null;
-  @Column({ type: 'varchar', length: 100, nullable: true })
-  supplierContactName: string | null;
-  @Column({ type: 'varchar', length: 100, nullable: true }) supplierPhone:
-    string | null;
-  @Column({ type: 'varchar', length: 200, nullable: true }) supplierEmail:
-    string | null;
+
   @Column({ type: 'varchar', length: 300, nullable: true }) deliveryLocation:
     string | null;
   @Column({ type: 'varchar', length: 3, default: 'KRW' }) currency: string;

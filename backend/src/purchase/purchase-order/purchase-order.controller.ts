@@ -2,7 +2,6 @@ import { MaxLength } from 'class-validator';
 import { IsString } from 'class-validator';
 import { NumberingService } from '../../numbering/numbering.service';
 import { Headers } from '@nestjs/common';
-import { PurchaseService } from '../common/purchase.service';
 import { IsArray, ArrayUnique } from 'class-validator';
 class PreviewRequestsDto {
   @IsArray()
@@ -11,7 +10,7 @@ class PreviewRequestsDto {
   @MaxLength(50, { each: true })
   requestIds: string[];
 }
-import { PurchaseSearchDto } from '../common/purchase.dto';
+import { PurchaseSearchDto } from '../common/purchase-search.dto';
 import {
   Body,
   Controller,
@@ -40,7 +39,6 @@ export class PurchaseOrderController {
   constructor(
     private readonly numbering: NumberingService,
     private readonly service: PurchaseOrderService,
-    private readonly purchases: PurchaseService,
   ) {}
 
   @RequirePermission(AppModuleKey.PURCHASE_ORDER, PermissionAction.READ)
@@ -52,7 +50,7 @@ export class PurchaseOrderController {
   @RequirePermission(AppModuleKey.PURCHASE_ORDER, PermissionAction.READ)
   @Post('request-preview')
   preview(@CurrentUser() user: UserContext, @Body() dto: PreviewRequestsDto) {
-    return this.purchases.preview(user, dto.requestIds);
+    return this.service.preview(user, dto.requestIds);
   }
   @RequirePermission(AppModuleKey.PURCHASE_ORDER, PermissionAction.READ)
   @Get('options')
