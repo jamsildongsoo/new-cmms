@@ -11,6 +11,7 @@ import { UsersService } from '../identity/users/users.service';
 import { LoginDto } from './dto/login.dto';
 import { JwtPayload } from './types/jwt-payload.type';
 import { UserContext } from './types/user-context.type';
+import { LoginHistoryService, LoginClientInfo } from './login-history.service';
 
 @Injectable()
 export class AuthService {
@@ -18,9 +19,13 @@ export class AuthService {
     private readonly usersService: UsersService,
     private readonly rolesService: RolesService,
     private readonly jwtService: JwtService,
+    private readonly loginHistory: LoginHistoryService,
   ) {}
 
-  async login(loginDto: LoginDto): Promise<{
+  async login(
+    loginDto: LoginDto,
+    client: LoginClientInfo = {},
+  ): Promise<{
     accessToken: string;
     tokenType: 'Bearer';
     user: UserContext;
@@ -29,26 +34,59 @@ export class AuthService {
     const user = await this.usersService.findActiveById(companyId, userId);
 
     if (!user) {
-      throw new UnauthorizedException('Invalid company, user, or password');
+      await this.loginHistory.record(
+        companyId,
+        userId,
+        false,
+        'USER_NOT_ACTIVE',
+        client,
+      );
+      throw new UnauthorizedException(
+        '회사·사용자 ID 또는 비밀번호를 확인해 주세요.',
+      );
     }
 
     const passwordMatches = await compare(password, user.passwordHash);
     if (!passwordMatches) {
-      throw new UnauthorizedException('Invalid company, user, or password');
+      await this.loginHistory.record(
+        companyId,
+        userId,
+        false,
+        'INVALID_PASSWORD',
+        client,
+      );
+      throw new UnauthorizedException(
+        '회사·사용자 ID 또는 비밀번호를 확인해 주세요.',
+      );
     }
 
-    const userContext = await this.buildUserContext(companyId, userId);
+    const userContext = await this.buildUserContext(
+      companyId,
+      userId,
+      user.tokenVersion,
+    );
     if (!userContext) {
-      throw new UnauthorizedException('Invalid company, user, or password');
+      await this.loginHistory.record(
+        companyId,
+        userId,
+        false,
+        'USER_CHANGED',
+        client,
+      );
+      throw new UnauthorizedException(
+        '회사·사용자 ID 또는 비밀번호를 확인해 주세요.',
+      );
     }
 
     const payload: JwtPayload = {
       sub: userContext.userId,
       companyId: userContext.companyId,
+      tokenVersion: user.tokenVersion,
     };
-
+    const accessToken = await this.jwtService.signAsync(payload);
+    await this.loginHistory.record(companyId, userId, true, null, client);
     return {
-      accessToken: await this.jwtService.signAsync(payload),
+      accessToken,
       tokenType: 'Bearer',
       user: userContext,
     };
@@ -57,6 +95,7 @@ export class AuthService {
   async buildUserContext(
     companyId: string,
     userId: string,
+    expectedTokenVersion?: number,
   ): Promise<UserContext | null> {
     if (
       typeof companyId !== 'string' ||
@@ -68,7 +107,11 @@ export class AuthService {
     )
       return null;
     const user = await this.usersService.findActiveById(companyId, userId);
-    if (!user) {
+    if (
+      !user ||
+      (expectedTokenVersion !== undefined &&
+        user.tokenVersion !== expectedTokenVersion)
+    ) {
       return null;
     }
 
@@ -93,15 +136,24 @@ export class AuthService {
     userId: string;
     password: string;
   } {
-    if (!loginDto.companyId || !loginDto.userId || !loginDto.password) {
+    if (
+      typeof loginDto.companyId !== 'string' ||
+      !loginDto.companyId.trim() ||
+      loginDto.companyId.trim().length > 30 ||
+      typeof loginDto.userId !== 'string' ||
+      !loginDto.userId.trim() ||
+      loginDto.userId.trim().length > 50 ||
+      typeof loginDto.password !== 'string' ||
+      !loginDto.password
+    ) {
       throw new BadRequestException(
-        'companyId, userId, and password are required',
+        '회사 ID, 사용자 ID와 비밀번호를 입력해 주세요.',
       );
     }
 
     return {
-      companyId: loginDto.companyId,
-      userId: loginDto.userId,
+      companyId: loginDto.companyId.trim(),
+      userId: loginDto.userId.trim(),
       password: loginDto.password,
     };
   }

@@ -4,7 +4,7 @@ import { IdentityFormPage } from './IdentityFormPage'
 import type { Resource } from './identity.api'
 
 export const identityRoutes: RouteObject[] = (
-  ['users', 'roles', 'permissions'] as Resource[]
+  ['users', 'roles'] as Resource[]
 ).flatMap((resource) => [
   {
     path: resource,

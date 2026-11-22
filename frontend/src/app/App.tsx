@@ -10,7 +10,7 @@ import { Navigate, useRoutes } from 'react-router-dom'
 import { AppLayout } from '@/layout/AppLayout'
 import { identityRoutes } from '@/modules/identity'
 import { approvalRoutes } from '@/modules/approvals'
-import { LoginPage, RequireAuth } from '@/modules/auth'
+import { LoginHistoryPage, LoginPage, RequireAuth } from '@/modules/auth'
 import { codeRoutes } from '@/modules/codes'
 import { equipmentRoutes } from '@/modules/maintenance/equipment'
 import { preventiveMaintenanceRoutes } from '@/modules/maintenance/preventive-maintenance'
@@ -27,6 +27,7 @@ function App() {
           element: <AppLayout />,
           children: [
             { index: true, element: <HomePage /> },
+            { path: '/login-history', element: <LoginHistoryPage /> },
             ...organizationRoutes,
             ...identityRoutes,
             ...codeRoutes,

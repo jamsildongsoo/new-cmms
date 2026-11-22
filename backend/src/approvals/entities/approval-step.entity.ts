@@ -1,14 +1,6 @@
 import { Column, Entity, PrimaryColumn } from 'typeorm';
 
-export const ApprovalStepType = {
-  SUBMITTER: 'SUBMITTER',
-  APPROVER: 'APPROVER',
-  AGREE: 'AGREE',
-  REFERENCE: 'REFERENCE',
-} as const;
-
-export type ApprovalStepType =
-  (typeof ApprovalStepType)[keyof typeof ApprovalStepType];
+import { ApprovalStepType, ApprovalStepResult } from '../approval.constant';
 
 @Entity('approval_step')
 export class ApprovalStep {
@@ -28,7 +20,7 @@ export class ApprovalStep {
   userId: string;
 
   @Column({ type: 'char', length: 1, nullable: true })
-  status: string | null;
+  status: ApprovalStepResult | null;
 
   @Column({ type: 'text', nullable: true })
   comment: string | null;

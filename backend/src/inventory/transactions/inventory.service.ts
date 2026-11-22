@@ -1,4 +1,5 @@
-/** 재고 거래의 저장·원본 참조·확정을 관리하고 확정 트랜잭션 안에서 재고를 재생한다. */
+import { inputQuantity, inputPrice } from '../../common/utils/decimal.util';
+/** 전표 확정·대기 입고 수령·취소를 회사 잠금과 단일 트랜잭션으로 처리한다. */
 import {
   BadRequestException,
   ConflictException,
@@ -6,66 +7,121 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { NumberingService } from '../../numbering/numbering.service';
 import { randomUUID } from 'node:crypto';
-import { DataSource, EntityManager, IsNull } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 import { UserContext } from '../../auth/types/user-context.type';
-import { applyDocumentScope } from '../../common/utils/document-scope.util';
-import { businessDate } from '../../common/utils/posting-date';
-import {
-  decimal,
-  lineAmount,
-  price,
-  qty,
-} from '../../common/utils/stock-decimal';
-import { Warehouse } from '../../organization/warehouses/entities/warehouse.entity';
-import { Site } from '../../organization/sites/entities/site.entity';
-import { Department } from '../../organization/departments/entities/department.entity';
+import { ModuleCode } from '../../common/constants/modules';
+import { normalizePaginationQuery } from '../../common/utils/pagination.util';
+import { businessDate } from '../../common/utils/date.util';
+import { decimal, rounded, price, qty } from '../../common/utils/decimal.util';
 import { Material } from '../material/entities/material.entity';
-import { CodeItem } from '../../codes/code-items/entities/code-item.entity';
-import { PurchaseOrderService } from '../../purchase/purchase-order/purchase-order.service';
+import { Site } from '../../organization/sites/entities/site.entity';
+import { Warehouse } from '../../organization/warehouses/entities/warehouse.entity';
+import { PurchaseOrderItem } from '../../purchase/purchase-order/entities/purchase-order-item.entity';
+import { PurchaseOrder } from '../../purchase/purchase-order/entities/purchase-order.entity';
 import { InventoryDocument } from './entities/inventory-document.entity';
 import { InventoryItem } from './entities/inventory-item.entity';
-import { InventoryTypeRule } from './entities/inventory-type-rule.entity';
-import { InventoryControl } from '../stock/entities/inventory-control.entity';
+import { InventoryControl } from './entities/inventory-control.entity';
 import { InventoryPeriodLock } from '../monthly-closing/entities/inventory-period-lock.entity';
-import { StockInTransit } from '../stock/entities/stock-in-transit.entity';
-import { SaveInventoryDto, InventorySearchDto } from './dto/inventory.dto';
-import {
-  STOCK_TYPE_DEFAULTS,
-  STOCK_KINDS,
-  StockKind,
-} from '../stock/stock-engine';
+
 import { StockProcessingService } from '../stock/stock-processing.service';
-const CODE = 'INVENTORY_TRANSACTION_TYPE';
+import { inventoryVariant } from '../inventory.constant';
+import { CreateInventoryDto, InventorySearchDto } from './dto/inventory.dto';
 @Injectable()
 export class InventoryService {
   constructor(
     private readonly db: DataSource,
-    private readonly purchases: PurchaseOrderService,
     private readonly stock: StockProcessingService,
+    private readonly numbering: NumberingService,
   ) {}
+  /** 재고는 부서로 구분하지 않는다. OWN_SITE·OWN_DEPARTMENT 모두 소속 사업장 조건으로 제한한다. */
   private scoped(user: UserContext, manager = this.db.manager) {
-    return applyDocumentScope(
-      manager.getRepository(InventoryDocument).createQueryBuilder('d'),
-      user,
-      'd',
-    );
+    const q = manager
+      .getRepository(InventoryDocument)
+      .createQueryBuilder('d')
+      .where('d.companyId=:companyId', { companyId: user.companyId })
+      .andWhere("d.deleteYn='N'");
+    if (user.accessScope === 'COMPANY_ALL') return q;
+    if (
+      (user.accessScope === 'OWN_SITE' ||
+        user.accessScope === 'OWN_DEPARTMENT') &&
+      user.siteId
+    )
+      return q.andWhere('d.siteId=:scopeSiteId', { scopeSiteId: user.siteId });
+    throw new ForbiddenException('재고 조회 범위 또는 소속 사업장이 없습니다.');
   }
   async list(user: UserContext, filter: InventorySearchDto = {}) {
-    const q = this.scoped(user).orderBy('d.createdAt', 'DESC');
-    if (filter.status)
-      q.andWhere('d.status=:status', { status: filter.status });
-    if (filter.typeCode)
-      q.andWhere('d.typeCode=:typeCode', { typeCode: filter.typeCode });
-    if (filter.siteId)
-      q.andWhere('d.siteId=:siteId', { siteId: filter.siteId });
+    const { page, limit, offset } = normalizePaginationQuery(filter);
+    const q = this.scoped(user)
+      .select([
+        'd.inventoryDocumentId',
+        'd.documentNo',
+        'd.title',
+        'd.type',
+        'd.kind',
+        'd.postingDate',
+        'd.siteId',
+        'd.warehouseId',
+        'd.status',
+      ])
+      .orderBy('d.createdAt', 'DESC')
+      .addOrderBy('d.inventoryDocumentId', 'DESC');
+    if (filter.search?.trim())
+      q.andWhere(
+        '(d.inventoryDocumentId ILIKE :search OR d.documentNo ILIKE :search OR d.title ILIKE :search)',
+        { search: `%${filter.search.trim().replace(/[\\%_]/g, '\\$&')}%` },
+      );
+    for (const field of [
+      'type',
+      'kind',
+      'status',
+      'siteId',
+      'warehouseId',
+    ] as const) {
+      if (filter[field])
+        q.andWhere(`d.${field} = :${field}`, { [field]: filter[field] });
+    }
     if (filter.from)
       q.andWhere('d."postingDate" >= :from', {
         from: businessDate(filter.from),
       });
     if (filter.to)
       q.andWhere('d."postingDate" <= :to', { to: businessDate(filter.to) });
-    return q.getMany();
+    if (filter.materialId)
+      q.andWhere(
+        'EXISTS (SELECT 1 FROM inventory_item i WHERE i."companyId" = d."companyId" AND i."inventoryDocumentId" = d."inventoryDocumentId" AND i."materialId" = :materialId)',
+        { materialId: filter.materialId },
+      );
+    const [rows, total] = await q.skip(offset).take(limit).getManyAndCount();
+    return {
+      items: rows.map(
+        ({
+          inventoryDocumentId,
+          documentNo,
+          title,
+          type,
+          kind,
+          postingDate,
+          siteId,
+          warehouseId,
+          status,
+        }) => ({
+          inventoryDocumentId,
+          documentNo,
+          title,
+          type,
+          kind,
+          postingDate,
+          siteId,
+          warehouseId,
+          status,
+        }),
+      ),
+      total,
+      page,
+      limit,
+    };
   }
   async get(user: UserContext, id: string, manager = this.db.manager) {
     const row = await this.scoped(user, manager)
@@ -76,43 +132,44 @@ export class InventoryService {
       where: { companyId: user.companyId, inventoryDocumentId: id },
       order: { sortOrder: 'ASC' },
     });
-    return Object.assign({}, row, { items });
+    const origin =
+      row.kind === 'TRANSFER' && row.type === 'IN' && row.refId
+        ? await manager.getRepository(InventoryDocument).findOneBy({
+            companyId: user.companyId,
+            inventoryDocumentId: row.refId,
+            deleteYn: 'N',
+          })
+        : null;
+    return Object.assign({}, row, {
+      items,
+      sourceSiteId: origin?.siteId ?? null,
+      sourceWarehouseId: origin?.warehouseId ?? null,
+    });
   }
-  private editable(user: UserContext, row: InventoryDocument) {
-    if (row.status !== 'D' || row.createdBy !== user.userId)
-      throw new ForbiddenException('작성자만 초안을 처리할 수 있습니다.');
-  }
-  private async departmentAllowed(
-    user: UserContext,
-    deptId: string | null,
+  private async openPeriod(
+    companyId: string,
+    date: string,
     manager: EntityManager,
   ) {
-    if (!user.deptId || !deptId) return false;
-    const rows: { deptId: string }[] = await manager.query(
-      `WITH RECURSIVE ds AS (SELECT "deptId" FROM department WHERE "companyId"=$1 AND "deptId"=$2 AND "deleteYn"='N' UNION SELECT d."deptId" FROM department d JOIN ds ON d."parentDeptId"=ds."deptId" WHERE d."companyId"=$1 AND d."deleteYn"='N') SELECT "deptId" FROM ds`,
-      [user.companyId, user.deptId],
-    );
-    return rows.some((r) => r.deptId === deptId);
-  }
-  private async assertScope(
-    user: UserContext,
-    siteId: string,
-    deptId: string | null,
-    manager = this.db.manager,
-  ) {
-    if (user.accessScope === 'COMPANY_ALL') return;
-    if (
-      user.accessScope === 'OWN_SITE' &&
-      user.siteId &&
-      user.siteId === siteId
-    )
-      return;
-    if (
-      user.accessScope === 'OWN_DEPARTMENT' &&
-      (await this.departmentAllowed(user, deptId, manager))
-    )
-      return;
-    throw new ForbiddenException('문서 scope 밖입니다.');
+    businessDate(date);
+    const period = await manager
+      .getRepository(InventoryPeriodLock)
+      .findOneBy({ companyId, yearMonth: date.slice(0, 6) });
+    if (!period || period.locked)
+      throw new ConflictException('전기월이 개시되지 않았거나 마감되었습니다.');
+    // 소급 처리로 이미 마감된 후속 월의 평가가 바뀌지 않도록 잠금 해제를 요구한다.
+    const later = await manager
+      .getRepository(InventoryPeriodLock)
+      .createQueryBuilder('p')
+      .where('p.companyId=:companyId', { companyId })
+      .andWhere('p.yearMonth > :month', { month: date.slice(0, 6) })
+      .andWhere('p.locked=true')
+      .getExists();
+    if (later)
+      throw new ConflictException(
+        '영향받는 후속 마감 월을 해제한 후 처리하십시오.',
+      );
+    return period;
   }
   private async warehouse(
     companyId: string,
@@ -121,91 +178,61 @@ export class InventoryService {
     manager: EntityManager,
   ) {
     if (
-      !siteId ||
-      !warehouseId ||
       !(await manager
         .getRepository(Warehouse)
         .findOneBy({ companyId, siteId, warehouseId, deleteYn: 'N' }))
     )
       throw new BadRequestException(
-        '같은 회사의 유효한 사업장·창고를 선택하십시오.',
+        '같은 회사 사업장의 유효한 창고를 선택하십시오.',
       );
-  }
-  async initializeTypes(user: UserContext) {
-    return this.db.transaction(async (manager) => {
-      for (const [
-        index,
-        [typeCode, name, kind],
-      ] of STOCK_TYPE_DEFAULTS.entries()) {
-        if (
-          !(await manager.getRepository(CodeItem).findOneBy({
-            companyId: user.companyId,
-            codeId: CODE,
-            codeItemId: typeCode,
-          }))
-        )
-          await manager.getRepository(CodeItem).save({
-            companyId: user.companyId,
-            codeId: CODE,
-            codeItemId: typeCode,
-            name,
-            sortOrder: index,
-          });
-        if (
-          !(await manager
-            .getRepository(InventoryTypeRule)
-            .findOneBy({ companyId: user.companyId, typeCode }))
-        )
-          await manager.getRepository(InventoryTypeRule).save({
-            companyId: user.companyId,
-            typeCode,
-            processingKind: kind,
-          });
-      }
-      return { message: '기본 수불유형을 등록했습니다.' };
-    });
   }
   async options(user: UserContext) {
     this.scoped(user);
-    const companyId = user.companyId;
-    const [
-      rules,
-      codes,
-      materials,
-      sites,
-      warehouses,
-      departments,
-      orders,
-      periods,
-    ] = await Promise.all([
-      this.db.getRepository(InventoryTypeRule).find({ where: { companyId } }),
-      this.db.getRepository(CodeItem).find({
-        where: { companyId, codeId: CODE },
-        order: { sortOrder: 'ASC' },
+    const [materials, sites, warehouses, periods] = await Promise.all([
+      this.db.getRepository(Material).find({
+        where: { companyId: user.companyId, deleteYn: 'N' },
+        order: { materialId: 'ASC' },
       }),
-      this.db
-        .getRepository(Material)
-        .find({ where: { companyId, deleteYn: 'N' } }),
-      this.db.getRepository(Site).find({ where: { companyId, deleteYn: 'N' } }),
+      this.db.getRepository(Site).find({
+        where: { companyId: user.companyId, deleteYn: 'N' },
+        order: { siteId: 'ASC' },
+      }),
       this.db.getRepository(Warehouse).find({
-        where: { companyId, deleteYn: 'N' },
+        where: { companyId: user.companyId, deleteYn: 'N' },
         order: { siteId: 'ASC', warehouseId: 'ASC' },
       }),
-      this.db
-        .getRepository(Department)
-        .find({ where: { companyId, deleteYn: 'N' } }),
-      this.purchases.findAll(user, { status: 'C' }),
-      this.db
-        .getRepository(InventoryPeriodLock)
-        .find({ where: { companyId }, order: { yearMonth: 'DESC' } }),
-    ]);
-    return {
-      types: codes.flatMap((c) => {
-        const r = rules.find((r) => r.typeCode === c.codeItemId);
-        return r
-          ? [{ value: r.typeCode, label: c.name, kind: r.processingKind }]
-          : [];
+      this.db.getRepository(InventoryPeriodLock).find({
+        where: { companyId: user.companyId },
+        order: { yearMonth: 'DESC' },
       }),
+    ]);
+    // 입고 후보는 발주 소속이 아닌 목적지 기준이다. 구매 화면 자체의 scope는 변경하지 않는다.
+    const orders =
+      user.accessScope === 'COMPANY_ALL' || user.siteId
+        ? await this.db.getRepository(PurchaseOrder).find({
+            where: {
+              companyId: user.companyId,
+              ...(user.accessScope === 'COMPANY_ALL'
+                ? {}
+                : { toSiteId: user.siteId! }),
+              status: 'C',
+              deleteYn: 'N',
+            },
+            select: { orderId: true, documentNo: true, title: true },
+            order: { createdAt: 'DESC', orderId: 'DESC' },
+          })
+        : [];
+    const receipts = await this.db.getRepository(InventoryDocument).find({
+      where: {
+        companyId: user.companyId,
+        refModule: ModuleCode.PURORD,
+        status: 'C',
+        deleteYn: 'N',
+      },
+      select: { refId: true },
+    });
+    const receivedIds = new Set(receipts.map((row) => row.refId));
+    return {
       materials: materials.map(({ materialId, name, spec, baseUnit }) => ({
         materialId,
         name,
@@ -218,252 +245,222 @@ export class InventoryService {
         warehouseId: w.warehouseId,
         name: w.name,
       })),
-      departments: departments.map((d) => ({ value: d.deptId, label: d.name })),
-      orders: orders.map((o) => ({
-        orderId: o.orderId,
-        documentNo: o.documentNo,
-        title: o.title,
-      })),
+      orders: orders.filter((order) => !receivedIds.has(order.orderId)),
       periods,
-      transfers: await this.incoming(user),
     };
   }
-  async incoming(user: UserContext) {
-    const rows = await this.db.getRepository(StockInTransit).find({
-      where: { companyId: user.companyId, receivedDocumentId: IsNull() },
-    });
-    const visible: StockInTransit[] = [];
-    for (const row of rows) {
-      try {
-        await this.assertScope(user, row.toSiteId, row.toDeptId);
-        visible.push(row);
-      } catch (error) {
-        if (!(error instanceof ForbiddenException)) throw error;
-      }
-    }
-    const ids = [...new Set(visible.map((t) => t.outDocumentId))];
-    const docs: InventoryDocument[] = [];
-    for (const id of ids) {
-      const d = await this.db.getRepository(InventoryDocument).findOneBy({
-        companyId: user.companyId,
-        inventoryDocumentId: id,
-        status: 'C',
-        deleteYn: 'N',
-      });
-      if (d) docs.push(d);
-    }
-    return docs.map((d) => ({
-      inventoryDocumentId: d.inventoryDocumentId,
-      documentNo: d.documentNo,
-      title: d.title,
-      toSiteId: d.toSiteId,
-      toWarehouseId: d.toWarehouseId,
-      toDeptId: d.toDeptId,
-    }));
+  private assertSite(user: UserContext, siteId: string) {
+    if (user.accessScope === 'COMPANY_ALL') return;
+    if (
+      (user.accessScope === 'OWN_SITE' ||
+        user.accessScope === 'OWN_DEPARTMENT') &&
+      user.siteId === siteId
+    )
+      return;
+    throw new ForbiddenException('처리 사업장 범위 밖입니다.');
   }
-  async reference(
+
+  /** 입고용 원문은 발주 작성 사업장이 아닌 수령 사업장(toSiteId)으로 접근을 검사한다. */
+  async purchaseOrder(
     user: UserContext,
-    module: string,
     id: string,
     manager = this.db.manager,
   ) {
-    if (module === 'purchase_order') {
-      const order = await this.purchases.findOne(user, id, manager);
-      if (order.status !== 'C' || !order.items.length)
-        throw new BadRequestException('완결 발주만 입고할 수 있습니다.');
-      return {
-        referenceNo: order.orderId,
-        title: order.title,
-        items: order.items.map((i) => ({
-          refItemId: i.itemId,
-          materialId: i.materialId,
-          materialName: i.materialName,
-          spec: i.spec,
-          baseUnit: i.baseUnit,
-          quantity: i.quantity,
-          unitPrice: i.unitPrice ?? '0',
-        })),
-        toSiteId: null as string | null,
-        toWarehouseId: null as string | null,
-        toDeptId: null as string | null,
-        postingDate: null as string | null,
-      };
-    }
-    if (module !== 'inventory_document')
-      throw new BadRequestException('잘못된 참조 모듈입니다.');
-    const source = await manager.getRepository(InventoryDocument).findOneBy({
+    const order = await manager.getRepository(PurchaseOrder).findOneBy({
       companyId: user.companyId,
-      inventoryDocumentId: id,
+      orderId: id,
       status: 'C',
-      processingKind: 'SITE_OUT',
       deleteYn: 'N',
     });
-    if (!source?.toSiteId || !source.toWarehouseId)
-      throw new NotFoundException('확정 타사업장출고가 없습니다.');
-    await this.assertScope(user, source.toSiteId, source.toDeptId, manager);
-    const transits = await manager
-      .getRepository(StockInTransit)
-      .find({ where: { companyId: user.companyId, outDocumentId: id } });
-    if (!transits.length || transits.some((t) => t.receivedDocumentId))
-      throw new ConflictException('이미 입고되었거나 이동 내역이 없습니다.');
-    const sourceItems = await manager.getRepository(InventoryItem).find({
-      where: { companyId: user.companyId, inventoryDocumentId: id },
+    if (!order || !order.toSiteId)
+      throw new NotFoundException('완결된 발주가 없습니다.');
+    if (user.accessScope !== 'COMPANY_ALL' && order.toSiteId !== user.siteId)
+      throw new ForbiddenException('입고 사업장 범위 밖입니다.');
+    const items = await manager.getRepository(PurchaseOrderItem).find({
+      where: { companyId: user.companyId, orderId: id },
       order: { sortOrder: 'ASC' },
     });
     return {
-      referenceNo: source.inventoryDocumentId,
-      title: source.title,
-      items: sourceItems.map((i) => ({
+      title: order.title,
+      siteId: order.toSiteId,
+      items: items.map((i) => ({
         refItemId: i.itemId,
         materialId: i.materialId,
         materialName: i.materialName,
         spec: i.spec,
         baseUnit: i.baseUnit,
         quantity: i.quantity,
-        unitPrice: i.unitPrice,
+        unitPrice: i.unitPrice ?? '0',
       })),
-      toSiteId: source.toSiteId,
-      toWarehouseId: source.toWarehouseId,
-      toDeptId: source.toDeptId,
-      postingDate: source.postingDate,
     };
   }
-  async save(user: UserContext, dto: SaveInventoryDto, id?: string) {
-    const targetId = id ?? dto.inventoryDocumentId;
-    if (!targetId)
-      throw new BadRequestException('서버 채번 문서 ID가 필요합니다.');
+  /** 문서번호와 다른 회사 전체 확정순번이다. 호출자는 회사 잠금을 보유하며 취소해도 카운터를 되돌리지 않는다. */
+  private async sequence(manager: EntityManager, companyId: string) {
+    const repo = manager.getRepository(InventoryControl);
+    const row =
+      (await repo.findOneBy({ companyId })) ??
+      repo.create({ companyId, lastSequence: '0' });
+    row.lastSequence = (BigInt(row.lastSequence) + 1n).toString();
+    await repo.save(row);
+    return row.lastSequence;
+  }
+  /** 원문 중복·전체 품목·월 잠금을 확인하고 전표와 해당 잔고 변경을 같은 트랜잭션에서 저장한다. */
+  async create(user: UserContext, dto: CreateInventoryDto) {
+    const id = dto.inventoryDocumentId;
+    if (!id) throw new BadRequestException('서버 문서번호가 없습니다.');
+    const movingOut = dto.type === 'OUT' && dto.kind === 'TRANSFER';
+    // 공통 채번 정책대로 저장 전 번호를 확보하며 실패 번호는 재사용하지 않는다.
+    const incomingId = movingOut
+      ? await this.numbering.generateDocumentId(
+          user.companyId,
+          ModuleCode.INVDOC,
+        )
+      : null;
     await this.db.transaction(async (manager) => {
-      const old = id ? await this.get(user, id, manager) : null;
-      if (old) this.editable(user, old);
-      else if (
-        await manager.getRepository(InventoryDocument).findOneBy({
+      await this.stock.companyLock(manager, user.companyId);
+      this.assertSite(user, dto.siteId);
+      await this.openPeriod(user.companyId, dto.postingDate, manager);
+      if (
+        !inventoryVariant(dto.type, dto.kind) ||
+        (dto.type === 'IN' && dto.kind === 'TRANSFER')
+      )
+        throw new BadRequestException('허용되지 않은 신규 수불 유형입니다.');
+      const docs = manager.getRepository(InventoryDocument);
+      if (
+        await docs.existsBy({
           companyId: user.companyId,
-          inventoryDocumentId: targetId,
+          inventoryDocumentId: id,
         })
       )
         throw new ConflictException('중복 문서 ID입니다.');
-      const deptId = dto.deptId ?? user.deptId;
-      await this.assertScope(user, dto.siteId, deptId, manager);
       await this.warehouse(
         user.companyId,
         dto.siteId,
         dto.warehouseId,
         manager,
       );
-      businessDate(dto.postingDate);
-      const rule = await manager
-        .getRepository(InventoryTypeRule)
-        .findOneBy({ companyId: user.companyId, typeCode: dto.typeCode });
-      if (
-        !rule ||
-        !STOCK_KINDS.includes(rule.processingKind as StockKind) ||
-        !(await manager.getRepository(CodeItem).findOneBy({
-          companyId: user.companyId,
-          codeId: CODE,
-          codeItemId: dto.typeCode,
-        }))
-      )
-        throw new BadRequestException('수불 유형 설정을 확인하십시오.');
-      const kind = rule.processingKind;
-      if (kind === 'TRANSFER' || kind === 'SITE_OUT') {
-        await this.warehouse(
-          user.companyId,
-          dto.toSiteId ?? '',
-          dto.toWarehouseId ?? '',
-          manager,
-        );
+      if (!dto.title.trim() || !dto.items.length)
+        throw new BadRequestException('전표명과 품목을 입력하십시오.');
+      if (dto.type === 'ADJUST' && !dto.reason?.trim())
+        throw new BadRequestException('조정 사유를 입력하십시오.');
+      const linked = dto.type === 'IN' && dto.kind === 'PURCHASE';
+      if (linked && (!dto.refId || dto.refModule !== ModuleCode.PURORD))
+        throw new BadRequestException('구매오더를 선택하십시오.');
+      if (!linked && (dto.refId || dto.refModule))
+        throw new BadRequestException('해당 수불은 원본을 연결할 수 없습니다.');
+      const source = linked
+        ? await this.purchaseOrder(user, dto.refId!, manager)
+        : null;
+      if (source) {
         if (
-          (kind === 'TRANSFER' &&
-            (dto.siteId !== dto.toSiteId ||
-              dto.warehouseId === dto.toWarehouseId)) ||
-          (kind === 'SITE_OUT' && dto.siteId === dto.toSiteId)
+          source.siteId !== dto.siteId ||
+          source.items.length !== dto.items.length
         )
           throw new BadRequestException(
-            '이동 유형과 목적 사업장·창고가 일치하지 않습니다.',
+            '원본 사업장과 전체 품목·수량을 유지하십시오.',
+          );
+        if (
+          await docs.existsBy({
+            companyId: user.companyId,
+            refModule: ModuleCode.PURORD,
+            refId: dto.refId!,
+            status: 'C',
+            deleteYn: 'N',
+          })
+        )
+          throw new ConflictException('이미 입고 확정한 구매오더입니다.');
+      }
+      let destination: Warehouse | null = null;
+      if (movingOut) {
+        if (!dto.toWarehouseId)
+          throw new BadRequestException('수령 창고를 선택하십시오.');
+        // 창고 키는 사업장+창고 복합키이므로 UI가 선택한 창고의 사업장을 함께 보낸다.
+        destination = await manager.getRepository(Warehouse).findOneBy({
+          companyId: user.companyId,
+          siteId: dto.toSiteId ?? '',
+          warehouseId: dto.toWarehouseId,
+          deleteYn: 'N',
+        });
+        if (
+          !destination ||
+          (destination.siteId === dto.siteId &&
+            destination.warehouseId === dto.warehouseId)
+        )
+          throw new BadRequestException(
+            '같은 회사의 다른 수령 창고를 선택하십시오.',
           );
       }
-      const linked = kind === 'PURCHASE_IN' || kind === 'SITE_IN';
-      if (
-        linked &&
-        (!dto.refId ||
-          dto.refModule !==
-            (kind === 'PURCHASE_IN' ? 'purchase_order' : 'inventory_document'))
-      )
-        throw new BadRequestException('원 발주 또는 출고를 선택하십시오.');
-      if (!linked && (dto.refId || dto.refModule))
-        throw new BadRequestException(
-          '일반 수불에는 구매/이동 원본을 연결할 수 없습니다.',
-        );
-      const source = linked
-        ? await this.reference(user, dto.refModule!, dto.refId!, manager)
-        : null;
-      if (source && source.items.length !== dto.items.length)
-        throw new BadRequestException('부분 입고는 허용되지 않습니다.');
-      if (
-        kind === 'SITE_IN' &&
-        source &&
-        (source.toSiteId !== dto.siteId ||
-          source.toWarehouseId !== dto.warehouseId ||
-          dto.postingDate < source.postingDate!)
-      )
-        throw new BadRequestException(
-          '도착 사업장·창고 또는 posting date를 확인하십시오.',
-        );
-      const items: InventoryItem[] = [],
-        seen = new Set<string>(),
-        sourceSeen = new Set<string>();
+      const seen = new Set<string>(),
+        refs = new Set<string>(),
+        items: InventoryItem[] = [];
       for (const [index, input] of dto.items.entries()) {
         const itemId = input.itemId ?? randomUUID();
         if (seen.has(itemId))
           throw new BadRequestException('중복 품목 ID입니다.');
         seen.add(itemId);
-        const quantity = decimal(qty(input.quantity, kind === 'ADJUST'));
-        if (
-          qty(quantity, true) === 0n ||
-          (kind !== 'ADJUST' && qty(quantity, true) < 0n)
-        )
-          throw new BadRequestException('유효한 수량을 입력하십시오.');
         const original = source?.items.find(
-          (s) => s.refItemId === input.refItemId,
+          (i) => i.refItemId === input.refItemId,
         );
+        const quantity = decimal(
+          original
+            ? qty(input.quantity)
+            : inputQuantity(input.quantity, dto.type === 'ADJUST'),
+        );
+        if (dto.type !== 'ADJUST' && qty(quantity, true) <= 0n)
+          throw new BadRequestException('수량은 양수여야 합니다.');
         if (
           source &&
           (!original ||
-            sourceSeen.has(original.refItemId) ||
+            refs.has(original.refItemId) ||
             original.materialId !== input.materialId ||
-            qty(original.quantity) !== qty(quantity, true))
+            qty(original.quantity) !== qty(quantity))
         )
-          throw new BadRequestException(
-            '원본의 전체 품목·수량을 유지하십시오.',
-          );
-        if (original) sourceSeen.add(original.refItemId);
+          throw new BadRequestException('원본 전체 품목·수량을 유지하십시오.');
+        if (original) refs.add(original.refItemId);
         const material = await manager.getRepository(Material).findOneBy({
           companyId: user.companyId,
           materialId: input.materialId,
           deleteYn: 'N',
         });
-        if (!material)
-          throw new BadRequestException('유효한 회사 자재를 선택하십시오.');
-        if (original && original.baseUnit !== material.baseUnit)
-          throw new BadRequestException('원 자재 단위가 변경되었습니다.');
-        const receipt =
-          kind === 'GENERAL_IN' ||
-          kind === 'PURCHASE_IN' ||
-          kind === 'SITE_IN' ||
-          (kind === 'ADJUST' && qty(quantity, true) > 0n);
-        const unitPrice =
-          original?.unitPrice ??
-          (receipt ? decimal(price(input.unitPrice ?? '0'), 8) : '0');
+        if (!material || (original && original.baseUnit !== material.baseUnit))
+          throw new BadRequestException(
+            '유효한 회사 자재·단위를 확인하십시오.',
+          );
         if (
           original &&
           input.unitPrice !== undefined &&
           price(input.unitPrice) !== price(original.unitPrice)
         )
           throw new BadRequestException('원본 단가는 변경할 수 없습니다.');
+        let unitPrice = '0',
+          amount = '0';
+        if (dto.type === 'ADJUST') {
+          if (!/^-?\d{1,20}$/.test(input.amount ?? ''))
+            throw new BadRequestException('조정 금액은 정수로 입력하십시오.');
+          amount = BigInt(input.amount!).toString();
+          if (qty(quantity, true) === 0n && amount === '0')
+            throw new BadRequestException(
+              '수량과 금액을 모두 0으로 조정할 수 없습니다.',
+            );
+        } else {
+          if (input.amount !== undefined)
+            throw new BadRequestException(
+              '금액 직접 입력은 조정에서만 가능합니다.',
+            );
+          if (dto.type === 'IN') {
+            unitPrice =
+              original?.unitPrice ??
+              decimal(inputPrice(input.unitPrice ?? '0'), 8);
+            amount = rounded(
+              qty(quantity) * price(unitPrice),
+              100000000000000n,
+            ).toString();
+          }
+        }
         items.push(
           Object.assign(new InventoryItem(), {
             companyId: user.companyId,
-            inventoryDocumentId: targetId,
+            inventoryDocumentId: id,
             itemId,
             sortOrder: index,
             materialId: material.materialId,
@@ -472,166 +469,179 @@ export class InventoryService {
             baseUnit: original?.baseUnit ?? material.baseUnit,
             quantity,
             unitPrice,
-            amount:
-              receipt && qty(quantity, true) > 0n
-                ? lineAmount(quantity, unitPrice)
-                : '0',
+            amount,
             refItemId: original?.refItemId ?? null,
             note: input.note?.trim() || null,
           }),
         );
       }
-      if (!dto.title.trim())
-        throw new BadRequestException('전표명을 입력하십시오.');
-      const row = Object.assign(new InventoryDocument(), old ?? {}, {
+      const row = docs.create({
         companyId: user.companyId,
-        inventoryDocumentId: targetId,
+        inventoryDocumentId: id,
         documentNo: dto.documentNo?.trim() ?? '',
         title: dto.title.trim(),
-        typeCode: dto.typeCode,
-        processingKind: kind,
+        type: dto.type,
+        kind: dto.kind ?? null,
         postingDate: dto.postingDate,
         siteId: dto.siteId,
         warehouseId: dto.warehouseId,
-        deptId: kind === 'SITE_IN' ? source!.toDeptId : deptId,
-        toSiteId: dto.toSiteId ?? null,
-        toWarehouseId: dto.toWarehouseId ?? null,
-        toDeptId: dto.toDeptId ?? null,
-        refModule: linked ? dto.refModule : null,
+        deptId: dto.deptId ?? user.deptId,
+        toSiteId: destination?.siteId ?? null,
+        toWarehouseId: destination?.warehouseId ?? null,
+        refModule: linked ? ModuleCode.PURORD : null,
         refId: linked ? dto.refId : null,
-        referenceNo: source?.referenceNo ?? null,
+        attachmentId: dto.attachmentId ?? null,
         reason: dto.reason?.trim() || null,
         note: dto.note?.trim() || null,
-        attachmentId: dto.attachmentId ?? null,
-        status: 'D',
+        status: 'C',
         deleteYn: 'N',
-        createdBy: old?.createdBy ?? user.userId,
+        postingSequence: await this.sequence(manager, user.companyId),
+        createdBy: user.userId,
+        confirmedBy: user.userId,
+        confirmedAt: new Date(),
+        cancelledBy: null,
+        cancelledAt: null,
+        cancelReason: null,
       });
-      if (old) {
-        row.updatedBy = user.userId;
-        row.updatedAt = new Date();
+      await this.stock.apply(manager, row, items);
+      await docs.save(row);
+      await manager.getRepository(InventoryItem).save(items);
+      // 이동 입고는 출고와 함께 W로 저장한다. 수령 확정 전에는 도착 창고 잔고를 변경하지 않는다.
+      if (destination && incomingId) {
+        const incoming = docs.create(
+          Object.assign({}, row, {
+            inventoryDocumentId: incomingId,
+            documentNo: '',
+            type: 'IN',
+            siteId: destination.siteId,
+            warehouseId: destination.warehouseId,
+            deptId: null,
+            toSiteId: null,
+            toWarehouseId: null,
+            refModule: ModuleCode.INVDOC,
+            refId: id,
+            attachmentId: null,
+            status: 'W',
+            postingSequence: null,
+            confirmedBy: null,
+            confirmedAt: null,
+          }),
+        );
+        await docs.save(incoming);
+        await manager.getRepository(InventoryItem).save(
+          items.map((i) =>
+            Object.assign({}, i, {
+              inventoryDocumentId: incomingId,
+              itemId: randomUUID(),
+              refItemId: i.itemId,
+            }),
+          ),
+        );
       }
-      await manager.getRepository(InventoryDocument).save(row);
-      await manager
-        .getRepository(InventoryItem)
-        .delete({ companyId: user.companyId, inventoryDocumentId: targetId });
-      if (items.length) await manager.getRepository(InventoryItem).save(items);
     });
-    return this.get(user, targetId);
+    return this.get(user, id);
   }
-  async remove(user: UserContext, id: string) {
-    const row = await this.get(user, id);
-    this.editable(user, row);
-    await this.db
-      .getRepository(InventoryDocument)
-      .update(
-        { companyId: user.companyId, inventoryDocumentId: id },
-        { deleteYn: 'Y', updatedBy: user.userId, updatedAt: new Date() },
-      );
-    return row;
-  }
-  async confirm(user: UserContext, id: string) {
+  /** 이동 출고 때 보존한 수량·단가·금액 그대로 입고한다. 확정 시점에 순번만 새로 부여한다. */
+  async confirm(user: UserContext, id: string, postingDate: string) {
     await this.db.transaction(async (manager) => {
       await this.stock.companyLock(manager, user.companyId);
       const row = await this.get(user, id, manager);
-      if (row.status === 'C') return;
-      this.editable(user, row);
-      const period = await manager
-        .getRepository(InventoryPeriodLock)
-        .findOneBy({
-          companyId: user.companyId,
-          yearMonth: row.postingDate.slice(0, 6),
-        });
-      if (!period || period.locked)
-        throw new ConflictException(
-          'Posting 월이 Open되지 않았거나 마감되었습니다.',
-        );
-      if (!row.items.length)
-        throw new BadRequestException('품목을 입력하십시오.');
-      if (row.processingKind === 'ADJUST' && !row.reason)
-        throw new BadRequestException('조정 사유를 입력하십시오.');
-      if (row.refModule && row.refId) {
-        const source = await this.reference(
-          user,
-          row.refModule,
-          row.refId,
-          manager,
-        );
-        if (
-          source.items.length !== row.items.length ||
-          source.items.some(
-            (s) =>
-              !row.items.some(
-                (i) =>
-                  i.refItemId === s.refItemId &&
-                  i.materialId === s.materialId &&
-                  qty(i.quantity) === qty(s.quantity),
-              ),
-          )
-        )
-          throw new ConflictException('원본 전체 수량과 일치하지 않습니다.');
-        const duplicate = await manager
-          .getRepository(InventoryDocument)
-          .findOneBy({
-            companyId: user.companyId,
-            refModule: row.refModule,
-            refId: row.refId,
-            status: 'C',
-            deleteYn: 'N',
-          });
-        if (duplicate)
-          throw new ConflictException('이미 입고 확정한 원본입니다.');
-      }
+      if (row.status !== 'W' || row.type !== 'IN' || row.kind !== 'TRANSFER')
+        throw new ConflictException('수령 대기 입고만 확정할 수 있습니다.');
+      this.assertSite(user, row.siteId);
       await this.warehouse(
         user.companyId,
         row.siteId,
         row.warehouseId,
         manager,
       );
-      if (row.toSiteId && row.toWarehouseId)
-        await this.warehouse(
-          user.companyId,
-          row.toSiteId,
-          row.toWarehouseId,
-          manager,
+      const source = await manager.getRepository(InventoryDocument).findOneBy({
+        companyId: user.companyId,
+        inventoryDocumentId: row.refId!,
+        type: 'OUT',
+        kind: 'TRANSFER',
+        status: 'C',
+        deleteYn: 'N',
+      });
+      if (!source) throw new ConflictException('유효한 원 출고가 없습니다.');
+      if (postingDate < source.postingDate)
+        throw new BadRequestException(
+          '입고 전기일은 출고 전기일보다 빠를 수 없습니다.',
         );
-      for (const item of row.items) {
-        const material = await manager.getRepository(Material).findOneBy({
-          companyId: user.companyId,
-          materialId: item.materialId,
-          deleteYn: 'N',
-        });
-        if (!material || material.baseUnit !== item.baseUnit)
-          throw new BadRequestException('자재 또는 기본단위가 변경되었습니다.');
-      }
-      let control = await manager
-        .getRepository(InventoryControl)
-        .findOneBy({ companyId: user.companyId });
-      if (!control)
-        control = Object.assign(new InventoryControl(), {
-          companyId: user.companyId,
-          lastSequence: '0',
-        });
-      control.lastSequence = (BigInt(control.lastSequence) + 1n).toString();
-      await manager.getRepository(InventoryControl).save(control);
-      await manager.getRepository(InventoryDocument).update(
+      await this.openPeriod(user.companyId, postingDate, manager);
+      row.status = 'C';
+      row.postingDate = postingDate;
+      row.postingSequence = await this.sequence(manager, user.companyId);
+      row.confirmedBy = user.userId;
+      row.confirmedAt = new Date();
+      row.updatedBy = user.userId;
+      row.updatedAt = new Date();
+      await this.stock.apply(manager, row, row.items);
+      const {
+        items: _items,
+        sourceSiteId: _site,
+        sourceWarehouseId: _warehouse,
+        ...header
+      } = row;
+      await manager.getRepository(InventoryDocument).save(header);
+    });
+    return this.get(user, id);
+  }
+  /** 회사 최신 확정순번부터 원금액으로 역반영한다. 확정 입고는 먼저 취소하고 대기 입고는 출고와 함께 취소한다. */
+  async cancel(user: UserContext, id: string, reason: string) {
+    if (!reason.trim())
+      throw new BadRequestException('취소 사유를 입력하십시오.');
+    await this.db.transaction(async (manager) => {
+      await this.stock.companyLock(manager, user.companyId);
+      const row = await this.get(user, id, manager);
+      if (row.status !== 'C')
+        throw new ConflictException(
+          '확정 전표만 취소할 수 있습니다. 대기 입고는 원 출고에서 함께 취소합니다.',
+        );
+      await this.openPeriod(user.companyId, row.postingDate, manager);
+      const docs = manager.getRepository(InventoryDocument);
+      const last = await docs.findOne({
+        where: { companyId: user.companyId, status: 'C', deleteYn: 'N' },
+        order: { postingSequence: 'DESC' },
+      });
+      if (last?.inventoryDocumentId !== id)
+        throw new ConflictException(
+          '회사 전체의 마지막 확정 전표부터 취소하십시오.',
+        );
+      const incoming =
+        row.type === 'OUT' && row.kind === 'TRANSFER'
+          ? await docs.findOneBy({
+              companyId: user.companyId,
+              type: 'IN',
+              kind: 'TRANSFER',
+              refModule: ModuleCode.INVDOC,
+              refId: id,
+              deleteYn: 'N',
+            })
+          : null;
+      if (incoming?.status === 'C')
+        throw new ConflictException('입고를 먼저 취소하십시오.');
+      await this.stock.apply(manager, row, row.items, true);
+      const cancelled = {
+        status: 'X' as const,
+        cancelledBy: user.userId,
+        cancelledAt: new Date(),
+        cancelReason: reason.trim(),
+        updatedBy: user.userId,
+        updatedAt: new Date(),
+      };
+      await docs.update(
         { companyId: user.companyId, inventoryDocumentId: id },
-        {
-          status: 'C',
-          postingSequence: control.lastSequence,
-          updatedBy: user.userId,
-          updatedAt: new Date(),
-        },
+        cancelled,
       );
-      await this.stock.rebuild(manager, user.companyId);
-      await manager
-        .getRepository(InventoryPeriodLock)
-        .createQueryBuilder()
-        .update()
-        .set({ summaryDirty: true })
-        .where('"companyId"=:companyId', { companyId: user.companyId })
-        .andWhere('"yearMonth">=:month', { month: period.yearMonth })
-        .execute();
+      if (incoming?.status === 'W')
+        await docs.update(
+          {
+            companyId: user.companyId,
+            inventoryDocumentId: incoming.inventoryDocumentId,
+          },
+          cancelled,
+        );
     });
     return this.get(user, id);
   }

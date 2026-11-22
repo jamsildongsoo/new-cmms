@@ -35,7 +35,7 @@ export class VendorService {
     return value.trim();
   }
   private assign(row: Vendor, dto: UpdateVendorDto) {
-    if (dto.name !== undefined) row.name = this.required(dto.name, '벤더명');
+    if (dto.name !== undefined) row.name = this.required(dto.name, '거래처명');
     for (const key of optionalFields)
       if (dto[key] !== undefined) row[key] = dto[key]?.trim() || null;
     return row;
@@ -49,7 +49,7 @@ export class VendorService {
     if (dto.search?.trim())
       query.andWhere(
         '(v.vendorId ILIKE :value OR v.name ILIKE :value OR v.registrationNumber ILIKE :value)',
-        { value: `%${dto.search.trim()}%` },
+        { value: `%${dto.search.trim().replace(/[\\%_]/g, '\\$&')}%` },
       );
     const [items, total] = await query
       .orderBy('v.vendorId', 'ASC')
@@ -64,17 +64,17 @@ export class VendorService {
       vendorId,
       deleteYn: 'N',
     });
-    if (!row) throw new NotFoundException('벤더를 찾을 수 없습니다.');
+    if (!row) throw new NotFoundException('거래처를 찾을 수 없습니다.');
     return row;
   }
   async create(user: UserContext, dto: CreateVendorDto) {
-    const vendorId = this.required(dto.vendorId, '벤더번호');
+    const vendorId = this.required(dto.vendorId, '거래처번호');
     if (await this.repo.findOneBy({ companyId: user.companyId, vendorId }))
-      throw new ConflictException('이미 등록된 벤더번호입니다.');
+      throw new ConflictException('이미 등록된 거래처번호입니다.');
     const row = this.repo.create({
       companyId: user.companyId,
       vendorId,
-      name: this.required(dto.name, '벤더명'),
+      name: this.required(dto.name, '거래처명'),
       deleteYn: 'N',
       createdBy: user.userId,
     });
@@ -86,7 +86,7 @@ export class VendorService {
         error instanceof QueryFailedError &&
         (error.driverError as { code?: string }).code === '23505'
       )
-        throw new ConflictException('이미 등록된 벤더번호입니다.');
+        throw new ConflictException('이미 등록된 거래처번호입니다.');
       throw error;
     }
   }
@@ -110,7 +110,7 @@ export class VendorService {
   async remove(user: UserContext, id: string) {
     const row = await this.get(user, id);
     const { purchaseOrderCount } = await this.deletionInfo(user, id);
-    // 기존 발주의 벤더 참조를 유지하여 삭제 후에도 업체 정보를 조회한다.
+    // 기존 발주의 거래처 참조를 유지하여 삭제 후에도 업체 정보를 조회한다.
     row.deleteYn = 'Y';
     row.updatedBy = user.userId;
     row.updatedAt = new Date();

@@ -23,12 +23,14 @@ export class BoardsService {
     const builder = this.db
       .getRepository(Board)
       .createQueryBuilder('b')
+      // API 계약: frontend/src/modules/boards/boards.api.ts의 BoardListItem과 함께 수정한다.
+      .select(['b.boardId', 'b.title', 'b.createdBy', 'b.createdAt'])
       .where('b.companyId = :companyId', { companyId: user.companyId })
       .andWhere("b.deleteYn = 'N'");
     if (query.search?.trim())
       builder.andWhere(
         '(b.title ILIKE :search OR b.content ILIKE :search OR b.boardId ILIKE :search)',
-        { search: `%${query.search.trim()}%` },
+        { search: `%${query.search.trim().replace(/[\\%_]/g, '\\$&')}%` },
       );
     const [items, total] = await builder
       .orderBy('b.createdAt', 'DESC')
@@ -36,7 +38,17 @@ export class BoardsService {
       .skip(offset)
       .take(limit)
       .getManyAndCount();
-    return { items, total, page, limit };
+    return {
+      items: items.map(({ boardId, title, createdBy, createdAt }) => ({
+        boardId,
+        title,
+        createdBy,
+        createdAt,
+      })),
+      total,
+      page,
+      limit,
+    };
   }
 
   private async active(

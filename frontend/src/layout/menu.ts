@@ -1,3 +1,4 @@
+// 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
 /** 홈·사이드바가 공유하는 메뉴 순서와 표시 권한이다. 실제 접근 권한은 서버에서 검사한다. */
 import {
   Building2,
@@ -5,7 +6,6 @@ import {
   ClipboardCheck,
   Home,
   MessageSquare,
-  KeyRound,
   MapPin,
   Package,
   Shield,
@@ -42,96 +42,119 @@ export const menuGroups: MenuGroup[] = [
       {
         label: '설비 마스터',
         path: '/equipment',
-        permission: 'equipment:read',
+        permission: 'EQUIP:read',
         icon: Wrench,
       },
       {
         label: '예방점검',
         path: '/preventive-maintenance',
-        permission: 'preventive_maintenance:read',
+        permission: 'PMAINT:read',
         icon: CalendarCheck,
       },
       {
         label: '작업의뢰서',
         path: '/work-request',
-        permission: 'work_request:read',
+        permission: 'WRKREQ:read',
         icon: Wrench,
       },
       {
         label: '작업 오더',
         path: '/work-order',
-        permission: 'work_order:read',
+        permission: 'WRKORD:read',
         icon: Wrench,
       },
       {
         label: '허가요청서',
         path: '/work-permit-request',
-        permission: 'work_permit_request:read',
+        permission: 'PERREQ:read',
         icon: ClipboardCheck,
       },
       {
         label: '작업허가서',
         path: '/work-permit',
-        permission: 'work_permit:read',
+        permission: 'PERMIT:read',
         icon: ClipboardCheck,
       },
     ],
   },
   {
-    label: '구매·재고관리',
+    label: '구매관리',
     items: [
       {
-        label: '자재 마스터',
-        path: '/material',
-        permission: 'material:read',
-        icon: Package,
-      },
-      {
-        label: '벤더 관리',
+        label: '거래처 관리',
         path: '/vendor',
-        permission: 'vendor:read',
+        permission: 'VENDOR:read',
         icon: Building2,
-      },
-      {
-        label: '창고 관리',
-        path: '/warehouses',
-        permission: 'warehouse:read',
-        icon: Warehouse,
       },
       {
         label: '구매요청서',
         path: '/purchase-request',
-        permission: 'purchase_request:read',
+        permission: 'PURREQ:read',
         icon: Package,
       },
       {
         label: '구매발주서',
         path: '/purchase-order',
-        permission: 'purchase_order:read',
+        permission: 'PURORD:read',
+        icon: Package,
+      },
+    ],
+  },
+  {
+    label: '재고관리',
+    items: [
+      {
+        label: '자재 마스터',
+        path: '/material',
+        permission: 'MATL:read',
         icon: Package,
       },
       {
-        label: '재고처리',
-        path: '/inventory-document',
-        permission: 'inventory_document:read',
+        label: '창고 관리',
+        path: '/warehouses',
+        permission: 'WHSE:read',
+        icon: Warehouse,
+      },
+      {
+        label: '입고',
+        path: '/inventory-in',
+        permission: 'INVDOC:read',
+        icon: Warehouse,
+      },
+      {
+        label: '출고',
+        path: '/inventory-out',
+        permission: 'INVDOC:read',
+        icon: Warehouse,
+      },
+      {
+        label: '타창고출고',
+        path: '/inventory-transfer',
+        permission: 'INVDOC:read',
+        icon: Warehouse,
+      },
+      {
+        label: '조정',
+        path: '/inventory-adjust',
+        permission: 'INVDOC:read',
         icon: Warehouse,
       },
       {
         label: '재고 현황',
         path: '/stock-status',
-        permission: 'stock_status:read',
+        permission: 'STOCK:read',
         icon: Warehouse,
       },
       {
         label: '수불장',
         path: '/stock-ledger',
-        permission: 'stock_ledger:read',
+        permission: 'LEDGER:read',
         icon: Warehouse,
       },
       {
         label: '월 마감',
         path: '/monthly-closing',
-        permission: 'monthly_closing:read',
+        permission: 'MCLOSE:read',
         icon: CalendarCheck,
       },
     ],
@@ -142,19 +165,19 @@ export const menuGroups: MenuGroup[] = [
       {
         label: '회사 정보',
         path: '/companies',
-        permission: 'company:read',
+        permission: 'COMP:read',
         icon: Building2,
       },
       {
         label: '사업장 관리',
         path: '/sites',
-        permission: 'site:read',
+        permission: 'SITE:read',
         icon: MapPin,
       },
       {
         label: '부서 관리',
         path: '/departments',
-        permission: 'department:read',
+        permission: 'DEPT:read',
         icon: UsersRound,
       },
     ],
@@ -165,20 +188,20 @@ export const menuGroups: MenuGroup[] = [
       {
         label: '사용자 관리',
         path: '/users',
-        permission: 'user:read',
+        permission: 'USER:read',
         icon: UserRound,
+      },
+      {
+        label: '로그인 이력',
+        path: '/login-history',
+        permission: 'LOGHIST:read',
+        icon: Shield,
       },
       {
         label: '역할 관리',
         path: '/roles',
-        permission: 'role:read',
+        permission: 'ROLE:read',
         icon: Shield,
-      },
-      {
-        label: '권한 관리',
-        path: '/permissions',
-        permission: 'permission:read',
-        icon: KeyRound,
       },
     ],
   },
@@ -188,21 +211,9 @@ export const menuGroups: MenuGroup[] = [
       {
         label: '공통코드 관리',
         path: '/code-items',
-        permission: 'code:read',
+        permission: 'CODE:read',
         icon: Package,
       },
     ],
   },
 ]
-export function visibleMenuGroups(
-  hasPermission: (permission: string) => boolean,
-) {
-  return menuGroups
-    .map((group) => ({
-      ...group,
-      items: group.items.filter(
-        (item) => !item.permission || hasPermission(item.permission),
-      ),
-    }))
-    .filter((group) => group.items.length > 0)
-}

@@ -1,3 +1,8 @@
+import { Pagination } from '@/shared/ui/Pagination'
+import { dateInput, dateValue } from '@/shared/lib/format'
+// 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
+// 유형·입력 항목 변경 시 백엔드 permit-template.ts/DTO/검증/approvalDraft와 permitPrint.ts를 함께 수정한다.
+import { DocumentAudit } from '@/shared/ui/DocumentAudit'
 import { DocumentIdField } from '@/shared/ui/DocumentIdField'
 import { printDocument } from '@/shared/lib/print'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
@@ -26,18 +31,32 @@ import {
   permitApi,
   permitHttp,
   type PermitRecord,
+  type PermitListItem,
   type PermitData,
   type PermitOptions,
   type PermitSection,
 } from './permit.api'
-import { printPermit, validatePermitPrint } from './permitPrint'
+import {
+  printPermit,
+  validatePermitPrint,
+  permitDataLabels,
+} from './permitPrint'
+const permitStatusLabel = (status: string, request: boolean) =>
+  ({
+    D: '작성 중',
+    P: request ? '신청 중' : '결재 중',
+    C: request ? '신청 완료' : '발행 완료',
+    R: '반려',
+    X: '취소',
+  })[status] ?? '상태 확인 필요'
+
 const emptyData: PermitData = {
   title: '',
   applicationDate: '',
   applicantType: 'INTERNAL',
   applicantName: '',
   organization: '',
-  phone: '',
+  phoneNumber: '',
   workType: 'INTERNAL',
   location: '',
   equipmentNo: '',
@@ -46,81 +65,154 @@ const emptyData: PermitData = {
   endTime: '',
   summary: '',
 }
-const dateInput = (v: string) =>
-  v ? `${v.slice(0, 4)}-${v.slice(4, 6)}-${v.slice(6, 8)}` : ''
 const timeInput = (v: string) =>
-  v ? `${dateInput(v)}T${v.slice(9, 11)}:00` : ''
+  v ? `${dateInput(v.slice(0, 8))}T${v.slice(9, 11)}:00` : ''
 const timeValue = (v: string) =>
   v ? v.slice(0, 10).replaceAll('-', '') + ':' + v.slice(11, 13) : ''
 function message(e: unknown) {
-  return e instanceof Error && !('response' in e) ? e.message : toMessage(e)
+  return e instanceof Error && !('response' in e)
+    ? e.message
+    : toMessage(e)
 }
 export function PermitList({ request = false }: { request?: boolean }) {
+  return (
+    <PermitListView
+      key={request ? 'request' : 'permit'}
+      request={request}
+    />
+  )
+}
+function PermitListView({ request = false }: { request?: boolean }) {
   const base = request ? '/work-permit-request' : '/work-permit',
-    module = request ? 'work_permit_request' : 'work_permit'
+    module = request ? 'PERREQ' : 'PERMIT'
   const { hasPermission } = useAuth(),
     navigate = useNavigate()
-  const [rows, setRows] = useState<PermitRecord[]>([]),
+  const [rows, setRows] = useState<PermitListItem[]>([]),
     [error, setError] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const [query, setQuery] = useState({ page: 1, search: '' })
+  const [total, setTotal] = useState(0)
+  const [limit, setLimit] = useState(20)
+  const [loading, setLoading] = useState(true)
   useEffect(() => {
     let active = true
     permitApi
-      .list(base)
-      .then((r) => active && setRows(r))
-      .catch((e) => active && setError(message(e)))
+      .list(base, { page: query.page, search: query.search || undefined })
+      .then((data) => {
+        if (!active) return
+        setRows(data.items)
+        setTotal(data.total)
+        setLimit(data.limit)
+        setError(null)
+      })
+      .catch((e) => {
+        if (!active) return
+        setRows([])
+        setTotal(0)
+        setError(message(e))
+      })
+      .finally(() => active && setLoading(false))
     return () => {
       active = false
     }
-  }, [base])
+  }, [base, query])
   if (!hasPermission(`${module}:read`)) return <Navigate to="/" replace />
   return (
     <section className="space-y-3">
-      <div className="flex justify-between">
+      <div className="flex flex-wrap justify-between">
         <h1>{request ? '허가 요청서' : '작업 허가서'}</h1>
-        <div className="flex gap-2">
+        <div className="page-actions">
           <Button
             type="button"
             variant="secondary"
+            disabled={loading || Boolean(error)}
             onClick={() =>
               printDocument({
                 title: request ? '허가 요청서 목록' : '작업 허가서 목록',
-                columns: ['문서번호', '관리번호', '작업명', '신청인', '상태'],
+                columns: [
+                  '문서번호',
+                  '관리번호',
+                  '작업명',
+                  '신청인',
+                  '상태',
+                ],
                 rows: rows.map((r) => [
                   r.workPermitRequestId ?? r.workPermitId,
                   r.documentNo,
-                  r.data.title,
-                  r.data.applicantName,
+                  r.title,
+                  r.applicantName,
                   r.status,
                 ]),
               })
             }
           >
-            인쇄
+            현재 페이지 인쇄
           </Button>
           <Button
             disabled={!hasPermission(`${module}:create`)}
             onClick={() => navigate(`${base}/new`)}
           >
-            신규
+            신규 작성
           </Button>
         </div>
       </div>
+      <form
+        className="search-form"
+        onSubmit={(event) => {
+          event.preventDefault()
+          setLoading(true)
+          setQuery({ page: 1, search: search.trim() })
+        }}
+      >
+        <Input
+          aria-label="허가 문서 검색"
+          placeholder="문서번호·관리번호·작업명"
+          maxLength={200}
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+        />
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={loading}
+          onClick={() => {
+            setSearch('')
+            setLoading(true)
+            setQuery({ page: 1, search: '' })
+          }}
+        >
+          초기화
+        </Button>
+        <Button type="submit" disabled={loading}>
+          검색
+        </Button>
+      </form>
       {error && <p role="alert">{error}</p>}
-      <DataTable<PermitRecord>
+      <DataTable<PermitListItem>
         gridTemplateColumns={
           request
-            ? '190px 120px 1fr 120px 90px 90px'
-            : '190px 120px 1fr 120px 90px'
+            ? '200px 150px minmax(180px,1fr) 120px 90px 90px'
+            : '200px 150px minmax(180px,1fr) 120px 90px'
         }
-        rows={rows}
-        emptyText="등록된 문서가 없습니다."
+        rows={loading || error ? [] : rows}
+        emptyText={
+          loading
+            ? '불러오는 중…'
+            : error
+              ? '조회에 실패했습니다.'
+              : '등록된 문서가 없습니다.'
+        }
         columns={[
           {
             key: 'systemDocumentId',
             label: '문서번호',
             render: (r) => r.workPermitRequestId ?? r.workPermitId,
           },
-          { key: 'documentNo', label: '관리번호', render: (r) => r.documentNo },
+          {
+            key: 'documentNo',
+            label: '관리번호',
+            render: (r) => r.documentNo,
+          },
           {
             key: 'title',
             label: '작업명',
@@ -129,34 +221,27 @@ export function PermitList({ request = false }: { request?: boolean }) {
                 className="text-blue-700 underline"
                 to={`${base}/${request ? r.workPermitRequestId : r.workPermitId}`}
               >
-                {r.data.title}
+                {r.title}
               </Link>
             ),
           },
           {
             key: 'applicant',
             label: '신청인',
-            render: (r) => r.data.applicantName,
+            render: (r) => r.applicantName,
           },
           {
             key: 'status',
             label: '상태',
-            render: (r) =>
-              ({
-                D: '작성',
-                P: request ? '신청' : '결재중',
-                C: request ? '신청 완료' : '발행',
-                R: '반려',
-                X: '취소',
-              })[r.status] ?? r.status,
+            render: (r) => permitStatusLabel(r.status, request),
           },
           ...(request
             ? [
                 {
                   key: 'permit',
                   label: '작업허가',
-                  render: (r: PermitRecord) =>
-                    r.status === 'C' && hasPermission('work_permit:create') ? (
+                  render: (r: PermitListItem) =>
+                    r.status === 'C' && hasPermission('PERMIT:create') ? (
                       <Button
                         onClick={() =>
                           navigate(
@@ -171,6 +256,17 @@ export function PermitList({ request = false }: { request?: boolean }) {
               ]
             : []),
         ]}
+      />
+      <Pagination
+        page={query.page}
+        limit={limit}
+        total={total}
+        loading={loading}
+        error={Boolean(error)}
+        onChange={(page) => {
+          setLoading(true)
+          setQuery((value) => ({ ...value, page }))
+        }}
       />
     </section>
   )
@@ -197,10 +293,9 @@ function Editor({
   requestId: string | null
 }) {
   const base = request ? '/work-permit-request' : '/work-permit',
-    module = request ? 'work_permit_request' : 'work_permit'
+    module = request ? 'PERREQ' : 'PERMIT'
   const navigate = useNavigate(),
-    { user, hasPermission } = useAuth(),
-    [requestKey] = useState(() => crypto.randomUUID())
+    { user, hasPermission } = useAuth()
   const [row, setRow] = useState<PermitRecord | null>(null),
     [data, setData] = useState({ ...emptyData }),
     [documentNo, setNo] = useState(''),
@@ -246,7 +341,9 @@ function Editor({
       .then(async ([opt, saved, src]) => {
         if (!active) return
         if (src && src.status !== 'C')
-          throw new Error('신청 완료로 확정된 요청서만 참조할 수 있습니다.')
+          throw new Error(
+            '신청 완료로 확정된 요청서만 참조할 수 있습니다.',
+          )
         if (opt) setOptions(opt)
         if (saved) {
           setRow(saved)
@@ -296,7 +393,9 @@ function Editor({
     let active = true
     if (!request) {
       Promise.all([
-        attachmentId ? getAttachmentItems(attachmentId) : Promise.resolve([]),
+        attachmentId
+          ? getAttachmentItems(attachmentId)
+          : Promise.resolve([]),
         source?.attachmentId
           ? getAttachmentItems(source.attachmentId)
           : Promise.resolve([]),
@@ -324,7 +423,7 @@ function Editor({
     attachmentId,
     ...(!request
       ? {
-          refModule: source ? 'work_permit_request' : null,
+          refModule: source ? 'PERREQ' : null,
           refId: source?.workPermitRequestId ?? null,
           permitTypes: sections.map((s) => s.type),
           sections,
@@ -346,7 +445,6 @@ function Editor({
           : base,
         payload,
         !row,
-        requestKey,
       )
       setRow(saved)
       setBaseline(state)
@@ -359,7 +457,9 @@ function Editor({
           await validatePermitPrint(
             saved,
             options.names,
-            Object.fromEntries(options.users.map((u) => [u.value, u.label])),
+            Object.fromEntries(
+              options.users.map((u) => [u.value, u.label]),
+            ),
           )
           const prefill = (
             await permitHttp.get(
@@ -409,7 +509,13 @@ function Editor({
         fields: [
           ['문서번호', row.workPermitRequestId ?? row.workPermitId],
           ['관리번호', row.documentNo],
-          ...Object.entries(row.data),
+          ...Object.entries(row.data).map(
+            ([key, value]) =>
+              [
+                permitDataLabels[key as keyof PermitData] ?? key,
+                value,
+              ] as [string, string],
+          ),
         ],
       })
       return
@@ -431,29 +537,23 @@ function Editor({
   return (
     <form
       ref={formRef}
+      data-readonly={readOnly}
       onSubmit={(e: FormEvent) => {
         e.preventDefault()
         void save(false)
       }}
-      className="space-y-3 border bg-white p-3"
+      className="space-y-3 rounded-lg border border-slate-200 bg-white p-4 md:p-5"
     >
-      <DocumentIdField value={row?.workPermitRequestId ?? row?.workPermitId} />
       <div className="flex flex-wrap justify-between gap-2">
         <h1>
           {request ? '허가 요청서' : '작업 허가서'}{' '}
-          {request && row?.status === 'C' ? '신청 완료' : row?.status}
+          {row && (
+            <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-600">
+              {permitStatusLabel(row.status, request)}
+            </span>
+          )}
         </h1>
-        <div className="flex gap-2">
-          {
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={!row || blocked}
-              onClick={() => void print()}
-            >
-              {request || row?.status === 'C' ? '인쇄' : '인쇄 미리보기'}
-            </Button>
-          }
+        <div className="page-actions">
           <Button
             type="button"
             variant="secondary"
@@ -464,15 +564,30 @@ function Editor({
           >
             목록
           </Button>
-          {!readOnly && <Button disabled={blocked}>저장</Button>}
+          {
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={!row || blocked}
+              onClick={() => void print()}
+            >
+              {request || row?.status === 'C' ? '인쇄' : '인쇄 미리보기'}
+            </Button>
+          }
           {row && !readOnly && hasPermission(`${module}:delete`) && (
             <Button
+              className="sm:ml-2"
               type="button"
               variant="danger"
               disabled={blocked}
               onClick={() => void remove()}
             >
               삭제
+            </Button>
+          )}
+          {!readOnly && (
+            <Button variant="secondary" disabled={blocked}>
+              임시저장
             </Button>
           )}
           {!readOnly && (
@@ -486,31 +601,57 @@ function Editor({
           )}
         </div>
       </div>
+      <DocumentIdField
+        value={row?.workPermitRequestId ?? row?.workPermitId}
+        documentNo={documentNo}
+        onDocumentNoChange={(value) => setNo(value)}
+        disabled={disabled}
+        readOnly={readOnly}
+      />
       {error && (
         <p role="alert" className="text-xs text-red-700">
           {error}
         </p>
       )}
-      {!ready && <p>조회 중...</p>}
-      <Field label="관리번호">
-        <Input
-          value={documentNo}
-          maxLength={50}
-          disabled={disabled}
-          onChange={(e) => setNo(e.target.value)}
-        />
-      </Field>
+      {!ready && <p>불러오는 중…</p>}
       <div className="grid gap-3 md:grid-cols-2">
+        <Field label="사업장">
+          <Input
+            readOnly
+            value={row ? (row.siteId ?? '') : (user?.siteId ?? '')}
+          />
+        </Field>
+        <Field label="부서">
+          <Input
+            readOnly
+            value={row ? (row.deptId ?? '') : (user?.deptId ?? '')}
+          />
+        </Field>
         {(
           [
             { key: 'title', label: '작업명', max: 100 },
             { key: 'applicationDate', label: '신청일', date: true },
             { key: 'applicantName', label: '신청인', max: 50 },
             { key: 'organization', label: '소속·시공사', max: 100 },
-            { key: 'phone', label: '연락처', optional: true, max: 50 },
+            {
+              key: 'phoneNumber',
+              label: '연락처',
+              optional: true,
+              max: 50,
+            },
             { key: 'location', label: '작업지역', max: 100 },
-            { key: 'equipmentNo', label: '설비번호', optional: true, max: 50 },
-            { key: 'equipmentName', label: '설비명', optional: true, max: 100 },
+            {
+              key: 'equipmentNo',
+              label: '설비번호',
+              optional: true,
+              max: 50,
+            },
+            {
+              key: 'equipmentName',
+              label: '설비명',
+              optional: true,
+              max: 100,
+            },
             { key: 'startTime', label: '허가기간 시작', time: true },
             { key: 'endTime', label: '허가기간 종료', time: true },
           ] as {
@@ -540,7 +681,7 @@ function Editor({
                 setData((d) => ({
                   ...d,
                   [f.key]: f.date
-                    ? e.target.value.replaceAll('-', '')
+                    ? dateValue(e.target.value)
                     : f.time
                       ? timeValue(e.target.value)
                       : e.target.value,
@@ -581,9 +722,12 @@ function Editor({
           rows={3}
           value={data.summary}
           disabled={disabled}
-          onChange={(e) => setData((d) => ({ ...d, summary: e.target.value }))}
+          onChange={(e) =>
+            setData((d) => ({ ...d, summary: e.target.value }))
+          }
         />
       </Field>
+
       {!request && (
         <>
           <h2>보충허가 필요 여부 (일반 필수)</h2>
@@ -595,13 +739,16 @@ function Editor({
                   checked={sections.some((s) => s.type === t.type)}
                   disabled={disabled || t.type === 'GENERAL'}
                   onChange={(e) => {
-                    if (e.target.checked) setSections((s) => [...s, { ...t }])
+                    if (e.target.checked)
+                      setSections((s) => [...s, { ...t }])
                     else if (
                       window.confirm(
                         '해당 유형의 편집 내용을 제외하시겠습니까?',
                       )
                     )
-                      setSections((s) => s.filter((v) => v.type !== t.type))
+                      setSections((s) =>
+                        s.filter((v) => v.type !== t.type),
+                      )
                   }}
                 />{' '}
                 {options.names[t.type]}
@@ -674,7 +821,7 @@ function Editor({
           <AttachmentManager
             key={source.workPermitRequestId}
             attachmentId={source.attachmentId}
-            refModule="work_permit_request"
+            refModule="PERREQ"
             refId={source.workPermitRequestId!}
             disabled
             onBusyChange={setSourceBusy}
@@ -687,7 +834,11 @@ function Editor({
         attachmentId={attachmentId}
         refModule={module}
         refId={
-          row ? (request ? row.workPermitRequestId : row.workPermitId) : null
+          row
+            ? request
+              ? row.workPermitRequestId
+              : row.workPermitId
+            : null
         }
         disabled={disabled}
         onBusyChange={setBusy}
@@ -711,7 +862,8 @@ function Editor({
                   }
                   onChange={(e) => {
                     const item = items.find(
-                      (v) => `${v.attachmentId}:${v.itemNo}` === e.target.value,
+                      (v) =>
+                        `${v.attachmentId}:${v.itemNo}` === e.target.value,
                     )
                     setFiles((v) => [
                       ...v.filter((f) => f.requirementId !== d.id),
@@ -742,11 +894,7 @@ function Editor({
           })}
         </section>
       )}
-      {row && (
-        <p className="text-xs">
-          등록자: {row.createdBy} / 등록일시: {row.createdAt}
-        </p>
-      )}
+      {row && <DocumentAudit record={row} />}
     </form>
   )
 }

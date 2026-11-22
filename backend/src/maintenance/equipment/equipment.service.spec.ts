@@ -156,7 +156,7 @@ describe('Equipment inspection fields', () => {
     );
     expect(types.find).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { companyId: 'A', codeId: 'EQUIPMENT_TYPE' },
+        where: { companyId: 'A', codeId: 'EQUIP_TYPE' },
       }),
     );
     expect(choices.sites).toEqual([{ value: 'S1', label: '사업장' }]);
@@ -180,7 +180,10 @@ describe('Equipment hierarchy', () => {
     ).rejects.toThrow();
     repository.find.mockResolvedValueOnce([
       equipment,
-      { ...equipment, equipmentId: 'CHILD', parentEquipmentId: 'EQ1' },
+      Object.assign({}, equipment, {
+        equipmentId: 'CHILD',
+        parentEquipmentId: 'EQ1',
+      }),
     ]);
     await expect(
       service.update(actor, 'EQ1', { parentEquipmentId: 'CHILD' }),
@@ -189,7 +192,7 @@ describe('Equipment hierarchy', () => {
   });
   it('accepts a same-site parent and rejects a missing or other-site parent', async () => {
     const { service, equipment, repository } = fixture();
-    const parent = { ...equipment, equipmentId: 'PARENT' };
+    const parent = Object.assign({}, equipment, { equipmentId: 'PARENT' });
     repository.find.mockResolvedValueOnce([equipment, parent]);
     expect(
       (
@@ -202,7 +205,7 @@ describe('Equipment hierarchy', () => {
     ).toBe('PARENT');
     repository.find.mockResolvedValueOnce([
       equipment,
-      { ...parent, siteId: 'OTHER' },
+      Object.assign({}, parent, { siteId: 'OTHER' }),
     ]);
     await expect(
       service.update(actor, 'EQ1', { parentEquipmentId: 'PARENT' }),

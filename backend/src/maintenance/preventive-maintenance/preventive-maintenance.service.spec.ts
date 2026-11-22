@@ -1,6 +1,7 @@
+import { businessDate } from '../../common/utils/date.util';
 import { Department } from '../../organization/departments/entities/department.entity';
 import { Logger } from '@nestjs/common';
-import { inspectionDate, nextInspectionDate } from './inspection-date.util';
+import { nextInspectionDate } from './inspection-date.util';
 import { Repository } from 'typeorm';
 import { PreventiveMaintenanceService } from './preventive-maintenance.service';
 import { PreventiveMaintenance } from './entities/preventive-maintenance.entity';
@@ -8,21 +9,58 @@ import { Equipment } from '../equipment/entities/equipment.entity';
 import { UserContext } from '../../auth/types/user-context.type';
 
 function fixture() {
-  const document = {
-    companyId: 'CR',
-    pmId: 'test-pm',
-    equipmentId: 'EQ1',
-    inspectionDate: '20261105',
-    nextInspectionDate: '20261212',
-    items: [],
-    createdBy: 'owner',
-    status: 'D',
-    title: '점검',
-    documentNo: '',
-    deleteYn: 'N',
-  } as PreventiveMaintenance;
+  const document: PreventiveMaintenance = Object.assign(
+    new PreventiveMaintenance(),
+    {
+      companyId: 'CR',
+      pmId: 'test-pm',
+      equipmentId: 'EQ1',
+      inspectionDate: '20261105',
+      nextInspectionDate: '20261212',
+      items: [],
+      createdBy: 'owner',
+      status: 'D',
+      title: '점검',
+      documentNo: '',
+      deleteYn: 'N',
+    },
+  );
   const repository = {
     findOneBy: jest.fn(async () => document as PreventiveMaintenance | null),
+    createQueryBuilder: () => {
+      const parameters: Record<string, unknown> = {};
+      const builder = {
+        where: jest.fn(function (
+          this: object,
+          _sql: string,
+          values?: Record<string, unknown>,
+        ) {
+          Object.assign(parameters, values);
+          return this;
+        }),
+        andWhere: jest.fn(function (
+          this: object,
+          _sql: string,
+          values?: Record<string, unknown>,
+        ) {
+          Object.assign(parameters, values);
+          return this;
+        }),
+        orderBy: jest.fn().mockReturnThis(),
+        getOne: async () =>
+          parameters.companyId === document.companyId &&
+          (!parameters.id || parameters.id === document.pmId) &&
+          document.deleteYn === 'N'
+            ? document
+            : null,
+        getMany: async () =>
+          parameters.companyId === document.companyId &&
+          document.deleteYn === 'N'
+            ? [document]
+            : [],
+      };
+      return builder;
+    },
     create: (value: PreventiveMaintenance) => value,
     save: jest.fn(async (value: PreventiveMaintenance) => value),
     manager: { getRepository: () => ({ find: jest.fn(async () => []) }) },
@@ -48,7 +86,14 @@ function fixture() {
     ),
   };
 }
-const actor = (userId: string) => ({ userId, companyId: 'CR' }) as UserContext;
+const actor = (userId: string) =>
+  ({
+    userId,
+    companyId: 'CR',
+    siteId: 'S1',
+    deptId: 'D1',
+    accessScope: 'COMPANY_ALL',
+  }) as UserContext;
 
 describe('PM detail actions', () => {
   it('persists the source attachment group and preserves it on unrelated saves', async () => {
@@ -103,6 +148,7 @@ describe('PM detail actions', () => {
     repository.findOneBy.mockResolvedValueOnce(null);
     const saved = await service.create(actor('owner'), {
       pmId: 'new-pm',
+      inspectionDate: '20261115',
       title: '새 점검',
       equipmentId: 'EQ1',
     });
@@ -168,10 +214,10 @@ describe('PM inspection dates and completion', () => {
   });
 
   it('rejects impossible dates', () => {
-    expect(() => inspectionDate('20260229', 'inspectionDate')).toThrow(
+    expect(() => businessDate('20260229', false, 'inspectionDate')).toThrow(
       'valid date',
     );
-    expect(() => inspectionDate('20260431', 'inspectionDate')).toThrow(
+    expect(() => businessDate('20260431', false, 'inspectionDate')).toThrow(
       'valid date',
     );
   });
@@ -288,7 +334,7 @@ describe('PM manual assessment', () => {
       (
         await service.update(actor('owner'), 'test-pm', {
           result: null,
-          inspectionDeptId: null,
+          deptId: null,
           inspectorId: null,
         })
       ).result,
@@ -301,7 +347,7 @@ describe('PM manual assessment', () => {
     const { service, document, equipment } = fixture();
     await service.update(actor('owner'), 'test-pm', {
       result: 'NOK',
-      inspectionDeptId: 'D1',
+      deptId: 'D1',
       inspectorId: 'inspector',
     });
     await expect(
@@ -317,34 +363,64 @@ describe('PM manual assessment', () => {
 });
 
 describe('PM historical references', () => {
-  it('resolves old names within the company without hiding soft-deleted references', async () => {
+  it('keeps historical IDs while using active-only name lookups', async () => {
     const { service, document, repository } = fixture();
-    document.inspectionDeptId = 'OLD-D';
+    document.deptId = 'OLD-D';
     document.inspectorId = 'OLD-U';
     const departments = {
-      find: jest.fn(async (_query: unknown) => [
-        { deptId: 'OLD-D', name: '기존 부서', deleteYn: 'Y' },
-      ]),
+      find: jest.fn(async (_query: unknown) => []),
     };
     const users = {
-      find: jest.fn(async (_query: unknown) => [
-        { userId: 'OLD-U', name: '기존 점검자', deleteYn: 'Y' },
-      ]),
+      find: jest.fn(async (_query: unknown) => []),
     };
     Object.assign(repository.manager, {
       getRepository: (entity: unknown) =>
         entity === Department ? departments : users,
     });
     expect(await service.findOne(actor('owner'), 'test-pm')).toMatchObject({
-      inspectionDeptName: '기존 부서',
-      inspectorName: '기존 점검자',
+      deptId: 'OLD-D',
+      inspectorId: 'OLD-U',
+      deptName: null,
+      inspectorName: null,
     });
     for (const repo of [departments, users]) {
       const query = repo.find.mock.calls[0][0] as {
         where: Record<string, unknown>;
       };
       expect(query.where.companyId).toBe('CR');
-      expect(query.where).not.toHaveProperty('deleteYn');
+      expect(query.where.deleteYn).toBe('N');
     }
+  });
+});
+
+describe('PM required inspection date', () => {
+  it.each([null, '', undefined])(
+    'rejects a missing creation date: %s',
+    async (value) => {
+      const { service, repository } = fixture();
+      repository.findOneBy.mockResolvedValueOnce(null);
+      await expect(
+        service.create(actor('owner'), {
+          pmId: 'new',
+          title: '점검',
+          equipmentId: 'EQ1',
+          inspectionDate: value as never,
+        }),
+      ).rejects.toThrow('점검일');
+      expect(repository.save).not.toHaveBeenCalled();
+    },
+  );
+  it('does not clear an existing date and does not submit a legacy document with no date', async () => {
+    const { service, repository, document } = fixture();
+    await expect(
+      service.update(actor('owner'), 'test-pm', {
+        inspectionDate: null as never,
+      }),
+    ).rejects.toThrow('점검일');
+    expect(repository.save).not.toHaveBeenCalled();
+    document.inspectionDate = null;
+    await expect(
+      service.assertCanSubmit(actor('owner'), 'test-pm'),
+    ).rejects.toThrow('점검일');
   });
 });

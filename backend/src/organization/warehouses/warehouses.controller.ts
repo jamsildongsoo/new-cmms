@@ -13,7 +13,7 @@ import { RequirePermission } from '../../auth/decorators/require-permissions.dec
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import type { UserContext } from '../../auth/types/user-context.type';
-import { AppModuleKey } from '../../common/constants/modules';
+import { ModuleCode } from '../../common/constants/modules';
 import { PermissionAction } from '../../common/constants/permissions';
 import { CreateWarehouseDto } from './dto/create-warehouse.dto';
 import { UpdateWarehouseDto } from './dto/update-warehouse.dto';
@@ -25,14 +25,14 @@ export class WarehousesController {
   constructor(private readonly warehousesService: WarehousesService) {}
 
   // List active warehouses in the authenticated user's company.
-  @RequirePermission(AppModuleKey.WAREHOUSE, PermissionAction.READ)
+  @RequirePermission(ModuleCode.WHSE, PermissionAction.READ)
   @Get()
   findAll(@CurrentUser() user: UserContext) {
     return this.warehousesService.findAll(user);
   }
 
   // Get one active warehouse in the authenticated user's company.
-  @RequirePermission(AppModuleKey.WAREHOUSE, PermissionAction.READ)
+  @RequirePermission(ModuleCode.WHSE, PermissionAction.READ)
   @Get(':siteId/:warehouseId')
   findOne(
     @CurrentUser() user: UserContext,
@@ -43,14 +43,14 @@ export class WarehousesController {
   }
 
   // Create a warehouse in the authenticated user's company.
-  @RequirePermission(AppModuleKey.WAREHOUSE, PermissionAction.CREATE)
+  @RequirePermission(ModuleCode.WHSE, PermissionAction.CREATE)
   @Post()
   create(@CurrentUser() user: UserContext, @Body() dto: CreateWarehouseDto) {
     return this.warehousesService.create(user, dto);
   }
 
   // Update a warehouse in the authenticated user's company.
-  @RequirePermission(AppModuleKey.WAREHOUSE, PermissionAction.UPDATE)
+  @RequirePermission(ModuleCode.WHSE, PermissionAction.UPDATE)
   @Patch(':siteId/:warehouseId')
   update(
     @CurrentUser() user: UserContext,
@@ -62,7 +62,7 @@ export class WarehousesController {
   }
 
   // Soft-delete a warehouse in the authenticated user's company.
-  @RequirePermission(AppModuleKey.WAREHOUSE, PermissionAction.DELETE)
+  @RequirePermission(ModuleCode.WHSE, PermissionAction.DELETE)
   @Delete(':siteId/:warehouseId')
   remove(
     @CurrentUser() user: UserContext,

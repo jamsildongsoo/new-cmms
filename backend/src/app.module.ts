@@ -1,3 +1,4 @@
+import { MetadataController } from './system/metadata.controller';
 import { MonthlyClosingModule } from './inventory/monthly-closing/monthly-closing.module';
 /** 한 애플리케이션의 단일 PostgreSQL 연결과 업무 모듈을 구성한다. 고객별 DB 라우팅은 제공하지 않는다. */
 import { BoardsModule } from './boards/boards.module';
@@ -14,12 +15,8 @@ import { AttachmentsModule } from './attachments/attachments.module';
 import { AuthModule } from './auth/auth.module';
 import { ApprovalsModule } from './approvals/approvals.module';
 import { CodesModule } from './codes/codes.module';
-import { appConfig } from './config/app.config';
-import { databaseConfig } from './config/database.config';
 import { validateEnv } from './config/env.schema';
 import { ENV_FILE_PATH } from './config/env-file';
-import { jwtConfig } from './config/jwt.config';
-import { storageConfig } from './config/storage.config';
 import { IdentityModule } from './identity/identity.module';
 import { EquipmentModule } from './maintenance/equipment/equipment.module';
 import { PreventiveMaintenanceModule } from './maintenance/preventive-maintenance/preventive-maintenance.module';
@@ -35,13 +32,14 @@ import { OrganizationModule } from './organization/organization.module';
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: ENV_FILE_PATH,
-      load: [appConfig, databaseConfig, jwtConfig, storageConfig],
       validate: validateEnv,
+      skipProcessEnv: true,
     }),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
         type: 'postgres',
+        schema: 'public',
         host: configService.getOrThrow<string>('database.host'),
         port: configService.getOrThrow<number>('database.port'),
         username: configService.getOrThrow<string>('database.username'),
@@ -80,6 +78,6 @@ import { OrganizationModule } from './organization/organization.module';
     PurchaseRequestModule,
     PurchaseOrderModule,
   ],
-  controllers: [HealthController],
+  controllers: [HealthController, MetadataController],
 })
 export class AppModule {}

@@ -1,5 +1,4 @@
 import { NumberingService } from '../../numbering/numbering.service';
-import { Headers } from '@nestjs/common';
 import { SearchWorkRequestDto } from './dto/search-work-request.dto';
 import {
   Body,
@@ -17,12 +16,13 @@ import { RequirePermission } from '../../auth/decorators/require-permissions.dec
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import type { UserContext } from '../../auth/types/user-context.type';
-import { AppModuleKey } from '../../common/constants/modules';
+import { ModuleCode } from '../../common/constants/modules';
 import { PermissionAction } from '../../common/constants/permissions';
 import { CreateWorkRequestDto } from './dto/create-work-request.dto';
 import { UpdateWorkRequestDto } from './dto/update-work-request.dto';
 import { WorkRequestService } from './work-request.service';
 
+/** 작업요청 API. 문서 채번·첨부 연결은 공통 서비스를 사용하며 소속 범위·작성자·초안 검사는 업무 Service가 수행한다. */
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('work-request')
 export class WorkRequestController {
@@ -31,7 +31,7 @@ export class WorkRequestController {
     private readonly service: WorkRequestService,
   ) {}
 
-  @RequirePermission(AppModuleKey.WORK_REQUEST, PermissionAction.READ)
+  @RequirePermission(ModuleCode.WRKREQ, PermissionAction.READ)
   @Get()
   findAll(
     @CurrentUser() user: UserContext,
@@ -40,13 +40,13 @@ export class WorkRequestController {
     return this.service.findAll(user, query);
   }
 
-  @RequirePermission(AppModuleKey.WORK_REQUEST, PermissionAction.READ)
+  @RequirePermission(ModuleCode.WRKREQ, PermissionAction.READ)
   @Get('options')
   getOptions(@CurrentUser() user: UserContext) {
     return this.service.getOptions(user);
   }
 
-  @RequirePermission(AppModuleKey.WORK_REQUEST, PermissionAction.READ)
+  @RequirePermission(ModuleCode.WRKREQ, PermissionAction.READ)
   @Get(':workRequestId/plans')
   relatedPlans(
     @CurrentUser() user: UserContext,
@@ -55,7 +55,7 @@ export class WorkRequestController {
     return this.service.relatedPlans(user, id);
   }
 
-  @RequirePermission(AppModuleKey.WORK_REQUEST, PermissionAction.READ)
+  @RequirePermission(ModuleCode.WRKREQ, PermissionAction.READ)
   @Get(':workRequestId')
   findOne(
     @CurrentUser() user: UserContext,
@@ -64,28 +64,22 @@ export class WorkRequestController {
     return this.service.findOne(user, workRequestId);
   }
 
-  @RequirePermission(AppModuleKey.WORK_REQUEST, PermissionAction.CREATE)
+  @RequirePermission(ModuleCode.WRKREQ, PermissionAction.CREATE)
   @Post()
-  create(
-    @CurrentUser() user: UserContext,
-    @Body() dto: CreateWorkRequestDto,
-    @Headers('idempotency-key') requestKey: string,
-  ) {
+  create(@CurrentUser() user: UserContext, @Body() dto: CreateWorkRequestDto) {
     return this.numbering.createDocument(
       user,
-      AppModuleKey.WORK_REQUEST,
-      requestKey,
+      ModuleCode.WRKREQ,
       (documentId) =>
         this.service.create(
           user,
           Object.assign({}, dto, { workRequestId: documentId }),
         ),
-      (documentId) => this.service.findOne(user, documentId),
       dto.attachmentId,
     );
   }
 
-  @RequirePermission(AppModuleKey.WORK_REQUEST, PermissionAction.UPDATE)
+  @RequirePermission(ModuleCode.WRKREQ, PermissionAction.UPDATE)
   @Patch(':workRequestId')
   update(
     @CurrentUser() user: UserContext,
@@ -94,14 +88,14 @@ export class WorkRequestController {
   ) {
     return this.numbering.saveDocument(
       user,
-      AppModuleKey.WORK_REQUEST,
+      ModuleCode.WRKREQ,
       workRequestId,
       dto.attachmentId,
       () => this.service.update(user, workRequestId, dto),
     );
   }
 
-  @RequirePermission(AppModuleKey.WORK_REQUEST, PermissionAction.DELETE)
+  @RequirePermission(ModuleCode.WRKREQ, PermissionAction.DELETE)
   @Delete(':workRequestId')
   remove(
     @CurrentUser() user: UserContext,

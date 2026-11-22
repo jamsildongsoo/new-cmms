@@ -1,3 +1,4 @@
+// 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
 /** 서버 로그인·/auth/me 결과만 Context에 보관하고 복원·탭 변경·늦은 응답의 세션 경합을 제어한다. */
 import {
   type ReactNode,
@@ -22,6 +23,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserContext | null>(null)
   const [loading, setLoading] = useState(Boolean(getAccessToken()))
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
   const version = useRef(0),
     knownToken = useRef(getAccessToken()),
     authenticating = useRef(false)
@@ -49,8 +51,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       // Context는 표시/버튼 제어용이다. 회사·사용자·권한은 서버 /auth/me의 DB 조회 결과만 사용한다.
       const current = await getMe()
-      if (request === version.current && getAccessToken() === token)
+      if (request === version.current && getAccessToken() === token) {
         setUser(current)
+        setNotice('')
+      }
     } catch {
       // 인증 만료(401)는 http에서 해제한다. 일시적 통신 실패는 토큰을 보존하고 재시도를 제공한다.
       if (request === version.current && getAccessToken() === token)
@@ -102,21 +106,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(response.user)
       setError('')
       setLoading(false)
+      setNotice('')
     } finally {
       authenticating.current = false
     }
   }, [])
-  const logout = useCallback(async () => {
-    clearTokens()
-    reset()
-  }, [reset])
+  const logout = useCallback(
+    async (message = '') => {
+      clearTokens()
+      reset()
+      setNotice(message)
+    },
+    [reset],
+  )
   const hasPermission = useCallback(
     (permission: string) => user?.permissions.includes(permission) ?? false,
     [user],
   )
   const value = useMemo(
-    () => ({ user, loading, error, reloadUser, login, logout, hasPermission }),
-    [user, loading, error, reloadUser, login, logout, hasPermission],
+    () => ({
+      user,
+      loading,
+      error,
+      notice,
+      reloadUser,
+      login,
+      logout,
+      hasPermission,
+    }),
+    [user, loading, error, notice, reloadUser, login, logout, hasPermission],
   )
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

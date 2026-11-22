@@ -11,7 +11,7 @@ export class PurchaseOrderItem {
   @Column({ type: 'text', nullable: true }) spec: string | null;
   @Column({ type: 'text', nullable: true }) note: string | null;
   @Column({ type: 'numeric', precision: 20, scale: 6 }) quantity: string;
-  @Column({ type: 'numeric', precision: 24, scale: 8, nullable: true })
+  @Column({ type: 'numeric', precision: 24, scale: 0, nullable: true })
   unitPrice: string | null;
   @Column({ type: 'numeric', precision: 24, scale: 0, nullable: true }) amount:
     string | null;

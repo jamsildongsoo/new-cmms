@@ -4,18 +4,14 @@ import {
   UnauthorizedException,
   ValidationPipe,
 } from '@nestjs/common';
-import { GUARDS_METADATA } from '@nestjs/common/constants';
 import request from 'supertest';
 import { randomUUID } from 'node:crypto';
 import { DataSource } from 'typeorm';
 import type { INestApplication } from '@nestjs/common';
 import type { UserContext } from '../auth/types/user-context.type';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { MODULES } from '../common/constants/modules';
-import { collectControllerPermissions } from '../bootstrap/controller-permissions';
 import { NumberingService } from '../numbering/numbering.service';
 import { NumberSequence } from '../numbering/entities/number-sequence.entity';
-import { DocumentRequest } from '../numbering/entities/document-request.entity';
 import { Attachment } from '../attachments/entities/attachment.entity';
 import { postgresTestDatabase } from '../../test/support/pglite';
 import { Board } from './entities/board.entity';
@@ -29,16 +25,12 @@ const actor = (userId = 'owner', companyId = 'A') =>
     companyId,
     userId,
     roleId: 'ADMIN',
+    siteId: null,
+    deptId: 'D1',
     accessScope: 'OWN_SITE',
     permissions: [],
   }) as UserContext;
-const entities = [
-  Board,
-  BoardComment,
-  NumberSequence,
-  DocumentRequest,
-  Attachment,
-];
+const entities = [Board, BoardComment, NumberSequence, Attachment];
 let db: DataSource,
   service: BoardsService,
   numbering: NumberingService,
@@ -93,39 +85,22 @@ function api() {
   return request(app.getHttpServer() as Parameters<typeof request>[0]);
 }
 async function post(user = actor(), extra = {}) {
-  return numbering.createDocument(
-    user,
-    'board',
-    randomUUID(),
-    (id) =>
-      service.create(user, id, {
-        title: '공지 제목',
-        content: '본문',
-        ...extra,
-      }),
-    (id) => service.get(user, id),
+  return numbering.createDocument(user, 'BORD', (id) =>
+    service.create(user, id, {
+      title: '공지 제목',
+      content: '본문',
+      ...extra,
+    }),
   );
 }
 
-it('records BORD and rbac=false, retaining authentication without CRUD permission declarations', () => {
-  expect(MODULES.BOARD).toMatchObject({
-    key: 'board',
-    documentPrefix: 'BORD',
-    rbac: false,
-  });
-  expect(Reflect.getMetadata(GUARDS_METADATA, BoardsController)).toEqual([
-    JwtAuthGuard,
-  ]);
-  expect(collectControllerPermissions([BoardsController])).toEqual([]);
-});
+
 it('requires authentication and lets an authenticated user without module permissions create/read a numbered post', async () => {
   await api().get('/boards').expect(401);
-  const payload = { title: '제목', content: '본문' },
-    key = randomUUID();
+  const payload = { title: '제목', content: '본문' };
   const first = await api()
     .post('/boards')
     .set('x-test-user', 'owner')
-    .set('Idempotency-Key', key)
     .send(payload)
     .expect(201);
   const id = (first.body as Board).boardId;
@@ -133,11 +108,10 @@ it('requires authentication and lets an authenticated user without module permis
   const retry = await api()
     .post('/boards')
     .set('x-test-user', 'owner')
-    .set('Idempotency-Key', key)
     .send(payload)
     .expect(201);
-  expect((retry.body as Board).boardId).toBe(id);
-  expect(await db.getRepository(Board).count()).toBe(1);
+  expect((retry.body as Board).boardId).not.toBe(id);
+  expect(await db.getRepository(Board).count()).toBe(2);
   await api().get(`/boards/${id}`).set('x-test-user', 'reader').expect(200);
 });
 it('accepts owner edits and denies another user even with an admin role', async () => {
@@ -285,7 +259,6 @@ it('rejects forged company/author/status/ID and blank post/comment bodies', asyn
   await api()
     .post('/boards')
     .set('x-test-user', 'owner')
-    .set('Idempotency-Key', randomUUID())
     .send({
       title: '제목',
       content: '본문',
@@ -298,7 +271,6 @@ it('rejects forged company/author/status/ID and blank post/comment bodies', asyn
   await api()
     .post('/boards')
     .set('x-test-user', 'owner')
-    .set('Idempotency-Key', randomUUID())
     .send({ title: ' ', content: '본문' })
     .expect(400);
   const board = await post();
@@ -331,19 +303,16 @@ it('paginates and searches only non-deleted posts in the authenticated company',
   expect((await service.list(actor())).total).toBe(1);
 });
 it('binds a pre-save UUID attachment group to the BORD document ID', async () => {
-  const attachment = await db
-    .getRepository(Attachment)
-    .save({
-      companyId: 'A',
-      attachmentId: randomUUID(),
-      refModule: 'board',
-      refId: null,
-      createdBy: 'owner',
-    });
+  const attachment = await db.getRepository(Attachment).save({
+    companyId: 'A',
+    attachmentId: randomUUID(),
+    refModule: 'BORD',
+    refId: null,
+    createdBy: 'owner',
+  });
   const response = await api()
     .post('/boards')
     .set('x-test-user', 'owner')
-    .set('Idempotency-Key', randomUUID())
     .send({
       title: '첨부 글',
       content: '본문',
@@ -359,4 +328,20 @@ it('binds a pre-save UUID attachment group to the BORD document ID', async () =>
         .findOneByOrFail({ attachmentId: attachment.attachmentId })
     ).refId,
   ).toBe(board.boardId);
+});
+
+it('returns lightweight list rows while searching literal special characters in the full body', async () => {
+  const row = await post(actor(), { content: String.raw`본문 100%_값 \경로` });
+  await post(actor(), { title: '100xx값', content: '일반 본문' });
+  for (const search of ['%', '_', '\\', '본문 100%_값']) {
+    const result = await service.list(actor(), { search });
+    expect(result.total).toBe(1);
+    expect(result.items[0].boardId).toBe(row.boardId);
+    expect(Object.keys(result.items[0]).sort()).toEqual(
+      ['boardId', 'title', 'createdBy', 'createdAt'].sort(),
+    );
+  }
+  expect((await service.get(actor(), row.boardId)).content).toBe(
+    String.raw`본문 100%_값 \경로`,
+  );
 });

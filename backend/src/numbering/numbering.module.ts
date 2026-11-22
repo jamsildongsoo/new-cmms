@@ -1,4 +1,3 @@
-import { DocumentRequest } from './entities/document-request.entity';
 import { Attachment } from '../attachments/entities/attachment.entity';
 import { Global, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -8,7 +7,7 @@ import { NumberingService } from './numbering.service';
 @Global()
 @Module({
   imports: [
-    TypeOrmModule.forFeature([NumberSequence, DocumentRequest, Attachment]),
+    TypeOrmModule.forFeature([NumberSequence, Attachment]),
   ],
   providers: [NumberingService],
   exports: [NumberingService],

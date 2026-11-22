@@ -1,17 +1,14 @@
-import { registerAs } from '@nestjs/config';
-import { ENV_DEFAULTS } from './env.schema';
+/** 개발 DB만 DB_SYNCHRONIZE=true 허용. 운영 스키마 설치는 bootstrap.sh schema로 별도 실행한다. */
+import type { EnvironmentVariables } from './env.schema';
 
-export const databaseConfig = registerAs('database', () => ({
-  host: process.env.DB_HOST,
-  port: Number(process.env.DB_PORT ?? ENV_DEFAULTS.DB_PORT),
-  username: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  name: process.env.DB_NAME,
-  ssl: (process.env.DB_SSL ?? ENV_DEFAULTS.DB_SSL) === 'true',
-  sslRejectUnauthorized:
-    (process.env.DB_SSL_REJECT_UNAUTHORIZED ??
-      ENV_DEFAULTS.DB_SSL_REJECT_UNAUTHORIZED) === 'true',
-  synchronize:
-    (process.env.DB_SYNCHRONIZE ?? ENV_DEFAULTS.DB_SYNCHRONIZE) === 'true',
-  logging: (process.env.DB_LOGGING ?? ENV_DEFAULTS.DB_LOGGING) === 'true',
-}));
+export const buildDatabaseConfig = (env: EnvironmentVariables) => ({
+  host: env.DB_HOST,
+  port: env.DB_PORT,
+  username: env.DB_USER,
+  password: env.DB_PASSWORD,
+  name: env.DB_NAME,
+  ssl: env.DB_SSL,
+  sslRejectUnauthorized: env.DB_SSL_REJECT_UNAUTHORIZED,
+  synchronize: env.DB_SYNCHRONIZE,
+  logging: env.DB_LOGGING,
+});

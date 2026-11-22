@@ -1,14 +1,18 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import * as entities from './entities';
-import { PurchaseOrderModule } from '../../purchase/purchase-order/purchase-order.module';
+import { InventoryDocument } from './entities/inventory-document.entity';
+import { InventoryItem } from './entities/inventory-item.entity';
+import { InventoryControl } from './entities/inventory-control.entity';
 import { StockModule } from '../stock/stock.module';
 import { InventoryService } from './inventory.service';
 import { InventoryController } from './inventory.controller';
 @Module({
   imports: [
-    TypeOrmModule.forFeature(Object.values(entities)),
-    PurchaseOrderModule,
+    TypeOrmModule.forFeature([
+      InventoryDocument,
+      InventoryItem,
+      InventoryControl,
+    ]),
     StockModule,
   ],
   controllers: [InventoryController],

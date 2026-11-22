@@ -1,3 +1,4 @@
+// 기본 문구 템플릿이다. 항목·허가 유형 변경 시 dto/permit-data.dto.ts, permit-validation.ts, WorkPermitService.approvalDraft와 frontend/src/modules/maintenance/work-permit/{PermitPages.tsx,permitPrint.ts}를 함께 수정한다.
 export const PERMIT_NAMES = {
   GENERAL: '일반',
   HOT_WORK: '화기',

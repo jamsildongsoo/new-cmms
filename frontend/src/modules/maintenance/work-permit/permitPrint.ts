@@ -1,5 +1,21 @@
 /** 일반과 선택 보충 허가를 동일한 A4 양식의 별도 페이지로 만들고 현장 서명란은 빈칸으로 둔다. */
-import type { PermitRecord } from './permit.api'
+import type { PermitRecord, PermitData } from './permit.api'
+// 입력·출력 항목 변경 시 PermitPages.tsx와 백엔드 permit-template.ts/DTO/검증/approvalDraft를 함께 수정한다.
+export const permitDataLabels: Record<keyof PermitData, string> = {
+  title: '작업명',
+  applicationDate: '신청일',
+  applicantType: '신청인 구분',
+  applicantName: '신청인',
+  organization: '소속·시공사',
+  phoneNumber: '연락처',
+  workType: '작업 구분',
+  location: '작업지역',
+  equipmentNo: '설비번호',
+  equipmentName: '설비명',
+  startTime: '허가기간 시작',
+  endTime: '허가기간 종료',
+  summary: '작업개요',
+}
 export const permitPrintCss = `@page{size:A4;margin:10mm}*{box-sizing:border-box}body{font-family:'Noto Sans CJK KR','Malgun Gothic',sans-serif;font-size:9pt;line-height:1.15;color:#000;margin:0}h1{font-size:17pt;text-align:center;margin:0 0 3mm}h2{font-size:10pt;margin:1.5mm 0 .7mm}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #333;padding:.7mm;overflow-wrap:anywhere;white-space:pre-wrap;vertical-align:middle}th{font-weight:600;background:#eee}p{margin:1mm 0}.blank{height:8mm}.note{font-size:8pt}section{break-inside:avoid;margin-bottom:1.5mm} .stamp{font-size:8pt}.permit-page{break-after:page}.permit-page:last-child{break-after:auto}`
 export function permitPrintHtml(
   row: PermitRecord,
@@ -63,7 +79,7 @@ export function permitPrintHtml(
 <tr><th>허가번호</th>${cell(row.workPermitId ?? row.workPermitRequestId ?? row.documentNo)}<th>유형</th>${cell(data.workType === 'INTERNAL' ? '자체' : '외주')}</tr>
 <tr><th>작업명</th>${cell(data.title)}<th>작업지역</th>${cell(data.location)}</tr>
 <tr><th>설비번호</th>${cell(data.equipmentNo)}<th>설비명</th>${cell(data.equipmentName)}</tr>
-<tr><th>신청인 / 소속</th><td>${esc(data.applicantName)} / ${esc(data.organization)} / ${esc(data.phone)}</td><th>허가기간</th><td>${esc(data.startTime)} ~ ${esc(data.endTime)}</td></tr>
+<tr><th>신청인 / 소속</th><td>${esc(data.applicantName)} / ${esc(data.organization)} / ${esc(data.phoneNumber)}</td><th>허가기간</th><td>${esc(data.startTime)} ~ ${esc(data.endTime)}</td></tr>
 <tr><th>작업개요</th><td colspan="3">${esc(data.summary)}</td></tr>
 <tr><th>보충허가</th><td colspan="3">${supplements}</td></tr></table></section>
 <section><h2>안전조치 요구사항</h2><table>${requirementColumns}<tr><th>제목</th><th colspan="2">내용</th><th>확인</th></tr>${requirements}</table></section>

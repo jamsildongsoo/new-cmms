@@ -1,5 +1,8 @@
+// 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
+import { useMetadata } from '@/shared/metadata/metadata'
+
 import { useEffect, useState, type FormEvent } from 'react'
-import { Navigate, useNavigate, useParams } from 'react-router-dom'
+import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '@/modules/auth'
 import { toMessage } from '@/shared/api/errors'
 import type { FormMode } from '@/shared/types/form'
@@ -23,6 +26,7 @@ import {
   type Choice,
   type UserOptions,
   type IdentityRow,
+  type PermissionOption,
 } from './identity.api'
 
 export function IdentityFormPage({
@@ -32,9 +36,19 @@ export function IdentityFormPage({
   resource: Resource
   mode: FormMode
 }) {
+  const metadata = useMetadata()
+  const permissionColumns = metadata.permissionActions.map(
+    ({ value, label }) => ({ action: value, label }),
+  )
   const config = configs[resource]
   const id = useParams().id
+  const location = useLocation()
   const navigate = useNavigate()
+  const pendingRolePermissions = location.state as {
+    roleId?: string
+    permissionIds?: string[]
+    error?: string
+  } | null
   const { hasPermission } = useAuth()
   const [form, setForm] = useState<Record<string, string>>({
     accessScope: 'OWN_DEPARTMENT',
@@ -45,11 +59,15 @@ export function IdentityFormPage({
     roles: [],
   })
   const [original, setOriginal] = useState<IdentityRow>({})
-  const [permissions, setPermissions] = useState<IdentityRow[]>([])
+  const [permissions, setPermissions] = useState<PermissionOption[]>([])
   const [selectedPermissions, setSelectedPermissions] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(
+    pendingRolePermissions?.roleId === id
+      ? pendingRolePermissions?.error ?? null
+      : null,
+  )
   const readOnly =
     mode !== 'create' && !hasPermission(`${config.permission}:update`)
   const [baseline, setBaseline] = useState('')
@@ -84,7 +102,13 @@ export function IdentityFormPage({
       }
       if (userOptions) setOptions(userOptions)
       setPermissions(availablePermissions)
-      setSelectedPermissions(assignedPermissions)
+      const retryPermissions =
+        resource === 'roles' &&
+        mode === 'edit' &&
+        pendingRolePermissions?.roleId === id
+          ? pendingRolePermissions?.permissionIds
+          : undefined
+      setSelectedPermissions(retryPermissions ?? assignedPermissions)
       const loadedForm = row
         ? Object.fromEntries(
             Object.entries(row).map(([key, value]) => [
@@ -105,13 +129,13 @@ export function IdentityFormPage({
     return () => {
       active = false
     }
-  }, [resource, mode, id])
+  }, [resource, mode, id, pendingRolePermissions?.roleId, pendingRolePermissions?.permissionIds])
 
   const action =
     mode === 'create' ? 'create' : mode === 'edit' ? 'update' : 'read'
   if (!hasPermission(`${config.permission}:${action}`))
     return <Navigate to={`/${resource}`} replace />
-  if (loading) return <p className="text-xs text-slate-500">Loading...</p>
+  if (loading) return <p className="text-xs text-slate-500">불러오는 중…</p>
 
   async function save(event: FormEvent) {
     event.preventDefault()
@@ -138,8 +162,23 @@ export function IdentityFormPage({
           ? await createRecord(resource, payload)
           : await updateRecord(resource, id!, payload)
       const savedId = String(saved[config.idKey])
-      if (resource === 'roles' && hasPermission('role:update')) {
-        await updateRolePermissions(savedId, selectedPermissions)
+      if (resource === 'roles' && hasPermission('ROLE:update')) {
+        try {
+          await updateRolePermissions(savedId, selectedPermissions)
+        } catch (permissionError) {
+          if (mode === 'create') {
+            navigate(`/roles/${encodeURIComponent(savedId)}/edit`, {
+              replace: true,
+              state: {
+                roleId: savedId,
+                permissionIds: selectedPermissions,
+                error: `역할은 생성됐지만 권한 저장에 실패했습니다. 권한을 확인하고 다시 저장해 주세요. ${toMessage(permissionError)}`,
+              },
+            })
+            return
+          }
+          throw permissionError
+        }
       }
       setBaseline(JSON.stringify([form, selectedPermissions]))
       setSaving(false)
@@ -176,24 +215,28 @@ export function IdentityFormPage({
     if (key === 'deptId') return options.departments
     if (key === 'roleId') return options.roles
     if (key === 'accessScope')
-      return [
-        { id: 'OWN_DEPARTMENT', name: 'Own department and sub-departments' },
-        { id: 'OWN_SITE', name: 'Own site' },
-        { id: 'COMPANY_ALL', name: 'Company all' },
-      ]
-    return null
-  }
-  function savedReferenceName(key: string) {
-    if (key === 'siteId') return original.siteName
-    if (key === 'deptId') return original.deptName
+      return metadata.accessScopes.map(({ value, label }) => ({
+        id: value,
+        name: label,
+      }))
     return null
   }
 
   return (
     <section className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-base font-semibold">{config.title}</h1>
-        <div className="flex flex-wrap justify-end gap-2">
+        <h1 className="text-lg font-semibold">{config.title}</h1>
+        <div className="page-actions">
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={saving}
+            onClick={() => {
+              if (confirmLeave()) navigate(`/${resource}`)
+            }}
+          >
+            목록
+          </Button>
           <Button
             type="button"
             variant="secondary"
@@ -209,16 +252,18 @@ export function IdentityFormPage({
           >
             인쇄
           </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={saving}
-            onClick={() => {
-              if (confirmLeave()) navigate(`/${resource}`)
-            }}
-          >
-            목록
-          </Button>
+          {mode !== 'create' &&
+            hasPermission(`${config.permission}:delete`) && (
+              <Button
+                className="sm:ml-2"
+                type="button"
+                variant="danger"
+                disabled={saving}
+                onClick={() => void remove()}
+              >
+                삭제
+              </Button>
+            )}
           {!readOnly && (
             <Button
               type="submit"
@@ -231,17 +276,6 @@ export function IdentityFormPage({
               저장
             </Button>
           )}
-          {mode !== 'create' &&
-            hasPermission(`${config.permission}:delete`) && (
-              <Button
-                type="button"
-                variant="danger"
-                disabled={saving}
-                onClick={() => void remove()}
-              >
-                삭제
-              </Button>
-            )}
         </div>
       </div>
       {error && (
@@ -252,7 +286,7 @@ export function IdentityFormPage({
       <form
         id="identity-form"
         onSubmit={(event) => void save(event)}
-        className="space-y-3 border border-slate-200 bg-white p-3"
+        className="space-y-3 rounded-lg border border-slate-200 bg-white p-4 md:p-5"
       >
         <div className="grid gap-3 md:grid-cols-2">
           {config.fields
@@ -281,17 +315,8 @@ export function IdentityFormPage({
                         }))
                       }
                     >
-                      <option value="">Select {field.label}</option>
-                      {/* 삭제된 기준정보도 기존 연결값은 그대로 유지한다. */}
-                      {value && !selected.some((row) => row.id === value) && (
-                        <option value={value}>
-                          {value}
-                          {savedReferenceName(field.key)
-                            ? ` · ${savedReferenceName(field.key)}`
-                            : ''}{' '}
-                          (inactive)
-                        </option>
-                      )}
+                      <option value="">선택 {field.label}</option>
+
                       {selected.map((row) => (
                         <option key={row.id} value={row.id}>
                           {row.id} · {row.name}
@@ -321,36 +346,98 @@ export function IdentityFormPage({
         </div>
         {resource === 'roles' && (
           <fieldset
-            disabled={readOnly || saving || !hasPermission('role:update')}
+            disabled={readOnly || saving || !hasPermission('ROLE:update')}
             className="space-y-2"
           >
-            <legend className="text-sm font-semibold">Permissions</legend>
-            {permissions.map((permission) => {
-              const code = String(permission.permissionId)
-              return (
-                <label key={code} className="flex items-center gap-2 text-xs">
-                  <input
-                    type="checkbox"
-                    checked={selectedPermissions.includes(code)}
-                    onChange={(e) =>
-                      setSelectedPermissions((current) =>
-                        e.target.checked
-                          ? [...current, code]
-                          : current.filter((item) => item !== code),
-                      )
-                    }
-                  />
-                  {code} · {String(permission.name)}
-                </label>
-              )
-            })}
+            <legend className="text-sm font-semibold">권한 관리</legend>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <caption className="sr-only">모듈별 역할 권한</caption>
+                <thead>
+                  <tr className="border-b border-slate-200">
+                    <th scope="col" className="px-3 py-2 text-left">
+                      모듈
+                    </th>
+                    {permissionColumns.map(({ action, label }) => (
+                      <th
+                        key={action}
+                        scope="col"
+                        className="px-3 py-2 text-center"
+                      >
+                        {label}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    ...new Set(
+                      permissions.map((permission) =>
+                        String(permission.module),
+                      ),
+                    ),
+                  ].map((module) => {
+                    const label =
+                      permissions.find((p) => p.module === module)
+                        ?.moduleLabel ?? module
+                    return (
+                      <tr key={module} className="border-b border-slate-100">
+                        <th
+                          scope="row"
+                          className="px-3 py-2 text-left font-medium"
+                        >
+                          {label}
+                        </th>
+                        {permissionColumns.map(
+                          ({ action, label: actionLabel }) => {
+                            const permission = permissions.find(
+                              (item) =>
+                                item.module === module &&
+                                item.action === action,
+                            )
+                            const code = permission
+                              ? String(permission.permissionId)
+                              : null
+                            return (
+                              <td
+                                key={action}
+                                className="px-3 py-2 text-center"
+                              >
+                                {code ? (
+                                  <input
+                                    type="checkbox"
+                                    aria-label={`${label} ${actionLabel}`}
+                                    checked={selectedPermissions.includes(code)}
+                                    onChange={(e) =>
+                                      setSelectedPermissions((current) =>
+                                        e.target.checked
+                                          ? [...current, code]
+                                          : current.filter(
+                                              (item) => item !== code,
+                                            ),
+                                      )
+                                    }
+                                  />
+                                ) : (
+                                  <span aria-label="지원하지 않는 동작">—</span>
+                                )}
+                              </td>
+                            )
+                          },
+                        )}
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
             {selectedPermissions
               .filter(
                 (code) => !permissions.some((row) => row.permissionId === code),
               )
               .map((code) => (
                 <p key={code} className="text-xs text-slate-500">
-                  {code} (inactive)
+                  {code} (사용 중지)
                 </p>
               ))}
           </fieldset>

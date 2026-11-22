@@ -1,3 +1,4 @@
+// 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
 import type { AuditFields } from '@/shared/types/audit'
 import { http } from '@/shared/api/http'
 

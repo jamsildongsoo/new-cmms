@@ -14,7 +14,7 @@ import { RequirePermission } from '../../auth/decorators/require-permissions.dec
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import type { UserContext } from '../../auth/types/user-context.type';
-import { AppModuleKey } from '../../common/constants/modules';
+import { ModuleCode } from '../../common/constants/modules';
 import { PermissionAction } from '../../common/constants/permissions';
 import { CreateRoleDto } from './dto/create-role.dto';
 import { UpdateRolePermissionsDto } from './dto/update-role-permissions.dto';
@@ -27,27 +27,27 @@ export class RolesController {
   constructor(private readonly rolesService: RolesService) {}
 
   // List active roles in the authenticated user's company.
-  @RequirePermission(AppModuleKey.ROLE, PermissionAction.READ)
+  @RequirePermission(ModuleCode.ROLE, PermissionAction.READ)
   @Get()
   findAll(@CurrentUser() user: UserContext) {
     return this.rolesService.findAll(user);
   }
 
-  @RequirePermission(AppModuleKey.ROLE, PermissionAction.READ)
+  @RequirePermission(ModuleCode.ROLE, PermissionAction.READ)
   @Get('permission-options')
   findPermissionOptions() {
     return this.rolesService.findPermissionOptions();
   }
 
   // Get one active role in the authenticated user's company.
-  @RequirePermission(AppModuleKey.ROLE, PermissionAction.READ)
+  @RequirePermission(ModuleCode.ROLE, PermissionAction.READ)
   @Get(':roleId')
   findOne(@CurrentUser() user: UserContext, @Param('roleId') roleId: string) {
     return this.rolesService.findOne(user, roleId);
   }
 
   // Create a role in the authenticated user's company.
-  @RequirePermission(AppModuleKey.ROLE, PermissionAction.CREATE)
+  @RequirePermission(ModuleCode.ROLE, PermissionAction.CREATE)
   @Post()
   create(
     @CurrentUser() user: UserContext,
@@ -57,7 +57,7 @@ export class RolesController {
   }
 
   // Update a role name in the authenticated user's company.
-  @RequirePermission(AppModuleKey.ROLE, PermissionAction.UPDATE)
+  @RequirePermission(ModuleCode.ROLE, PermissionAction.UPDATE)
   @Patch(':roleId')
   update(
     @CurrentUser() user: UserContext,
@@ -68,14 +68,14 @@ export class RolesController {
   }
 
   // Soft-delete a role in the authenticated user's company.
-  @RequirePermission(AppModuleKey.ROLE, PermissionAction.DELETE)
+  @RequirePermission(ModuleCode.ROLE, PermissionAction.DELETE)
   @Delete(':roleId')
   remove(@CurrentUser() user: UserContext, @Param('roleId') roleId: string) {
     return this.rolesService.remove(user, roleId);
   }
 
   // List permission codes currently assigned to one role.
-  @RequirePermission(AppModuleKey.ROLE, PermissionAction.READ)
+  @RequirePermission(ModuleCode.ROLE, PermissionAction.READ)
   @Get(':roleId/permissions')
   findPermissions(
     @CurrentUser() user: UserContext,
@@ -85,7 +85,7 @@ export class RolesController {
   }
 
   // Replace the permission codes assigned to one role.
-  @RequirePermission(AppModuleKey.ROLE, PermissionAction.UPDATE)
+  @RequirePermission(ModuleCode.ROLE, PermissionAction.UPDATE)
   @Put(':roleId/permissions')
   updatePermissions(
     @CurrentUser() user: UserContext,

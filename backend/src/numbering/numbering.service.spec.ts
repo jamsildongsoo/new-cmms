@@ -1,14 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import {
-  BadRequestException,
-  ConflictException,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 import { postgresTestDatabase } from '../../test/support/pglite';
 import { UserContext } from '../auth/types/user-context.type';
-import { MODULE_LIST } from '../common/constants/modules';
+import { MODULE_LIST, ModuleCode } from '../common/constants/modules';
 import { Attachment } from '../attachments/entities/attachment.entity';
 import { AttachmentItem } from '../attachments/entities/attachment-item.entity';
 import { AttachmentsService } from '../attachments/attachments.service';
@@ -16,7 +12,6 @@ import { FileStorage } from '../attachments/storage/storage.types';
 import { PurchaseRequest } from '../purchase/purchase-request/entities/purchase-request.entity';
 import { NumberingService } from './numbering.service';
 import { NumberSequence } from './entities/number-sequence.entity';
-import { DocumentRequest } from './entities/document-request.entity';
 
 jest.setTimeout(90000);
 const actor = {
@@ -24,13 +19,7 @@ const actor = {
   userId: 'owner',
   accessScope: 'COMPANY_ALL',
 } as UserContext;
-const entities = [
-  NumberSequence,
-  DocumentRequest,
-  Attachment,
-  AttachmentItem,
-  PurchaseRequest,
-];
+const entities = [NumberSequence, Attachment, AttachmentItem, PurchaseRequest];
 let db: DataSource, numbering: NumberingService, close: () => Promise<void>;
 beforeAll(async () => {
   const fixture = await postgresTestDatabase(entities);
@@ -44,13 +33,6 @@ afterAll(async () => {
 beforeEach(async () => {
   for (const entity of entities) await db.getRepository(entity).clear();
 });
-const read = async (id: string) => {
-  const row = await db
-    .getRepository(PurchaseRequest)
-    .findOneBy({ companyId: actor.companyId, requestId: id, deleteYn: 'N' });
-  if (!row) throw new NotFoundException();
-  return row;
-};
 const save =
   (attachmentId: string | null = null) =>
   async (id: string) =>
@@ -63,10 +45,7 @@ const save =
       attachmentId,
       createdBy: actor.userId,
     });
-async function group(
-  refModule = 'purchase_request',
-  companyId = actor.companyId,
-) {
+async function group(refModule = 'PURREQ', companyId = actor.companyId) {
   return db.getRepository(Attachment).save({
     companyId,
     attachmentId: randomUUID(),
@@ -76,165 +55,98 @@ async function group(
   });
 }
 
-it('uses a single unique prefix definition for document modules including the explicit BORD prefix', () => {
-  const prefixes = MODULE_LIST.flatMap((m) =>
-    'documentPrefix' in m ? [m.documentPrefix] : [],
+it('uses unique fixed module codes without separate prefixes or numbering flags', () => {
+  expect(new Set(MODULE_LIST.map((module) => module.code)).size).toBe(
+    MODULE_LIST.length,
   );
-  expect(prefixes).toHaveLength(10);
-  expect(new Set(prefixes).size).toBe(10);
-  expect(prefixes.every((p) => p === 'BORD' || /^[A-Z]{6}$/.test(p))).toBe(
-    true,
-  );
+  for (const module of MODULE_LIST) {
+    expect(module.code).toMatch(/^[A-Z]+$/);
+    expect(module).not.toHaveProperty('documentPrefix');
+    expect(module).not.toHaveProperty('rbac');
+  }
 });
 it('increments by company, module and issuance month using the Korea month boundary', async () => {
   const end = new Date('2026-11-30T14:59:59Z'),
     next = new Date('2026-11-30T15:00:00Z');
-  expect(await numbering.generateDocumentId('A', 'purchase_order', end)).toBe(
+  expect(await numbering.generateDocumentId('A', ModuleCode.PURORD, end)).toBe(
     'PURORD-202611-00001',
   );
-  expect(await numbering.generateDocumentId('A', 'purchase_order', end)).toBe(
+  expect(await numbering.generateDocumentId('A', ModuleCode.PURORD, end)).toBe(
     'PURORD-202611-00002',
   );
-  expect(await numbering.generateDocumentId('B', 'purchase_order', end)).toBe(
+  expect(await numbering.generateDocumentId('B', ModuleCode.PURORD, end)).toBe(
     'PURORD-202611-00001',
   );
-  expect(await numbering.generateDocumentId('A', 'purchase_request', end)).toBe(
+  expect(await numbering.generateDocumentId('A', ModuleCode.PURREQ, end)).toBe(
     'PURREQ-202611-00001',
   );
-  expect(await numbering.generateDocumentId('A', 'purchase_order', next)).toBe(
+  expect(await numbering.generateDocumentId('A', ModuleCode.PURORD, next)).toBe(
     'PURORD-202612-00001',
   );
 });
-it('rejects non-document modules and serial overflow without wrapping', async () => {
+it('rejects unknown module codes and serial overflow without wrapping', async () => {
   await expect(
-    numbering.generateDocumentId('A', 'material'),
+    numbering.generateDocumentId('A', 'UNKNOWN' as ModuleCode),
   ).rejects.toBeInstanceOf(BadRequestException);
-  await db.getRepository(NumberSequence).save({
-    companyId: 'A',
-    moduleCode: 'PURORD',
-    yyyymm: '202611',
-    lastSerial: 99999,
-  });
+  await db
+    .getRepository(NumberSequence)
+    .save({
+      companyId: 'A',
+      moduleCode: 'PURORD',
+      yyyymm: '202611',
+      lastSerial: 99999,
+    });
   await expect(
-    numbering.generateDocumentId('A', 'purchase_order', new Date('2026-11-01')),
+    numbering.generateDocumentId(
+      'A',
+      ModuleCode.PURORD,
+      new Date('2026-11-01'),
+    ),
   ).rejects.toBeInstanceOf(ConflictException);
 });
-it('returns the same saved document on a lost-response retry, preserving manual documentNo', async () => {
-  const key = randomUUID(),
-    create = jest.fn(save());
+it('creates a new numbered document on every POST and preserves manual documentNo', async () => {
+  const create = jest.fn(save());
   const first = await numbering.createDocument(
     actor,
-    'purchase_request',
-    key,
+    ModuleCode.PURREQ,
     create,
-    read,
   );
   const second = await numbering.createDocument(
     actor,
-    'purchase_request',
-    key,
+    ModuleCode.PURREQ,
     create,
-    read,
   );
-  expect(second.requestId).toBe(first.requestId);
-  expect(second.documentNo).toBe('사용자 관리번호');
+  expect(first.requestId).not.toBe(second.requestId);
   expect(first.requestId).toMatch(/^PURREQ-\d{6}-00001$/);
-  expect(create).toHaveBeenCalledTimes(1);
-  expect(await db.getRepository(NumberSequence).count()).toBe(1);
-  await expect(
-    numbering.createDocument(
-      { ...actor, userId: 'other' },
-      'purchase_request',
-      key,
-      create,
-      read,
-    ),
-  ).rejects.toBeInstanceOf(ConflictException);
+  expect(second.requestId).toMatch(/^PURREQ-\d{6}-00002$/);
+  expect(second.documentNo).toBe('사용자 관리번호');
+  expect(create).toHaveBeenCalledTimes(2);
 });
-it('retains a reserved number after save failure and uses it again only for the same request', async () => {
-  const key = randomUUID();
+it('does not reuse a number after save failure', async () => {
   await expect(
-    numbering.createDocument(
-      actor,
-      'purchase_request',
-      key,
-      () => Promise.reject(new Error('save failed')),
-      read,
+    numbering.createDocument(actor, ModuleCode.PURREQ, () =>
+      Promise.reject(new Error('save failed')),
     ),
   ).rejects.toThrow('save failed');
-  const reservation = await db
-    .getRepository(DocumentRequest)
-    .findOneByOrFail({ requestKey: key });
   const saved = await numbering.createDocument(
     actor,
-    'purchase_request',
-    key,
+    ModuleCode.PURREQ,
     save(),
-    read,
   );
-  expect(saved.requestId).toBe(reservation.documentId);
-  const other = await numbering.createDocument(
-    actor,
-    'purchase_request',
-    randomUUID(),
-    save(),
-    read,
-  );
-  expect(other.requestId.endsWith('00002')).toBe(true);
+  expect(saved.requestId.endsWith('00002')).toBe(true);
 });
-it('rejects a missing request key before issuing any number', async () => {
-  await expect(
-    numbering.createDocument(
-      actor,
-      'purchase_request',
-      undefined as unknown as string,
-      save(),
-      read,
-    ),
-  ).rejects.toBeInstanceOf(BadRequestException);
+it('saveDocument uses the supplied ID without advancing any sequence', async () => {
+  const saved = await numbering.saveDocument(
+    actor,
+    ModuleCode.PURREQ,
+    'manual-id',
+    null,
+    () => save()('manual-id'),
+  );
+  expect(saved.requestId).toBe('manual-id');
   expect(await db.getRepository(NumberSequence).count()).toBe(0);
 });
-it('rejects a simultaneous duplicate request while the original saves', async () => {
-  const key = randomUUID();
-  let release!: () => void, started!: () => void;
-  const entered = new Promise<void>((r) => {
-    started = r;
-  });
-  const pending = numbering.createDocument(
-    actor,
-    'purchase_request',
-    key,
-    async (id) => {
-      started();
-      await new Promise<void>((r) => {
-        release = r;
-      });
-      return save()(id);
-    },
-    read,
-  );
-  await entered;
-  try {
-    await expect(
-      numbering.createDocument(actor, 'purchase_request', key, save(), read),
-    ).rejects.toBeInstanceOf(ConflictException);
-  } finally {
-    release();
-  }
-  const first = await pending;
-  expect(
-    (
-      await numbering.createDocument(
-        actor,
-        'purchase_request',
-        key,
-        save(),
-        read,
-      )
-    ).requestId,
-  ).toBe(first.requestId);
-});
-it('creates separate null-reference UUID groups and reuses only a concrete document reference', async () => {
+it('creates separate unbound attachment groups and binds the chosen group on save', async () => {
   const service = new AttachmentsService(
     db.getRepository(Attachment),
     db.getRepository(AttachmentItem),
@@ -242,27 +154,24 @@ it('creates separate null-reference UUID groups and reuses only a concrete docum
     {} as ConfigService,
   );
   const first = await service.create(actor, {
-    refModule: 'purchase_request',
+    refModule: ModuleCode.PURREQ,
     refId: null,
   });
   const second = await service.create(actor, {
-    refModule: 'purchase_request',
+    refModule: ModuleCode.PURREQ,
     refId: null,
   });
   expect(first.attachmentId).not.toBe(second.attachmentId);
-  expect(first.refId).toBeNull();
   const saved = await numbering.createDocument(
     actor,
-    'purchase_request',
-    randomUUID(),
+    ModuleCode.PURREQ,
     save(first.attachmentId),
-    read,
     first.attachmentId,
   );
   expect(
     (
       await service.create(actor, {
-        refModule: 'purchase_request',
+        refModule: ModuleCode.PURREQ,
         refId: saved.requestId,
       })
     ).attachmentId,
@@ -276,8 +185,8 @@ it('creates separate null-reference UUID groups and reuses only a concrete docum
   ).toBeNull();
 });
 it('rejects foreign-company, other-module and already-bound attachment groups before saving', async () => {
-  const foreign = await group('purchase_request', 'B'),
-    other = await group('work_order'),
+  const foreign = await group('PURREQ', 'B'),
+    other = await group('WRKORD'),
     bound = await group();
   await db
     .getRepository(Attachment)
@@ -290,58 +199,33 @@ it('rejects foreign-company, other-module and already-bound attachment groups be
     await expect(
       numbering.createDocument(
         actor,
-        'purchase_request',
-        randomUUID(),
+        ModuleCode.PURREQ,
         create,
-        read,
         attachment.attachmentId,
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(create).not.toHaveBeenCalled();
   }
 });
-it('preserves a saved document after bind failure and repairs the connection on retry', async () => {
-  const attachment = await group(),
-    key = randomUUID();
-  const create = jest.fn(async (id: string) => {
-    const result = await save(attachment.attachmentId)(id);
-    await db
-      .getRepository(Attachment)
-      .update({ attachmentId: attachment.attachmentId }, { deleteYn: 'Y' });
-    return result;
-  });
+it('preserves a saved document if subsequent attachment binding fails', async () => {
+  const attachment = await group();
   await expect(
     numbering.createDocument(
       actor,
-      'purchase_request',
-      key,
-      create,
-      read,
+      ModuleCode.PURREQ,
+      async (id) => {
+        const result = await save(attachment.attachmentId)(id);
+        await db
+          .getRepository(Attachment)
+          .update({ attachmentId: attachment.attachmentId }, { deleteYn: 'Y' });
+        return result;
+      },
       attachment.attachmentId,
     ),
   ).rejects.toBeInstanceOf(ConflictException);
   expect(await db.getRepository(PurchaseRequest).count()).toBe(1);
-  await db
-    .getRepository(Attachment)
-    .update({ attachmentId: attachment.attachmentId }, { deleteYn: 'N' });
-  const retry = await numbering.createDocument(
-    actor,
-    'purchase_request',
-    key,
-    create,
-    read,
-    attachment.attachmentId,
-  );
-  expect(create).toHaveBeenCalledTimes(1);
-  expect(
-    (
-      await db
-        .getRepository(Attachment)
-        .findOneByOrFail({ attachmentId: attachment.attachmentId })
-    ).refId,
-  ).toBe(retry.requestId);
 });
-it('does not rebind the source attachment group for linked approvals', async () => {
+it('does not rebind source attachments for linked approvals', async () => {
   const attachment = await group();
   await db
     .getRepository(Attachment)
@@ -351,12 +235,8 @@ it('does not rebind the source attachment group for linked approvals', async () 
     );
   const result = await numbering.createDocument(
     actor,
-    'approval',
-    randomUUID(),
-    async (id) => ({ id, attachmentId: attachment.attachmentId }),
-    async () => {
-      throw new NotFoundException();
-    },
+    ModuleCode.APPROV,
+    async (id) => ({ id }),
     attachment.attachmentId,
     true,
   );

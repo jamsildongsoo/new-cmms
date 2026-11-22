@@ -3,7 +3,6 @@ import {
   Controller,
   Delete,
   Get,
-  Headers,
   Param,
   Patch,
   Post,
@@ -13,7 +12,7 @@ import {
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { UserContext } from '../auth/types/user-context.type';
-import { AppModuleKey } from '../common/constants/modules';
+import { ModuleCode } from '../common/constants/modules';
 import { NumberingService } from '../numbering/numbering.service';
 import { BoardsService } from './boards.service';
 import { SaveBoardDto, SaveCommentDto, SearchBoardDto } from './dto/board.dto';
@@ -38,17 +37,11 @@ export class BoardsController {
   ) {
     return this.service.get(user, id);
   }
-  @Post() create(
-    @CurrentUser() user: UserContext,
-    @Body() dto: SaveBoardDto,
-    @Headers('idempotency-key') requestKey: string,
-  ) {
+  @Post() create(@CurrentUser() user: UserContext, @Body() dto: SaveBoardDto) {
     return this.numbering.createDocument(
       user,
-      AppModuleKey.BOARD,
-      requestKey,
+      ModuleCode.BORD,
       (id) => this.service.create(user, id, dto),
-      (id) => this.service.get(user, id),
       dto.attachmentId,
     );
   }
@@ -59,7 +52,7 @@ export class BoardsController {
   ) {
     return this.numbering.saveDocument(
       user,
-      AppModuleKey.BOARD,
+      ModuleCode.BORD,
       id,
       dto.attachmentId,
       () => this.service.update(user, id, dto),

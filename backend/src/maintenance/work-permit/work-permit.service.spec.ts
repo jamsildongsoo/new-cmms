@@ -44,7 +44,7 @@ function fixture() {
       { requirementId: 'WORK_PLAN', attachmentId: 'files', itemNo: 1 },
       { requirementId: 'RISK_ASSESSMENT', attachmentId: 'files', itemNo: 2 },
     ],
-  } as CreateWorkPermitDto;
+  } satisfies CreateWorkPermitDto;
   let row: WorkPermit | null = null;
   const file = {
     findOneBy: jest.fn(async () => ({ itemNo: 1 }) as AttachmentItem | null),
@@ -125,7 +125,7 @@ describe('work permit issuance', () => {
       f.source.status = status;
       const dto = {
         ...f.dto,
-        refModule: 'work_permit_request',
+        refModule: 'PERREQ',
         refId: 'request',
       };
       await expect(f.service.create(user, dto)).rejects.toThrow('확정');
@@ -197,11 +197,11 @@ describe('work permit issuance', () => {
       '실제 파일',
     );
   });
-  it('includes request attachments without copying and produces a fixed two-step line', async () => {
+  it('includes request attachments without copying or constructing an approval line', async () => {
     const f = fixture();
     await f.service.create(user, {
       ...f.dto,
-      refModule: 'work_permit_request',
+      refModule: 'PERREQ',
       refId: 'request',
       documentFiles: f.dto.documentFiles.map((v) => ({
         ...v,
@@ -209,10 +209,7 @@ describe('work permit issuance', () => {
       })),
     });
     const draft = await f.service.approvalDraft(user, 'permit');
-    expect(draft.steps).toEqual([
-      { type: 'APPROVER', userId: 'issuer' },
-      { type: 'APPROVER', userId: 'approver' },
-    ]);
+    expect(draft).not.toHaveProperty('steps');
     expect(draft.sourceAttachmentIds).toEqual(['request-files']);
   });
   it('requires matching completed approval before official printing', async () => {
@@ -234,7 +231,7 @@ describe('work permit issuance', () => {
       2,
     );
     f.steps.find.mockResolvedValue([]);
-    await expect(f.service.printData(user, 'permit')).rejects.toThrow('이력');
+    expect((await f.service.printData(user, 'permit')).approvals).toEqual([]);
   });
   it('validates real dates, hours and chronological ranges', () => {
     expect(() =>
@@ -247,4 +244,16 @@ describe('work permit issuance', () => {
       validatePermitData({ ...data, endTime: '20261105:09' }),
     ).toThrow();
   });
+});
+
+it('accepts the author as a permit issuer independently of the approval line', async () => {
+  const f = fixture();
+  const row = await f.service.create(
+    user,
+    Object.assign({}, f.dto, { issuerId: user.userId }),
+  );
+  expect(row.issuerId).toBe(user.userId);
+  expect(await f.service.approvalDraft(user, 'permit')).not.toHaveProperty(
+    'steps',
+  );
 });

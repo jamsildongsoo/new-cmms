@@ -11,11 +11,14 @@ export function LoginPage() {
       user,
       loading,
       error: sessionError,
+      notice: sessionNotice,
       reloadUser,
       logout,
     } = useAuth(),
     navigate = useNavigate(),
     location = useLocation()
+  const notice =
+    (location.state as { notice?: string } | null)?.notice ?? sessionNotice
   const from = (
     location.state as {
       from?: { pathname?: string; search?: string; hash?: string }
@@ -67,7 +70,7 @@ export function LoginPage() {
         onSubmit={(e) => void submit(e)}
         className="w-full max-w-sm space-y-3 border border-slate-200 bg-white p-6 shadow-sm"
       >
-        <h1 className="text-base font-semibold text-slate-900">CMMS 로그인</h1>
+        <h1 className="text-lg font-semibold text-slate-900">CMMS 로그인</h1>
         <Field label="회사 ID" required>
           <Input
             required
@@ -93,6 +96,14 @@ export function LoginPage() {
             onChange={(e) => setPassword(e.target.value)}
           />
         </Field>
+        {notice && (
+          <p
+            role="status"
+            className="rounded-md bg-emerald-50 px-3 py-2 text-xs text-emerald-700"
+          >
+            {notice}
+          </p>
+        )}
         {error && (
           <p role="alert" className="text-xs text-red-600">
             {error}

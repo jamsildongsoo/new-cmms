@@ -1,3 +1,9 @@
+import { SearchPermitDto } from './dto/search-permit.dto';
+import { normalizePaginationQuery } from '../../common/utils/pagination.util';
+import { ForbiddenException } from '@nestjs/common';
+import { DocumentStatus } from '../../common/constants/document-status';
+import { ModuleCode } from '../../common/constants/modules';
+import type { EntityManager } from 'typeorm';
 /** 일반/보충 허가의 템플릿·필수 서류·발급자/승인자를 검사하고 하나의 결재로 연결한다. */
 import { WorkPermitRequest } from '../work-permit-request/entities/work-permit-request.entity';
 import {
@@ -7,9 +13,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { UserContext } from '../../auth/types/user-context.type';
-import { applyDocumentScope } from '../../common/utils/document-scope.util';
 import { User } from '../../identity/users/entities/user.entity';
 import { AttachmentItem } from '../../attachments/entities/attachment-item.entity';
 import { Approval } from '../../approvals/entities/approval.entity';
@@ -27,27 +32,97 @@ import {
 import { permitOwner, validatePermitData } from './permit-validation';
 @Injectable()
 export class WorkPermitService {
+  withManager(manager: EntityManager): WorkPermitService {
+    return new WorkPermitService(
+      manager.getRepository(WorkPermit),
+      this.requests.withManager(manager),
+    );
+  }
+
   constructor(
     @InjectRepository(WorkPermit)
     private readonly repository: Repository<WorkPermit>,
     private readonly requests: WorkPermitRequestService,
   ) {}
   private query(user: UserContext) {
-    return applyDocumentScope(
-      this.repository.createQueryBuilder('p'),
-      user,
-      'p',
+    // 이 모듈의 조회 정책이다. 기본 조건 뒤에는 andWhere로 업무 조건을 추가한다.
+    const query = this.repository.createQueryBuilder('p');
+    query
+      .where('p.companyId = :companyId', { companyId: user.companyId })
+      .andWhere('p.deleteYn = :deleteYn', { deleteYn: 'N' });
+    if (user.accessScope === 'COMPANY_ALL') return query;
+    if (user.accessScope === 'OWN_SITE' && user.siteId)
+      return query.andWhere('p.siteId = :scopeSiteId', {
+        scopeSiteId: user.siteId,
+      });
+    if (user.accessScope === 'OWN_DEPARTMENT' && user.deptId)
+      return query.andWhere(
+        `p.deptId IN (
+        WITH RECURSIVE scope_departments AS (
+          SELECT "deptId" FROM "department" WHERE "companyId" = :companyId AND "deptId" = :scopeDeptId AND "deleteYn" = 'N'
+          UNION
+          SELECT d."deptId" FROM "department" d JOIN scope_departments p ON d."parentDeptId" = p."deptId"
+          WHERE d."companyId" = :companyId AND d."deleteYn" = 'N'
+        ) SELECT "deptId" FROM scope_departments
+      )`,
+        { scopeDeptId: user.deptId },
+      );
+    throw new ForbiddenException(
+      'Document access scope or affiliation is missing',
     );
   }
-  findAll(user: UserContext) {
-    return this.query(user).orderBy('p.createdAt', 'DESC').getMany();
+  async findAll(user: UserContext, filter: SearchPermitDto = {}) {
+    const { page, limit, offset } = normalizePaginationQuery(filter);
+    const query = this.query(user).select([
+      'p.workPermitId',
+      'p.documentNo',
+      'p.data',
+      'p.status',
+    ]);
+    // 설비번호는 직접 입력 참고값이다. 검색 대상은 문서번호·관리번호·작업명만 둔다.
+    if (filter.search?.trim())
+      query.andWhere(
+        "(p.workPermitId ILIKE :search OR p.documentNo ILIKE :search OR p.data->>'title' ILIKE :search)",
+        { search: `%${filter.search.trim().replace(/[\\%_]/g, '\\$&')}%` },
+      );
+    const [rows, total] = await query
+      .orderBy('p.createdAt', 'DESC')
+      .addOrderBy('p.workPermitId', 'DESC')
+      .skip(offset)
+      .take(limit)
+      .getManyAndCount();
+    return {
+      items: rows.map((row) => ({
+        workPermitId: row.workPermitId,
+        documentNo: row.documentNo,
+        title: row.data.title,
+        applicantName: row.data.applicantName,
+        status: row.status,
+      })),
+      total,
+      page,
+      limit,
+    };
   }
   async findOne(user: UserContext, id: string) {
     const row = await this.query(user)
       .andWhere('p.workPermitId = :id', { id })
       .getOne();
     if (!row) throw new NotFoundException('작업 허가서가 없습니다.');
-    return row;
+    const users = await this.repository.manager.getRepository(User).find({
+      where: {
+        companyId: user.companyId,
+        userId: In([row.issuerId, row.approverId]),
+        deleteYn: 'N',
+      },
+      select: { userId: true, name: true },
+    });
+    return Object.assign({}, row, {
+      issuerName:
+        users.find((person) => person.userId === row.issuerId)?.name ?? null,
+      approverName:
+        users.find((person) => person.userId === row.approverId)?.name ?? null,
+    });
   }
   async options(user: UserContext) {
     this.query(user);
@@ -62,15 +137,16 @@ export class WorkPermitService {
       users: users.map((u) => ({ value: u.userId, label: u.name })),
     };
   }
+  /** 허가기간·허가 유형·담당자 등 작업허가 고유 조건을 검사한다. 특수 시간 형식은 이 모듈에서 관리한다. */
   private async validate(user: UserContext, dto: SaveWorkPermitDto) {
     validatePermitData(dto.data);
     if (Boolean(dto.refModule) !== Boolean(dto.refId))
       throw new BadRequestException('참조 모듈과 ID는 함께 지정해야 합니다.');
     if (dto.refModule) {
-      if (dto.refModule !== 'work_permit_request')
+      if (dto.refModule !== ModuleCode.PERREQ)
         throw new BadRequestException('허가 요청서만 참조할 수 있습니다.');
       const source = await this.requests.findOne(user, dto.refId!);
-      if (source.status !== 'C')
+      if (source.status !== DocumentStatus.CONFIRMED)
         throw new BadRequestException(
           '신청 완료로 확정된 요청서만 선택할 수 있습니다.',
         );
@@ -122,7 +198,6 @@ export class WorkPermitService {
         throw new BadRequestException('유효한 발급자·승인자를 지정하십시오.');
   }
   async create(user: UserContext, dto: CreateWorkPermitDto) {
-    this.query(user);
     await this.validate(user, dto);
     if (
       await this.repository.findOneBy({
@@ -142,7 +217,7 @@ export class WorkPermitService {
           refId: dto.refId ?? null,
           attachmentId: dto.attachmentId ?? null,
           approvalId: null,
-          status: 'D' as const,
+          status: DocumentStatus.DRAFT,
           deleteYn: 'N',
           createdBy: user.userId,
         }),
@@ -227,7 +302,7 @@ export class WorkPermitService {
       ]),
     ];
     return {
-      refModule: 'work_permit',
+      refModule: ModuleCode.PERMIT,
       refId: id,
       title: `[작업허가] ${row.data.title}`,
       attachmentId: row.attachmentId,
@@ -239,10 +314,6 @@ export class WorkPermitService {
         type: 'doc',
         content: fields.map(([k, v]) => paragraph(`${k}: ${v}`)),
       },
-      steps: [
-        { type: 'APPROVER' as const, userId: row.issuerId },
-        { type: 'APPROVER' as const, userId: row.approverId },
-      ],
     };
   }
   async syncApprovalStatus(
@@ -284,15 +355,16 @@ export class WorkPermitService {
   }
   async printData(user: UserContext, id: string) {
     const permit = await this.findOne(user, id);
-    if (permit.status !== 'C') return { permit, approvals: [] };
+    if (permit.status !== DocumentStatus.CONFIRMED)
+      return { permit, approvals: [] };
     const approval = await this.repository.manager
       .getRepository(Approval)
       .findOneBy({
         companyId: user.companyId,
         approvalId: permit.approvalId!,
-        refModule: 'work_permit',
+        refModule: ModuleCode.PERMIT,
         refId: id,
-        status: 'C',
+        status: DocumentStatus.CONFIRMED,
         deleteYn: 'N',
       });
     if (!approval)
@@ -303,17 +375,11 @@ export class WorkPermitService {
         where: {
           companyId: user.companyId,
           approvalId: approval.approvalId,
-          type: 'APPROVER',
+          type: In(['APPROVER', 'AGREE']),
           status: 'Y',
         },
         order: { stepNo: 'ASC' },
       });
-    if (
-      approvals.length !== 2 ||
-      approvals[0].userId !== permit.issuerId ||
-      approvals[1].userId !== permit.approverId
-    )
-      throw new ConflictException('발급·승인 이력을 확인하십시오.');
     return { permit, approvals };
   }
 }

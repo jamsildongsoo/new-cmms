@@ -1,6 +1,5 @@
-import { AppModuleKey } from '../common/constants/modules';
+import { ModuleCode } from '../common/constants/modules';
 import { NumberingService } from '../numbering/numbering.service';
-import { Headers } from '@nestjs/common';
 import {
   Body,
   Controller,
@@ -15,11 +14,13 @@ import {
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { UserContext } from '../auth/types/user-context.type';
+import { ApprovalQueryDto } from './dto/approval-query.dto';
 import { ApprovalActionDto } from './dto/approval-action.dto';
 import { CreateApprovalDto } from './dto/create-approval.dto';
 import { UpdateApprovalDto } from './dto/update-approval.dto';
 import { ApprovalsService } from './approvals.service';
 
+/** 결재 API. 경로별 동작 권한 외에 참여자·처리 차례·문서 상태를 Service가 추가 검사한다. */
 @UseGuards(JwtAuthGuard)
 @Controller('approvals')
 export class ApprovalsController {
@@ -34,8 +35,9 @@ export class ApprovalsController {
     @CurrentUser() user: UserContext,
     @Param('box')
     box: 'submit' | 'pending' | 'processed' | 'closed' | 'reference',
+    @Query() query: ApprovalQueryDto,
   ) {
-    return this.approvalsService.findBox(user, box);
+    return this.approvalsService.findBox(user, box, query);
   }
 
   // Search users by id or name for the approver picker.
@@ -61,24 +63,17 @@ export class ApprovalsController {
 
   // Create an approval draft, or create and submit immediately when submit is true.
   @Post()
-  create(
-    @CurrentUser() user: UserContext,
-    @Body() dto: CreateApprovalDto,
-    @Headers('idempotency-key') requestKey: string,
-  ) {
+  create(@CurrentUser() user: UserContext, @Body() dto: CreateApprovalDto) {
     return this.numbering.createDocument(
       user,
-      AppModuleKey.APPROVAL,
-      requestKey,
+      ModuleCode.APPROV,
       (documentId) =>
         this.approvalsService.create(
           user,
           Object.assign({}, dto, { approvalId: documentId }),
         ),
-      (documentId) => this.approvalsService.findOne(user, documentId),
       dto.attachmentId,
       Boolean(dto.refModule && dto.refId),
-      (documentId) => this.approvalsService.resumeCreate(user, documentId, dto),
     );
   }
 
@@ -91,7 +86,7 @@ export class ApprovalsController {
   ) {
     return this.numbering.saveDocument(
       user,
-      AppModuleKey.APPROVAL,
+      ModuleCode.APPROV,
       approvalId,
       dto.attachmentId,
       () => this.approvalsService.update(user, approvalId, dto),

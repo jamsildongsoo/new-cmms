@@ -19,3 +19,21 @@ export interface LoginResponse {
   tokenType: 'Bearer'
   user: UserContext
 }
+
+export interface LoginHistoryItem {
+  id: string
+  companyId: string
+  userId: string
+  success: boolean
+  failureReason: string | null
+  ipAddress: string | null
+  userAgent: string | null
+  attemptedAt: string
+}
+export interface LoginHistoryQuery {
+  from?: string
+  to?: string
+  userId?: string
+  result?: 'success' | 'failure' | ''
+  page?: number
+}

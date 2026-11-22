@@ -15,7 +15,7 @@ const actor = (overrides: Partial<UserContext> = {}) =>
     siteId: 'S',
     deptId: 'D',
     accessScope: 'COMPANY_ALL',
-    permissions: ['work_request:read', 'work_order:read'],
+    permissions: ['WRKREQ:read', 'WRKORD:read'],
     ...overrides,
   }) as UserContext;
 function fixture() {
@@ -43,7 +43,7 @@ function fixture() {
       companyId: 'A',
       workOrderId: 'plan1',
       orderKind: 'PLAN',
-      refModule: 'work_request',
+      refModule: 'WRKREQ',
       refId: 'request',
       siteId: 'S',
       deptId: 'D',
@@ -53,7 +53,7 @@ function fixture() {
       companyId: 'A',
       workOrderId: 'plan2',
       orderKind: 'PLAN',
-      refModule: 'work_request',
+      refModule: 'WRKREQ',
       refId: 'request',
       siteId: 'S',
       deptId: 'CHILD',
@@ -63,7 +63,7 @@ function fixture() {
       companyId: 'B',
       workOrderId: 'foreign',
       orderKind: 'PLAN',
-      refModule: 'work_request',
+      refModule: 'WRKREQ',
       refId: 'request',
       siteId: 'S',
       deptId: 'D',
@@ -85,7 +85,8 @@ function fixture() {
             r[q.sql.some((s) => s.includes('.refId')) ? 'refId' : idField] ===
               p.id) &&
           (!p.scopeSiteId || r.siteId === p.scopeSiteId) &&
-          (!p.scopeDeptId || [p.scopeDeptId, 'CHILD'].includes(r.deptId)) &&
+          (!p.scopeDeptId ||
+            [p.scopeDeptId, 'CHILD'].some((deptId) => deptId === r.deptId)) &&
           (!p.status || r.status === p.status) &&
           (!p.kind || r.orderKind === p.kind) &&
           (!p.module || r.refModule === p.module)
@@ -104,6 +105,10 @@ function fixture() {
       },
       select: () => b,
       orderBy: () => b,
+      addOrderBy: () => b,
+      skip: () => b,
+      take: () => b,
+      getManyAndCount: async () => [matches(), matches().length],
       getOne: async () => matches()[0] ?? null,
       getMany: async () => matches(),
     };
@@ -273,7 +278,7 @@ describe('Work request references and scope', () => {
       actor({ companyId: 'B' }),
       actor({ accessScope: 'OWN_SITE', siteId: 'OTHER' }),
     ]) {
-      expect(await service.findAll(user)).toEqual([]);
+      expect((await service.findAll(user)).items).toEqual([]);
       await expect(service.findOne(user, 'request')).rejects.toThrow(
         'not found',
       );
@@ -289,7 +294,7 @@ describe('Work request references and scope', () => {
     const { service, request, queries } = fixture();
     request.deptId = 'CHILD';
     expect(
-      await service.findAll(actor({ accessScope: 'OWN_DEPARTMENT' })),
+      (await service.findAll(actor({ accessScope: 'OWN_DEPARTMENT' }))).items,
     ).toHaveLength(1);
     expect(queries[0].sql.join(' ')).toContain('WITH RECURSIVE');
     await expect(
@@ -306,22 +311,18 @@ describe('Work request references and scope', () => {
     ).toEqual(['plan1', 'plan2']);
     expect(
       await service.relatedPlans(
-        actor({ permissions: ['work_request:read'] }),
+        actor({ permissions: ['WRKREQ:read'] }),
         'request',
       ),
     ).toEqual([]);
     expect(request.status).toBe('C');
   });
-  it('supplies company-specific equipment and priority code choices', async () => {
+  it('supplies company equipment without loading frontend-only priority choices', async () => {
     const { service, codeItems } = fixture();
-    expect((await service.getOptions(actor())).priorities).toEqual([
-      { value: 'URGENT', label: '긴급' },
-    ]);
-    expect(codeItems.find).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { companyId: 'A', codeId: 'WORK_REQUEST_PRIORITY' },
-      }),
-    );
+    const options = await service.getOptions(actor());
+    expect(options).not.toHaveProperty('priorities');
+    expect(options).toHaveProperty('equipment');
+    expect(codeItems.find).not.toHaveBeenCalled();
   });
   it('rejects forged ownership, affiliation and status fields in incoming requests', async () => {
     const dto = plainToInstance(CreateWorkRequestDto, {

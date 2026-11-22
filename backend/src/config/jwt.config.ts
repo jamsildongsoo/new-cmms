@@ -1,8 +1,7 @@
-import { registerAs } from '@nestjs/config';
-import { ENV_DEFAULTS } from './env.schema';
+/** backend/.env의 JWT_ACCESS_SECRET과 단위 포함 만료시간을 사용한다. 운영 비밀값은 개발과 분리한다. */
+import type { EnvironmentVariables } from './env.schema';
 
-export const jwtConfig = registerAs('jwt', () => ({
-  accessSecret: process.env.JWT_ACCESS_SECRET,
-  accessExpiresIn:
-    process.env.JWT_ACCESS_EXPIRES_IN ?? ENV_DEFAULTS.JWT_ACCESS_EXPIRES_IN,
-}));
+export const buildJwtConfig = (env: EnvironmentVariables) => ({
+  accessSecret: env.JWT_ACCESS_SECRET,
+  accessExpiresIn: env.JWT_ACCESS_EXPIRES_IN,
+});

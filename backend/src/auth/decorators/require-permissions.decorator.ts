@@ -1,5 +1,5 @@
 import { SetMetadata } from '@nestjs/common';
-import type { AppModuleKey } from '../../common/constants/modules';
+import type { ModuleCode } from '../../common/constants/modules';
 import {
   buildPermissionCode,
   PermissionAction,
@@ -11,6 +11,6 @@ export const RequirePermissions = (...permissions: string[]) =>
   SetMetadata(REQUIRED_PERMISSIONS_KEY, permissions);
 
 export const RequirePermission = (
-  moduleKey: AppModuleKey,
+  moduleCode: ModuleCode,
   action: PermissionAction,
-) => RequirePermissions(buildPermissionCode(moduleKey, action));
+) => RequirePermissions(buildPermissionCode(moduleCode, action));

@@ -1,3 +1,4 @@
+// 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Navigate, useNavigate, useParams } from 'react-router-dom'
@@ -90,15 +91,15 @@ export function DepartmentFormPage({ mode }: { mode: FormMode }) {
 
   const requiredPermission =
     mode === 'create'
-      ? 'department:create'
+      ? 'DEPT:create'
       : mode === 'edit'
-        ? 'department:update'
-        : 'department:read'
+        ? 'DEPT:update'
+        : 'DEPT:read'
   if (!hasPermission(requiredPermission)) {
     return <Navigate to="/departments" replace />
   }
 
-  const readOnly = mode !== 'create' && !hasPermission('department:update')
+  const readOnly = mode !== 'create' && !hasPermission('DEPT:update')
 
   const update = (key: keyof DepartmentFormState, value: string) =>
     setForm((current) => ({ ...current, [key]: value }))
@@ -109,19 +110,21 @@ export function DepartmentFormPage({ mode }: { mode: FormMode }) {
     setIsSaving(true)
     setError(null)
     try {
-      if (mode !== 'create' && id) {
-        // Key fields are immutable, so the backend update DTO does not accept them.
-        const payload: Partial<DepartmentFormState> = { ...form }
-        delete payload.deptId
-        await updateDepartment(
-          id,
-          payload as Omit<DepartmentFormState, 'deptId'>,
-        )
-      } else {
-        await createDepartment({ ...form })
+      const saved =
+        mode !== 'create' && id
+          ? await updateDepartment(id, {
+              name: form.name,
+              parentDeptId: form.parentDeptId,
+            })
+          : await createDepartment({ ...form })
+      const loaded = {
+        deptId: saved.deptId,
+        name: saved.name,
+        parentDeptId: saved.parentDeptId ?? '',
       }
-      setSavedForm(JSON.stringify(form))
-      navigate(`/departments/${encodeURIComponent(form.deptId)}`, {
+      setForm(loaded)
+      setSavedForm(JSON.stringify(loaded))
+      navigate(`/departments/${encodeURIComponent(saved.deptId)}`, {
         replace: mode === 'create',
       })
     } catch (saveError) {
@@ -135,7 +138,7 @@ export function DepartmentFormPage({ mode }: { mode: FormMode }) {
     if (
       !id ||
       isSaving ||
-      !hasPermission('department:delete') ||
+      !hasPermission('DEPT:delete') ||
       !window.confirm('이 정보를 삭제하시겠습니까?')
     )
       return
@@ -152,24 +155,8 @@ export function DepartmentFormPage({ mode }: { mode: FormMode }) {
   return (
     <section className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-base font-semibold text-slate-900">부서</h1>
-        <div className="flex flex-wrap justify-end gap-2">
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={mode === 'create' || isLoading || isSaving}
-            onClick={() =>
-              printDocument({
-                title: '부서',
-                fields: Object.entries(form).map(([key, value]) => [
-                  key,
-                  value,
-                ]),
-              })
-            }
-          >
-            인쇄
-          </Button>
+        <h1 className="text-lg font-semibold text-slate-900">부서</h1>
+        <div className="page-actions">
           <Button
             type="button"
             variant="secondary"
@@ -180,6 +167,34 @@ export function DepartmentFormPage({ mode }: { mode: FormMode }) {
           >
             목록
           </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={mode === 'create' || isLoading || isSaving}
+            onClick={() =>
+              printDocument({
+                title: '부서',
+                fields: [
+                  ['부서코드', form.deptId],
+                  ['부서명', form.name],
+                  ['상위 부서', form.parentDeptId],
+                ],
+              })
+            }
+          >
+            인쇄
+          </Button>
+          {mode !== 'create' && hasPermission('DEPT:delete') && (
+            <Button
+              className="sm:ml-2"
+              type="button"
+              variant="danger"
+              disabled={isSaving || isLoading}
+              onClick={() => void remove()}
+            >
+              삭제
+            </Button>
+          )}
           {!readOnly && (
             <Button
               type="submit"
@@ -187,16 +202,6 @@ export function DepartmentFormPage({ mode }: { mode: FormMode }) {
               disabled={isSaving || isLoading}
             >
               저장
-            </Button>
-          )}
-          {mode !== 'create' && hasPermission('department:delete') && (
-            <Button
-              type="button"
-              variant="danger"
-              disabled={isSaving || isLoading}
-              onClick={() => void remove()}
-            >
-              삭제
             </Button>
           )}
         </div>
@@ -210,39 +215,36 @@ export function DepartmentFormPage({ mode }: { mode: FormMode }) {
 
       <form
         id="departments-form"
-        className="border border-slate-200 bg-white p-3"
+        className="rounded-lg border border-slate-200 bg-white p-4 md:p-5"
         onSubmit={(event) => void save(event)}
       >
         <div className="grid gap-3 md:grid-cols-2">
-          <Field label="Department ID" required>
+          <Field label="부서코드" required>
             <Input
               value={form.deptId}
+              required
+              maxLength={30}
               disabled={mode !== 'create' || isLoading}
               onChange={(event) => update('deptId', event.target.value)}
             />
           </Field>
-          <Field label="Name" required>
+          <Field label="부서명" required>
             <Input
               value={form.name}
+              required
+              maxLength={100}
               disabled={readOnly || isLoading}
               onChange={(event) => update('name', event.target.value)}
             />
           </Field>
-          <Field label="Parent Department">
+          <Field label="상위 부서">
             <Select
               value={form.parentDeptId}
               disabled={readOnly || isLoading}
               onChange={(event) => update('parentDeptId', event.target.value)}
             >
-              <option value="">No parent</option>
-              {form.parentDeptId &&
-                !departments.some(
-                  (row) => row.deptId === form.parentDeptId,
-                ) && (
-                  <option value={form.parentDeptId}>
-                    {form.parentDeptId} (inactive)
-                  </option>
-                )}
+              <option value="">상위 항목 없음</option>
+
               {departments
                 .filter((row) => row.deptId !== form.deptId)
                 .map((row) => (

@@ -1,3 +1,5 @@
+import { PermissionAction } from '../../common/constants/permissions';
+import { ModuleCode } from '../../common/constants/modules';
 import {
   Body,
   Controller,
@@ -24,41 +26,41 @@ import { VendorService } from './vendor.service';
 @Controller('vendor')
 export class VendorController {
   constructor(private readonly service: VendorService) {}
-  @Get() @RequirePermission('vendor', 'read') list(
+  @Get() @RequirePermission(ModuleCode.VENDOR, PermissionAction.READ) list(
     @CurrentUser() user: UserContext,
     @Query() dto: SearchVendorDto,
   ) {
     return this.service.list(user, dto);
   }
-  @Get(':id') @RequirePermission('vendor', 'read') get(
+  @Get(':id') @RequirePermission(ModuleCode.VENDOR, PermissionAction.READ) get(
     @CurrentUser() user: UserContext,
     @Param('id') id: string,
   ) {
     return this.service.get(user, id);
   }
-  @Post() @RequirePermission('vendor', 'create') create(
+  @Post() @RequirePermission(ModuleCode.VENDOR, PermissionAction.CREATE) create(
     @CurrentUser() user: UserContext,
     @Body() dto: CreateVendorDto,
   ) {
     return this.service.create(user, dto);
   }
-  @Patch(':id') @RequirePermission('vendor', 'update') update(
+  @Patch(':id')
+  @RequirePermission(ModuleCode.VENDOR, PermissionAction.UPDATE)
+  update(
     @CurrentUser() user: UserContext,
     @Param('id') id: string,
     @Body() dto: UpdateVendorDto,
   ) {
     return this.service.update(user, id, dto);
   }
-  @Get(':id/deletion-info') @RequirePermission('vendor', 'delete') deletionInfo(
-    @CurrentUser() user: UserContext,
-    @Param('id') id: string,
-  ) {
+  @Get(':id/deletion-info')
+  @RequirePermission(ModuleCode.VENDOR, PermissionAction.DELETE)
+  deletionInfo(@CurrentUser() user: UserContext, @Param('id') id: string) {
     return this.service.deletionInfo(user, id);
   }
-  @Delete(':id') @RequirePermission('vendor', 'delete') remove(
-    @CurrentUser() user: UserContext,
-    @Param('id') id: string,
-  ) {
+  @Delete(':id')
+  @RequirePermission(ModuleCode.VENDOR, PermissionAction.DELETE)
+  remove(@CurrentUser() user: UserContext, @Param('id') id: string) {
     return this.service.remove(user, id);
   }
 }

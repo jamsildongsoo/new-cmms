@@ -1,21 +1,16 @@
+import { DecimalInput } from '@/shared/ui/DecimalInput'
+import { CodeSelect } from '@/shared/ui/CodeSelect'
 import type { Dispatch, SetStateAction } from 'react'
 import { Button } from '@/shared/ui/Button'
 import { Input } from '@/shared/ui/Input'
-import {
-  amount,
-  money,
-  totals,
-  type WorkOrderForm,
-  type LaborRow,
-  type MaterialRow,
-  type CostRow,
-} from './workOrderForm'
+import { amount, money, totals, type WorkOrderForm, type LaborRow, type MaterialRow, type CostRow } from './workOrderForm'
 
 interface Column<T> {
   key: keyof T
   label: string
   numeric?: boolean
   step?: string
+  choices?: { value: string; label: string }[]
   maxLength?: number
 }
 function DetailTable<T extends object>({
@@ -39,8 +34,8 @@ function DetailTable<T extends object>({
 }) {
   return (
     <section className="space-y-2">
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold">{title}</h2>
+      <div className="flex flex-wrap items-center justify-between">
+        <h2 className="text-base font-semibold">{title}</h2>
         {!readOnly && (
           <Button
             type="button"
@@ -92,27 +87,70 @@ function DetailTable<T extends object>({
                       key={String(column.key)}
                       className="min-w-24 border p-1"
                     >
-                      <Input
-                        aria-label={`${title} ${index + 1}행 ${column.label}`}
-                        type={column.numeric ? 'number' : 'text'}
-                        min={column.numeric ? 0 : undefined}
-                        step={
-                          column.numeric ? (column.step ?? '0.0001') : undefined
-                        }
-                        maxLength={column.maxLength}
-                        required={col === 0 || column.numeric}
-                        value={String(row[column.key])}
-                        disabled={disabled}
-                        onChange={(e) =>
-                          onChange(
-                            rows.map((item, i) =>
-                              i === index
-                                ? { ...item, [column.key]: e.target.value }
-                                : item,
-                            ),
-                          )
-                        }
-                      />
+                      {column.choices ? (
+                        <CodeSelect
+                          aria-label={`${title} ${index + 1}행 ${column.label}`}
+                          options={column.choices}
+                          value={String(row[column.key])}
+                          disabled={disabled || readOnly}
+                          onChange={(event) =>
+                            onChange(
+                              rows.map((item, i) =>
+                                i === index
+                                  ? {
+                                      ...item,
+                                      [column.key]: event.target.value,
+                                    }
+                                  : item,
+                              ),
+                            )
+                          }
+                        />
+                      ) : column.key === 'quantity' ||
+                        column.key === 'unitPrice' ? (
+                        <DecimalInput
+                          kind={
+                            column.key === 'quantity' ? 'quantity' : 'unitPrice'
+                          }
+                          aria-label={`${title} ${index + 1}행 ${column.label}`}
+                          required
+                          value={String(row[column.key])}
+                          disabled={disabled || readOnly}
+                          onChange={(e) =>
+                            onChange(
+                              rows.map((item, i) =>
+                                i === index
+                                  ? { ...item, [column.key]: e.target.value }
+                                  : item,
+                              ),
+                            )
+                          }
+                        />
+                      ) : (
+                        <Input
+                          aria-label={`${title} ${index + 1}행 ${column.label}`}
+                          type={column.numeric ? 'number' : 'text'}
+                          min={column.numeric ? 0 : undefined}
+                          step={
+                            column.numeric
+                              ? (column.step ?? '0.0001')
+                              : undefined
+                          }
+                          maxLength={column.maxLength}
+                          required={col === 0 || column.numeric}
+                          value={String(row[column.key])}
+                          disabled={disabled}
+                          onChange={(e) =>
+                            onChange(
+                              rows.map((item, i) =>
+                                i === index
+                                  ? { ...item, [column.key]: e.target.value }
+                                  : item,
+                              ),
+                            )
+                          }
+                        />
+                      )}
                     </td>
                   ))}
                   {extra && (
@@ -150,7 +188,9 @@ export function WorkOrderDetails({
   setForm,
   readOnly,
   disabled,
+  units,
 }: {
+  units: { value: string; label: string }[]
   form: WorkOrderForm
   setForm: Dispatch<SetStateAction<WorkOrderForm>>
   readOnly: boolean
@@ -183,8 +223,8 @@ export function WorkOrderDetails({
           { key: 'name', label: '자재명', maxLength: 150 },
           { key: 'spec', label: '규격', maxLength: 200 },
           { key: 'quantity', label: '수량', numeric: true },
-          { key: 'unit', label: '단위', maxLength: 50 },
-          { key: 'unitPrice', label: '단가', numeric: true, step: '0.01' },
+          { key: 'unit', label: '단위', choices: units },
+          { key: 'unitPrice', label: '단가', numeric: true },
         ]}
         extra={(r) => money(amount(r.quantity, r.unitPrice))}
         onChange={(materials) =>

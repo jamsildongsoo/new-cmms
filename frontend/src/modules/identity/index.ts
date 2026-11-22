@@ -1,1 +1,6 @@
 export { identityRoutes } from './routes'
+export { getRecord } from './identity.api'
+export type { IdentityRow } from './identity.api'
+export { AccountPanel } from './AccountPanel'
+export { getProfile } from './user-profile.api'
+export type { UserProfile } from './user-profile.types'

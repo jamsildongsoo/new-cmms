@@ -1,5 +1,5 @@
+import { SearchPermitDto } from './dto/search-permit.dto';
 import { NumberingService } from '../../numbering/numbering.service';
-import { Headers } from '@nestjs/common';
 import {
   Body,
   Controller,
@@ -8,6 +8,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
@@ -15,12 +16,13 @@ import { RequirePermission } from '../../auth/decorators/require-permissions.dec
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import type { UserContext } from '../../auth/types/user-context.type';
-import { AppModuleKey } from '../../common/constants/modules';
+import { ModuleCode } from '../../common/constants/modules';
 import { PermissionAction } from '../../common/constants/permissions';
 import { CreateWorkPermitDto } from './dto/create-work-permit.dto';
 import { UpdateWorkPermitDto } from './dto/update-work-permit.dto';
 import { WorkPermitService } from './work-permit.service';
 
+/** 작업허가 API. 원문 저장·결재 초안 구성·인쇄 데이터 조회를 구분한다. */
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('work-permit')
 export class WorkPermitController {
@@ -29,23 +31,24 @@ export class WorkPermitController {
     private readonly service: WorkPermitService,
   ) {}
 
-  @RequirePermission(AppModuleKey.WORK_PERMIT, PermissionAction.READ)
+  @RequirePermission(ModuleCode.PERMIT, PermissionAction.READ)
   @Get()
-  findAll(@CurrentUser() user: UserContext) {
-    return this.service.findAll(user);
+  findAll(@CurrentUser() user: UserContext, @Query() query: SearchPermitDto) {
+    return this.service.findAll(user, query);
   }
 
-  @RequirePermission(AppModuleKey.WORK_PERMIT, PermissionAction.READ)
+  @RequirePermission(ModuleCode.PERMIT, PermissionAction.READ)
   @Get('options')
   options(@CurrentUser() user: UserContext) {
     return this.service.options(user);
   }
-  @RequirePermission(AppModuleKey.WORK_PERMIT, PermissionAction.READ)
+  @RequirePermission(ModuleCode.PERMIT, PermissionAction.READ)
+  // 결재에 사용할 본문 데이터 구성이다. 이 조회 자체가 결재 문서를 저장하거나 상신하지는 않는다.
   @Get(':workPermitId/approval-draft')
   draft(@CurrentUser() user: UserContext, @Param('workPermitId') id: string) {
     return this.service.approvalDraft(user, id);
   }
-  @RequirePermission(AppModuleKey.WORK_PERMIT, PermissionAction.READ)
+  @RequirePermission(ModuleCode.PERMIT, PermissionAction.READ)
   @Get(':workPermitId/print-data')
   printData(
     @CurrentUser() user: UserContext,
@@ -53,7 +56,7 @@ export class WorkPermitController {
   ) {
     return this.service.printData(user, id);
   }
-  @RequirePermission(AppModuleKey.WORK_PERMIT, PermissionAction.READ)
+  @RequirePermission(ModuleCode.PERMIT, PermissionAction.READ)
   @Get(':workPermitId')
   findOne(
     @CurrentUser() user: UserContext,
@@ -62,28 +65,22 @@ export class WorkPermitController {
     return this.service.findOne(user, workPermitId);
   }
 
-  @RequirePermission(AppModuleKey.WORK_PERMIT, PermissionAction.CREATE)
+  @RequirePermission(ModuleCode.PERMIT, PermissionAction.CREATE)
   @Post()
-  create(
-    @CurrentUser() user: UserContext,
-    @Body() dto: CreateWorkPermitDto,
-    @Headers('idempotency-key') requestKey: string,
-  ) {
+  create(@CurrentUser() user: UserContext, @Body() dto: CreateWorkPermitDto) {
     return this.numbering.createDocument(
       user,
-      AppModuleKey.WORK_PERMIT,
-      requestKey,
+      ModuleCode.PERMIT,
       (documentId) =>
         this.service.create(
           user,
           Object.assign({}, dto, { workPermitId: documentId }),
         ),
-      (documentId) => this.service.findOne(user, documentId),
       dto.attachmentId,
     );
   }
 
-  @RequirePermission(AppModuleKey.WORK_PERMIT, PermissionAction.UPDATE)
+  @RequirePermission(ModuleCode.PERMIT, PermissionAction.UPDATE)
   @Patch(':workPermitId')
   update(
     @CurrentUser() user: UserContext,
@@ -92,14 +89,14 @@ export class WorkPermitController {
   ) {
     return this.numbering.saveDocument(
       user,
-      AppModuleKey.WORK_PERMIT,
+      ModuleCode.PERMIT,
       workPermitId,
       dto.attachmentId,
       () => this.service.update(user, workPermitId, dto),
     );
   }
 
-  @RequirePermission(AppModuleKey.WORK_PERMIT, PermissionAction.DELETE)
+  @RequirePermission(ModuleCode.PERMIT, PermissionAction.DELETE)
   @Delete(':workPermitId')
   remove(
     @CurrentUser() user: UserContext,

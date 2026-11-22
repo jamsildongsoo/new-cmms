@@ -1,6 +1,6 @@
 import { http } from '@/shared/api/http'
 
-export type Resource = 'users' | 'roles' | 'permissions'
+export type Resource = 'users' | 'roles'
 export type IdentityRow = Record<string, string | boolean | null>
 export interface Choice {
   id: string
@@ -48,8 +48,15 @@ export async function getRolePermissions(roleId: string) {
     await http.get<string[]>(`/roles/${encodeURIComponent(roleId)}/permissions`)
   ).data
 }
+export interface PermissionOption {
+  permissionId: string
+  module: string
+  moduleLabel: string
+  action: string
+  name: string
+}
 export async function getRolePermissionOptions() {
-  return (await http.get<IdentityRow[]>('/roles/permission-options')).data
+  return (await http.get<PermissionOption[]>('/roles/permission-options')).data
 }
 export async function updateRolePermissions(
   roleId: string,

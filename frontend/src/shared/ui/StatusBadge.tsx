@@ -1,5 +1,5 @@
-import { documentStatusLabels } from '@/shared/types/document'
-import type { DocumentStatus } from '@/shared/types/document'
+import { useMetadata } from '@/shared/metadata/metadata'
+import type { DocumentStatus } from '@/shared/constants/document-status'
 
 const statusClasses: Record<DocumentStatus, string> = {
   D: 'border-slate-300 bg-slate-50 text-slate-600',
@@ -10,6 +10,9 @@ const statusClasses: Record<DocumentStatus, string> = {
 }
 
 export function StatusBadge({ status }: { status: DocumentStatus }) {
+  const { documentStatuses } = useMetadata()
+  const label =
+    documentStatuses.find((option) => option.value === status)?.label ?? status
   return (
     <span
       className={[
@@ -17,7 +20,7 @@ export function StatusBadge({ status }: { status: DocumentStatus }) {
         statusClasses[status],
       ].join(' ')}
     >
-      {documentStatusLabels[status]}
+      {label}
     </span>
   )
 }

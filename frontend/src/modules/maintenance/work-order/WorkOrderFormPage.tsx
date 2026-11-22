@@ -1,3 +1,6 @@
+// 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
+import { moduleDocumentPath } from '@/shared/constants/modules'
+import { DocumentAudit } from '@/shared/ui/DocumentAudit'
 import { DocumentIdField } from '@/shared/ui/DocumentIdField'
 import {
   getWorkRequest,
@@ -33,15 +36,7 @@ import {
   type WorkOrder,
   type WorkOrderOptions,
 } from './workOrder.api'
-import {
-  amount,
-  emptyForm,
-  kindName,
-  toForm,
-  toPayload,
-  totals,
-  type WorkOrderForm,
-} from './workOrderForm'
+import { amount, emptyForm, kindName, toForm, toPayload, totals, type WorkOrderForm } from './workOrderForm'
 import { WorkOrderDetails } from './WorkOrderDetails'
 import { toWorkOrderDraft } from './approvalDraft'
 
@@ -49,8 +44,8 @@ async function loadReference(
   refModule: string,
   refId: string,
 ): Promise<WorkRequest | WorkOrder> {
-  if (refModule === 'work_request') return getWorkRequest(refId)
-  if (refModule === 'work_order') return getWorkOrder(refId)
+  if (refModule === 'WRKREQ') return getWorkRequest(refId)
+  if (refModule === 'WRKORD') return getWorkOrder(refId)
   throw new Error('지원하지 않는 참조 모듈입니다.')
 }
 function copiedForm(
@@ -80,6 +75,8 @@ function copiedForm(
   }
   if (source.orderKind !== 'PLAN')
     throw new Error('작업계획만 참조할 수 있습니다.')
+  if (source.status !== 'C')
+    throw new Error('완결된 작업계획만 참조할 수 있습니다.')
   const copied = toForm(source)
   return {
     ...current,
@@ -126,13 +123,14 @@ function WorkOrderEditor({
 }) {
   const navigate = useNavigate()
   const { user, hasPermission } = useAuth()
-  const [requestKey] = useState(() => crypto.randomUUID())
+
   const [document, setDocument] = useState<WorkOrder | null>(null)
   const [form, setForm] = useState<WorkOrderForm>(emptyForm)
   const [baseline, setBaseline] = useState(JSON.stringify(emptyForm))
   const [options, setOptions] = useState<WorkOrderOptions>({
     equipment: [],
     types: [],
+    units: [],
     plans: [],
     requests: [],
     siteId: null,
@@ -203,16 +201,16 @@ function WorkOrderEditor({
   }, [form.refModule, form.refId])
   const required =
     mode === 'create'
-      ? 'work_order:create'
+      ? 'WRKORD:create'
       : mode === 'edit'
-        ? 'work_order:update'
-        : 'work_order:read'
+        ? 'WRKORD:update'
+        : 'WRKORD:read'
   if (!hasPermission(required)) return <Navigate to="/work-order" replace />
   const isNew = mode === 'create' && !document
   const owner = document?.createdBy === user?.userId
   const readOnly = isNew
-    ? !hasPermission('work_order:create')
-    : !(owner && document?.status === 'D' && hasPermission('work_order:update'))
+    ? !hasPermission('WRKORD:create')
+    : !(owner && document?.status === 'D' && hasPermission('WRKORD:update'))
   const blocked =
     loading || saving || copying || attachmentBusy || referenceBusy || !ready
   const disabled = readOnly || blocked
@@ -222,7 +220,7 @@ function WorkOrderEditor({
       : null
   const referenceChoices =
     form.orderKind === 'PLAN'
-      ? (options.requests ?? []).map((r) => ({
+      ? options.requests.map((r) => ({
           value: r.workRequestId,
           label: `${r.workRequestId} / ${r.documentNo ? `${r.documentNo} / ` : ''}${r.title}`,
         }))
@@ -265,8 +263,7 @@ function WorkOrderEditor({
     setCopying(true)
     setError(null)
     try {
-      const refModule =
-        form.orderKind === 'PLAN' ? 'work_request' : 'work_order'
+      const refModule = form.orderKind === 'PLAN' ? 'WRKREQ' : 'WRKORD'
       const source = await loadReference(refModule, refId)
       const copied = copiedForm(form, source, refModule, refId)
       setForm(copied)
@@ -282,7 +279,7 @@ function WorkOrderEditor({
     setError(null)
     try {
       const saved = isNew
-        ? await createWorkOrder(requestKey, form.orderKind, toPayload(form))
+        ? await createWorkOrder(form.orderKind, toPayload(form))
         : await updateWorkOrder(document!.workOrderId, toPayload(form))
       setDocument(saved)
       setForm(toForm(saved))
@@ -306,7 +303,7 @@ function WorkOrderEditor({
       !document ||
       !owner ||
       document.status !== 'D' ||
-      !hasPermission('work_order:delete') ||
+      !hasPermission('WRKORD:delete') ||
       blocked ||
       !window.confirm('이 초안 문서를 삭제하시겠습니까?')
     )
@@ -341,26 +338,18 @@ function WorkOrderEditor({
   return (
     <form
       ref={formRef}
+      data-readonly={readOnly}
       onSubmit={(e: FormEvent<HTMLFormElement>) => {
         e.preventDefault()
         void save(false)
       }}
-      className="space-y-4 border border-slate-200 bg-white p-3"
+      className="space-y-4 rounded-lg border border-slate-200 bg-white p-4 md:p-5"
     >
-      <DocumentIdField value={document?.workOrderId} />
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="flex items-center gap-2 text-base font-semibold">
+        <h1 className="flex items-center gap-2 text-lg font-semibold">
           작업 오더 {document && <StatusBadge status={document.status} />}
         </h1>
-        <div className="flex flex-wrap justify-end gap-2">
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={!document || blocked}
-            onClick={print}
-          >
-            인쇄
-          </Button>
+        <div className="page-actions">
           <Button
             type="button"
             variant="secondary"
@@ -371,15 +360,19 @@ function WorkOrderEditor({
           >
             목록
           </Button>
-          {!readOnly && (
-            <Button type="submit" disabled={blocked}>
-              저장
-            </Button>
-          )}
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={!document || blocked}
+            onClick={print}
+          >
+            인쇄
+          </Button>
           {document?.status === 'D' &&
             owner &&
-            hasPermission('work_order:delete') && (
+            hasPermission('WRKORD:delete') && (
               <Button
+                className="sm:ml-2"
                 type="button"
                 variant="danger"
                 disabled={blocked}
@@ -388,6 +381,11 @@ function WorkOrderEditor({
                 삭제
               </Button>
             )}
+          {!readOnly && (
+            <Button variant="secondary" type="submit" disabled={blocked}>
+              임시저장
+            </Button>
+          )}
           {!readOnly && (
             <Button
               type="button"
@@ -399,7 +397,14 @@ function WorkOrderEditor({
           )}
         </div>
       </div>
-      {loading && <p className="text-xs text-slate-500">조회 중...</p>}
+      <DocumentIdField
+        value={document?.workOrderId}
+        documentNo={form.documentNo}
+        onDocumentNoChange={(value) => update('documentNo', value)}
+        disabled={disabled}
+        readOnly={readOnly}
+      />
+      {loading && <p className="text-xs text-slate-500">불러오는 중…</p>}
       {error && (
         <div
           role="alert"
@@ -420,14 +425,6 @@ function WorkOrderEditor({
             <option value="ACTUAL">실적</option>
           </Select>
         </Field>
-        <Field label="관리번호">
-          <Input
-            maxLength={50}
-            value={form.documentNo}
-            disabled={disabled}
-            onChange={(e) => update('documentNo', e.target.value)}
-          />
-        </Field>
         <Field label="작업명" required>
           <Input
             maxLength={200}
@@ -445,12 +442,7 @@ function WorkOrderEditor({
             onChange={(e) => update('equipmentId', e.target.value)}
           >
             <option value="">선택</option>
-            {form.equipmentId &&
-              !options.equipment.some((e) => e.value === form.equipmentId) && (
-                <option value={form.equipmentId}>
-                  {form.equipmentId} (기존 값)
-                </option>
-              )}
+
             {options.equipment.map((e) => (
               <option key={e.value} value={e.value}>
                 {e.label} ({e.value})
@@ -474,10 +466,7 @@ function WorkOrderEditor({
             onChange={(e) => update('typeCode', e.target.value)}
           >
             <option value="">선택</option>
-            {form.typeCode &&
-              !options.types.some((e) => e.value === form.typeCode) && (
-                <option value={form.typeCode}>{form.typeCode} (기존 값)</option>
-              )}
+
             {options.types.map((e) => (
               <option key={e.value} value={e.value}>
                 {e.label}
@@ -492,10 +481,7 @@ function WorkOrderEditor({
             onChange={(e) => void copyReference(e.target.value)}
           >
             <option value="">참조 없음</option>
-            {form.refId &&
-              !referenceChoices.some((c) => c.value === form.refId) && (
-                <option value={form.refId}>{form.refId} (기존 참조)</option>
-              )}
+
             {referenceChoices.map((c) => (
               <option key={c.value} value={c.value}>
                 {c.label}
@@ -520,7 +506,7 @@ function WorkOrderEditor({
         <section className="space-y-2 border border-slate-200 p-3">
           <Link
             className="inline-block text-xs text-blue-700 underline"
-            to={`/${form.refModule.replaceAll('_', '-')}/${encodeURIComponent(form.refId)}`}
+            to={moduleDocumentPath(form.refModule, form.refId) ?? '/work-order'}
             onClick={(e) => {
               if (blocked || !confirmLeave()) e.preventDefault()
             }}
@@ -555,6 +541,7 @@ function WorkOrderEditor({
         />
       </Field>
       <WorkOrderDetails
+        units={options.units}
         form={form}
         setForm={setForm}
         readOnly={readOnly}
@@ -570,7 +557,7 @@ function WorkOrderEditor({
       </Field>
       <AttachmentManager
         attachmentId={form.attachmentId}
-        refModule="work_order"
+        refModule="WRKORD"
         refId={document?.workOrderId ?? null}
         disabled={disabled}
         onBusyChange={setAttachmentBusy}
@@ -579,13 +566,7 @@ function WorkOrderEditor({
           setForm((current) => ({ ...current, attachmentId }))
         }
       />
-      {document && (
-        <p className="text-xs text-slate-500">
-          등록자: {document.createdBy} / 등록일시: {document.createdAt} /
-          수정자: {document.updatedBy || '-'} / 수정일시:{' '}
-          {document.updatedAt || '-'}
-        </p>
-      )}
+      {document && <DocumentAudit record={document} />}
     </form>
   )
 }

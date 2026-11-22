@@ -1,3 +1,8 @@
+import { ApprovalQueryDto } from './dto/approval-query.dto';
+import { normalizePaginationQuery } from '../common/utils/pagination.util';
+import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
+import { ApprovalStepResult, ApprovalStepType } from './approval.constant';
+
 /** 결재 참여자·현재 순번·owner+D를 검사한다. 결재 결과 저장과 원본 상태 동기화는 순차 처리한다. */
 import { PurchaseOrderService } from '../purchase/purchase-order/purchase-order.service';
 import { PurchaseRequestService } from '../purchase/purchase-request/purchase-request.service';
@@ -5,7 +10,7 @@ import { WorkPermitService } from '../maintenance/work-permit/work-permit.servic
 import { WorkRequestService } from '../maintenance/work-request/work-request.service';
 import { WorkOrderService } from '../maintenance/work-order/work-order.service';
 import { PreventiveMaintenanceService } from '../maintenance/preventive-maintenance/preventive-maintenance.service';
-import { AppModuleKey } from '../common/constants/modules';
+import { ModuleCode } from '../common/constants/modules';
 import {
   BadRequestException,
   ConflictException,
@@ -15,7 +20,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { EntityManager, In, Repository } from 'typeorm';
 import { User } from '../identity/users/entities/user.entity';
 import { Department } from '../organization/departments/entities/department.entity';
 import { UserContext } from '../auth/types/user-context.type';
@@ -24,16 +29,14 @@ import { assertDraft } from '../common/utils/document-status.util';
 import { ApprovalActionDto } from './dto/approval-action.dto';
 import {
   ApprovalResponseDto,
+  ApprovalListItemDto,
   ApprovalUserInfoDto,
   ApprovalStepResponseDto,
 } from './dto/approval-response.dto';
 import { ApprovalStepInputDto } from './dto/approval-step-input.dto';
 import { CreateApprovalDto } from './dto/create-approval.dto';
 import { UpdateApprovalDto } from './dto/update-approval.dto';
-import {
-  ApprovalStep,
-  ApprovalStepType,
-} from './entities/approval-step.entity';
+import { ApprovalStep } from './entities/approval-step.entity';
 import { Approval } from './entities/approval.entity';
 import { SOURCE_DOCUMENTS } from './source-documents';
 
@@ -41,6 +44,7 @@ type ApprovalBox = 'submit' | 'pending' | 'processed' | 'closed' | 'reference';
 
 @Injectable()
 export class ApprovalsService {
+  private inTransaction = false;
   private readonly logger = new Logger(ApprovalsService.name);
   constructor(
     @InjectRepository(Approval)
@@ -58,6 +62,139 @@ export class ApprovalsService {
     private readonly purchaseRequests: PurchaseRequestService,
     private readonly purchaseOrders: PurchaseOrderService,
   ) {}
+
+  private inScope<T extends { withManager(manager: EntityManager): T }>(
+    service: T,
+    manager = this.inTransaction ? this.approvalRepository.manager : undefined,
+  ): T {
+    return manager ? service.withManager(manager) : service;
+  }
+
+  /** 회사+결재문서 잠금 안에서 결재와 단계를 먼저 저장한다. 원문 동기화는 커밋 후 별도로 실행한다. */
+  private async mutate(
+    user: UserContext,
+    id: string,
+    operation: (service: ApprovalsService) => Promise<ApprovalResponseDto>,
+    synchronize: boolean,
+  ) {
+    const lockId = this.requireTrimmedString(id, '문서번호');
+    const lock = async (manager: EntityManager) => {
+      await manager.query(
+        'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+        [`approval:${user.companyId}:${lockId}`],
+      );
+    };
+    const result = await this.approvalRepository.manager.transaction(
+      async (manager) => {
+        await lock(manager);
+        const service = new ApprovalsService(
+          manager.getRepository(Approval),
+          manager.getRepository(ApprovalStep),
+          manager.getRepository(User),
+          manager.getRepository(Department),
+          this.preventiveMaintenanceService,
+          this.workOrderService,
+          this.workRequestService,
+          this.workPermitService,
+          this.purchaseRequests,
+          this.purchaseOrders,
+        );
+        service.inTransaction = true;
+        return operation(service);
+      },
+    );
+    if (synchronize && result.refModule && result.refId) {
+      // 원본 동기화 실패 시 결재 결과는 유지한다. 별도 잠금 안에서 최신 결과를 읽어
+      // 동시 요청의 늦은 P 동기화가 이미 완료된 C 상태를 덮어쓰지 않게 한다.
+      const runner =
+        this.approvalRepository.manager.connection.createQueryRunner();
+      const key = `approval:${user.companyId}:${lockId}`;
+      let locked = false;
+      let syncing = false;
+      let warning: string | undefined;
+      try {
+        await runner.connect();
+        await runner.query('SELECT pg_advisory_lock(hashtextextended($1, 0))', [
+          key,
+        ]);
+        locked = true;
+        const latest = await runner.manager.findOneBy(Approval, {
+          companyId: user.companyId,
+          approvalId: result.approvalId,
+          deleteYn: 'N',
+        });
+        if (latest) {
+          syncing = true;
+          await this.syncSourceStatus(latest, runner.manager);
+        }
+      } catch (error) {
+        warning =
+          '결재 처리는 완료되었으나 원문 상태 반영에 실패했습니다. 관리자에게 문의해 주세요.';
+        if (!syncing)
+          this.logger.error({
+            message:
+              'Source status update failed; saved approval result is retained',
+            companyId: user.companyId,
+            approvalId: result.approvalId,
+            refModule: result.refModule,
+            refId: result.refId,
+            status: result.status,
+            stage: 'syncSourceStatus',
+            error: error instanceof Error ? error.message : String(error),
+          });
+      } finally {
+        try {
+          if (locked)
+            await runner.query(
+              'SELECT pg_advisory_unlock(hashtextextended($1, 0))',
+              [key],
+            );
+        } catch (error) {
+          this.logger.error({
+            message: 'Approval synchronization lock cleanup failed',
+            companyId: user.companyId,
+            approvalId: result.approvalId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        } finally {
+          try {
+            await runner.release();
+          } catch (error) {
+            this.logger.error(error);
+          }
+        }
+      }
+      if (warning) return { ...result, sourceSyncWarning: warning };
+    }
+    return synchronize ? this.findOne(user, result.approvalId) : result;
+  }
+
+  private async validateParticipants(
+    user: UserContext,
+    steps: readonly { type: ApprovalStepType; userId: string }[],
+  ) {
+    const ids = steps.map((step) => step.userId);
+    if (new Set(ids).size !== ids.length)
+      throw new BadRequestException(
+        '같은 사용자를 결재선에 중복 지정할 수 없습니다.',
+      );
+    if (ids.includes(user.userId))
+      throw new BadRequestException(
+        '상신자 본인은 결재선에 추가할 수 없습니다.',
+      );
+    if (ids.some((id) => !id.trim() || id.length > 50))
+      throw new BadRequestException('결재선 사용자 ID를 확인해 주세요.');
+    if (!ids.length) return;
+    const active = await this.userRepository.findBy({
+      companyId: user.companyId,
+      userId: In(ids),
+      deleteYn: 'N',
+    });
+    if (active.length !== ids.length)
+      throw new BadRequestException(
+        '결재선에는 같은 회사의 활성 사용자만 지정할 수 있습니다.',
+      );
+  }
 
   async searchUsers(
     userContext: UserContext,
@@ -95,7 +232,7 @@ export class ApprovalsService {
       deleteYn: 'N',
     });
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new NotFoundException('사용자를 찾을 수 없습니다.');
     }
     return (await this.loadDirectory(userContext.companyId, [user.userId])).get(
       user.userId,
@@ -114,12 +251,14 @@ export class ApprovalsService {
     const users = await this.userRepository.findBy({
       companyId,
       userId: In(ids),
+      deleteYn: 'N',
     });
     const deptIds = [...new Set(users.map((user) => user.deptId))];
     const departments = deptIds.length
       ? await this.departmentRepository.findBy({
           companyId,
           deptId: In(deptIds),
+          deleteYn: 'N',
         })
       : [];
     const deptNames = new Map(departments.map((d) => [d.deptId, d.name]));
@@ -140,12 +279,20 @@ export class ApprovalsService {
     userContext: UserContext,
     dto: CreateApprovalDto,
   ): Promise<ApprovalResponseDto> {
-    if (dto.refModule === 'work_permit' && dto.refId)
-      dto = Object.assign(
-        {},
-        dto,
-        await this.workPermitService.approvalDraft(userContext, dto.refId),
+    if (!this.inTransaction)
+      return this.mutate(
+        userContext,
+        dto.approvalId ?? '',
+        (service) => service.create(userContext, dto),
+        dto.submit === true,
       );
+    if (dto.refModule === ModuleCode.PERMIT && dto.refId) {
+      const source = await this.inScope(this.workPermitService).approvalDraft(
+        userContext,
+        dto.refId,
+      );
+      dto = Object.assign({}, dto, source, { steps: dto.steps });
+    }
     const approvalId = this.requireTrimmedString(
       dto.approvalId ?? '',
       '서버 채번 문서 ID',
@@ -155,7 +302,7 @@ export class ApprovalsService {
       approvalId,
     });
     if (existingApproval) {
-      throw new ConflictException('Approval already exists');
+      throw new ConflictException('이미 존재하는 결재 문서입니다.');
     }
 
     const refModule = this.normalizeNullableString(dto.refModule);
@@ -194,45 +341,113 @@ export class ApprovalsService {
     return this.findOne(userContext, savedApproval.approvalId);
   }
 
-  // 결재 헤더 저장 후 결재선/상신이 실패한 생성 요청만 재개한다.
-  async resumeCreate(user: UserContext, id: string, dto: CreateApprovalDto) {
-    const existing = await this.findOne(user, id);
-    if (existing.status !== DocumentStatus.DRAFT) return existing;
-    const saved = await this.update(user, id, dto);
-    return dto.submit === true ? this.submit(user, id) : saved;
-  }
-
   async findBox(
     userContext: UserContext,
     box: ApprovalBox,
-  ): Promise<ApprovalResponseDto[]> {
+    filter: ApprovalQueryDto = {},
+  ): Promise<PaginatedResponseDto<ApprovalListItemDto>> {
     this.assertValidBox(box);
-    const approvals = await this.findVisibleApprovals(userContext);
-    const approvalIds = approvals.map((approval) => approval.approvalId);
-    const steps = await this.findSteps(userContext.companyId, approvalIds);
-    const stepsByApprovalId = this.groupSteps(steps);
-    const filteredApprovals = approvals.filter((approval) =>
-      this.isInBox(
-        userContext,
-        approval,
-        stepsByApprovalId.get(approval.approvalId) ?? [],
-        box,
+    const { page, limit, offset } = normalizePaginationQuery(filter);
+    const query = this.approvalRepository
+      .createQueryBuilder('a')
+      .select([
+        'a.approvalId',
+        'a.documentNo',
+        'a.title',
+        'a.submitterId',
+        'a.status',
+        'a.createdAt',
+      ])
+      .where('a.companyId = :companyId', { companyId: userContext.companyId })
+      .andWhere("a.deleteYn = 'N'")
+      .setParameters({
+        userId: userContext.userId,
+        processing: [ApprovalStepType.APPROVER, ApprovalStepType.AGREE],
+        progress: DocumentStatus.PROGRESS,
+        approved: ApprovalStepResult.APPROVED,
+      });
+    const stepExists = (alias: string, condition: string) =>
+      `EXISTS (SELECT 1 FROM approval_step ${alias} WHERE ${alias}."companyId" = a."companyId" AND ${alias}."approvalId" = a."approvalId" AND ${condition})`;
+    if (box === 'submit') query.andWhere('a.submitterId = :userId');
+    if (box === 'pending')
+      query
+        .andWhere('a.status = :progress')
+        .andWhere(
+          stepExists(
+            'pending_step',
+            `pending_step."userId" = :userId AND pending_step.type IN (:...processing) AND (pending_step.status IS NULL OR BTRIM(pending_step.status) = '') AND NOT EXISTS (SELECT 1 FROM approval_step earlier WHERE earlier."companyId" = pending_step."companyId" AND earlier."approvalId" = pending_step."approvalId" AND earlier.type IN (:...processing) AND (earlier.status IS NULL OR BTRIM(earlier.status) = '') AND earlier."stepNo" < pending_step."stepNo")`,
+          ),
+        );
+    if (box === 'processed')
+      query
+        .andWhere('a.status = :progress')
+        .andWhere(
+          stepExists(
+            'processed_step',
+            'processed_step."userId" = :userId AND processed_step.type IN (:...processing) AND processed_step.status = :approved',
+          ),
+        );
+    if (box === 'closed')
+      query
+        .andWhere('a.status IN (:...closed)', {
+          closed: [
+            DocumentStatus.CONFIRMED,
+            DocumentStatus.REJECTED,
+            DocumentStatus.CANCELLED,
+          ],
+        })
+        .andWhere(
+          `(a."submitterId" = :userId OR ${stepExists('closed_step', 'closed_step."userId" = :userId AND closed_step.type IN (:...processing)')})`,
+        );
+    if (box === 'reference')
+      query
+        .andWhere('a.status = :confirmed', {
+          confirmed: DocumentStatus.CONFIRMED,
+        })
+        .andWhere(
+          stepExists(
+            'reference_step',
+            'reference_step."userId" = :userId AND reference_step.type = :reference',
+          ),
+        )
+        .setParameter('reference', ApprovalStepType.REFERENCE);
+    if (filter.status)
+      query.andWhere('a.status = :status', { status: filter.status });
+    if (filter.search?.trim()) {
+      const search = `%${filter.search.trim().replace(/[\\%_]/g, '\\$&')}%`;
+      query.andWhere(
+        '(a.approvalId ILIKE :search OR a.documentNo ILIKE :search OR a.title ILIKE :search OR a.submitterId ILIKE :search)',
+        { search },
+      );
+    }
+    const [items, total] = await query
+      .orderBy('a.createdAt', 'DESC')
+      .addOrderBy('a.approvalId', 'DESC')
+      .skip(offset)
+      .take(limit)
+      .getManyAndCount();
+    return {
+      items: items.map(
+        ({
+          approvalId,
+          documentNo,
+          title,
+          submitterId,
+          status,
+          createdAt,
+        }) => ({
+          approvalId,
+          documentNo,
+          title,
+          submitterId,
+          status,
+          createdAt,
+        }),
       ),
-    );
-
-    const directory = await this.loadDirectory(
-      userContext.companyId,
-      filteredApprovals.flatMap((approval) =>
-        (stepsByApprovalId.get(approval.approvalId) ?? []).map((s) => s.userId),
-      ),
-    );
-    return filteredApprovals.map((approval) =>
-      this.toResponse(
-        approval,
-        stepsByApprovalId.get(approval.approvalId) ?? [],
-        directory,
-      ),
-    );
+      total,
+      page,
+      limit,
+    };
   }
 
   async findOne(
@@ -248,7 +463,7 @@ export class ApprovalsService {
     ]);
 
     if (!this.canView(userContext, approval, steps)) {
-      throw new ForbiddenException('Approval is not visible to this user');
+      throw new ForbiddenException('이 문서를 조회할 권한이 없습니다.');
     }
 
     const response = this.toResponse(
@@ -259,12 +474,10 @@ export class ApprovalsService {
         steps.map((step) => step.userId),
       ),
     );
-    if (approval.refModule === 'work_permit' && approval.refId)
-      response.sourceAttachmentIds =
-        await this.workPermitService.relatedAttachmentIds(
-          approval.companyId,
-          approval.refId,
-        );
+    if (approval.refModule === ModuleCode.PERMIT && approval.refId)
+      response.sourceAttachmentIds = await this.inScope(
+        this.workPermitService,
+      ).relatedAttachmentIds(approval.companyId, approval.refId);
     return response;
   }
 
@@ -273,6 +486,13 @@ export class ApprovalsService {
     approvalId: string,
     dto: UpdateApprovalDto,
   ): Promise<ApprovalResponseDto> {
+    if (!this.inTransaction)
+      return this.mutate(
+        userContext,
+        approvalId,
+        (service) => service.update(userContext, approvalId, dto),
+        false,
+      );
     const approval = await this.findApprovalOrThrow(
       userContext.companyId,
       approvalId,
@@ -280,7 +500,7 @@ export class ApprovalsService {
     this.assertSubmitter(userContext, approval);
     assertDraft(approval.status);
 
-    if (approval.refModule === 'work_permit') {
+    if (approval.refModule === ModuleCode.PERMIT) {
       if (
         (dto.refModule !== undefined && dto.refModule !== approval.refModule) ||
         (dto.refId !== undefined && dto.refId !== approval.refId)
@@ -288,14 +508,11 @@ export class ApprovalsService {
         throw new BadRequestException(
           '작업허가 원본 참조는 변경할 수 없습니다.',
         );
-      dto = Object.assign(
-        {},
-        dto,
-        await this.workPermitService.approvalDraft(
-          userContext,
-          approval.refId!,
-        ),
+      const source = await this.inScope(this.workPermitService).approvalDraft(
+        userContext,
+        approval.refId!,
       );
+      dto = Object.assign({}, dto, source, { steps: dto.steps });
     }
     const refModule =
       dto.refModule === undefined
@@ -346,6 +563,13 @@ export class ApprovalsService {
     userContext: UserContext,
     approvalId: string,
   ): Promise<ApprovalResponseDto> {
+    if (!this.inTransaction)
+      return this.mutate(
+        userContext,
+        approvalId,
+        (service) => service.remove(userContext, approvalId),
+        false,
+      );
     const approval = await this.findApprovalOrThrow(
       userContext.companyId,
       approvalId,
@@ -364,10 +588,18 @@ export class ApprovalsService {
     );
   }
 
+  /** 초안 작성자·결재 참여자·연계 원문을 다시 확인한 뒤 상신한다. 화면에서 받은 원문 정보만 신뢰하지 않는다. */
   async submit(
     userContext: UserContext,
     approvalId: string,
   ): Promise<ApprovalResponseDto> {
+    if (!this.inTransaction)
+      return this.mutate(
+        userContext,
+        approvalId,
+        (service) => service.submit(userContext, approvalId),
+        true,
+      );
     const approval = await this.findApprovalOrThrow(
       userContext.companyId,
       approvalId,
@@ -378,28 +610,32 @@ export class ApprovalsService {
     const steps = await this.findSteps(userContext.companyId, [
       approval.approvalId,
     ]);
+    await this.validateParticipants(
+      userContext,
+      steps.filter((step) => step.type !== ApprovalStepType.SUBMITTER),
+    );
     if (!steps.some((step) => this.isProcessingStep(step))) {
       throw new BadRequestException(
-        'At least one approver or agreement step is required',
+        '결재자 또는 합의자를 한 명 이상 지정해 주세요.',
       );
     }
 
-    if (
-      approval.refModule === AppModuleKey.PREVENTIVE_MAINTENANCE &&
-      approval.refId
-    ) {
-      await this.preventiveMaintenanceService.assertCanSubmit(
+    if (approval.refModule === ModuleCode.PMAINT && approval.refId) {
+      await this.inScope(this.preventiveMaintenanceService).assertCanSubmit(
         userContext,
         approval.refId,
       );
     }
 
-    if (approval.refModule === AppModuleKey.WORK_ORDER && approval.refId) {
-      await this.workOrderService.assertCanSubmit(userContext, approval.refId);
+    if (approval.refModule === ModuleCode.WRKORD && approval.refId) {
+      await this.inScope(this.workOrderService).assertCanSubmit(
+        userContext,
+        approval.refId,
+      );
     }
 
-    if (approval.refModule === AppModuleKey.WORK_REQUEST && approval.refId) {
-      await this.workRequestService.assertCanSubmit(
+    if (approval.refModule === ModuleCode.WRKREQ && approval.refId) {
+      await this.inScope(this.workRequestService).assertCanSubmit(
         userContext,
         approval.refId,
       );
@@ -407,31 +643,20 @@ export class ApprovalsService {
 
     if (
       approval.refId &&
-      (approval.refModule === 'purchase_request' ||
-        approval.refModule === 'purchase_order')
+      (approval.refModule === ModuleCode.PURREQ ||
+        approval.refModule === ModuleCode.PURORD)
     )
       await (
-        approval.refModule === 'purchase_request'
-          ? this.purchaseRequests
-          : this.purchaseOrders
+        approval.refModule === ModuleCode.PURREQ
+          ? this.inScope(this.purchaseRequests)
+          : this.inScope(this.purchaseOrders)
       ).assertCanSubmit(userContext, approval.refId);
 
-    if (approval.refModule === 'work_permit' && approval.refId) {
-      const locked = await this.workPermitService.approvalDraft(
+    if (approval.refModule === ModuleCode.PERMIT && approval.refId) {
+      const locked = await this.inScope(this.workPermitService).approvalDraft(
         userContext,
         approval.refId,
       );
-      const processing = steps
-        .filter((s) => this.isProcessingStep(s))
-        .sort((a, b) => a.stepNo - b.stepNo);
-      if (
-        processing.length !== 2 ||
-        processing.some(
-          (s, i) =>
-            s.type !== 'APPROVER' || s.userId !== locked.steps[i].userId,
-        )
-      )
-        throw new BadRequestException('발급자→승인자 결재선이 필요합니다.');
       approval.title = locked.title;
       approval.contentJson = locked.contentJson;
     }
@@ -446,11 +671,11 @@ export class ApprovalsService {
     const now = new Date();
     for (const step of steps) {
       if (step.type === ApprovalStepType.SUBMITTER) {
-        step.status = 'Y';
+        step.status = ApprovalStepResult.APPROVED;
         step.actedAt = now;
       }
       if (step.type === ApprovalStepType.REFERENCE) {
-        step.status = 'Y';
+        step.status = ApprovalStepResult.APPROVED;
       }
     }
 
@@ -461,7 +686,7 @@ export class ApprovalsService {
 
     await this.approvalStepRepository.save(steps);
     await this.approvalRepository.save(approval);
-    await this.syncSourceStatus(approval);
+    if (!this.inTransaction) await this.syncSourceStatus(approval);
 
     return this.findOne(userContext, approval.approvalId);
   }
@@ -471,13 +696,20 @@ export class ApprovalsService {
     approvalId: string,
     dto: ApprovalActionDto,
   ): Promise<ApprovalResponseDto> {
+    if (!this.inTransaction)
+      return this.mutate(
+        userContext,
+        approvalId,
+        (service) => service.approve(userContext, approvalId, dto),
+        true,
+      );
     const { approval, steps, currentStep } = await this.findActionContext(
       userContext,
       approvalId,
     );
     const now = new Date();
 
-    currentStep.status = 'Y';
+    currentStep.status = ApprovalStepResult.APPROVED;
     currentStep.comment = this.normalizeNullableString(dto.comment);
     currentStep.actedAt = now;
 
@@ -494,7 +726,7 @@ export class ApprovalsService {
 
     await this.approvalStepRepository.save(currentStep);
     await this.approvalRepository.save(approval);
-    await this.syncSourceStatus(approval);
+    if (!this.inTransaction) await this.syncSourceStatus(approval);
 
     return this.findOne(userContext, approval.approvalId);
   }
@@ -504,13 +736,20 @@ export class ApprovalsService {
     approvalId: string,
     dto: ApprovalActionDto,
   ): Promise<ApprovalResponseDto> {
+    if (!this.inTransaction)
+      return this.mutate(
+        userContext,
+        approvalId,
+        (service) => service.reject(userContext, approvalId, dto),
+        true,
+      );
     const { approval, currentStep } = await this.findActionContext(
       userContext,
       approvalId,
     );
     const now = new Date();
 
-    currentStep.status = 'N';
+    currentStep.status = ApprovalStepResult.REJECTED;
     currentStep.comment = this.normalizeNullableString(dto.comment);
     currentStep.actedAt = now;
 
@@ -521,7 +760,7 @@ export class ApprovalsService {
 
     await this.approvalStepRepository.save(currentStep);
     await this.approvalRepository.save(approval);
-    await this.syncSourceStatus(approval);
+    if (!this.inTransaction) await this.syncSourceStatus(approval);
 
     return this.findOne(userContext, approval.approvalId);
   }
@@ -530,15 +769,20 @@ export class ApprovalsService {
     userContext: UserContext,
     approvalId: string,
   ): Promise<ApprovalResponseDto> {
+    if (!this.inTransaction)
+      return this.mutate(
+        userContext,
+        approvalId,
+        (service) => service.cancel(userContext, approvalId),
+        true,
+      );
     const approval = await this.findApprovalOrThrow(
       userContext.companyId,
       approvalId,
     );
     this.assertSubmitter(userContext, approval);
     if (approval.status !== DocumentStatus.PROGRESS) {
-      throw new ConflictException(
-        'Only in-progress approvals can be cancelled',
-      );
+      throw new ConflictException('결재 중인 문서만 상신 취소할 수 있습니다.');
     }
 
     const now = new Date();
@@ -548,7 +792,7 @@ export class ApprovalsService {
     approval.updatedAt = now;
 
     await this.approvalRepository.save(approval);
-    await this.syncSourceStatus(approval);
+    if (!this.inTransaction) await this.syncSourceStatus(approval);
     return this.findOne(userContext, approval.approvalId);
   }
 
@@ -560,22 +804,25 @@ export class ApprovalsService {
   ): Promise<string | null> {
     if (Boolean(refModule) !== Boolean(refId))
       throw new BadRequestException(
-        'refModule and refId must be provided together',
+        '원문 모듈과 문서번호를 함께 지정해 주세요.',
       );
     if (!refModule) return ownAttachmentId;
     if (!Object.hasOwn(SOURCE_DOCUMENTS, refModule)) {
-      throw new BadRequestException('Unsupported approval source module');
+      throw new BadRequestException('지원하지 않는 원문 모듈입니다.');
     }
     const source = SOURCE_DOCUMENTS[refModule];
     const document = (await this.approvalRepository.manager.findOneBy(
       source.entity,
       { companyId, [source.idField]: refId!, deleteYn: 'N' },
     )) as { attachmentId: string | null } | null;
-    if (!document) throw new NotFoundException('Source document not found');
+    if (!document) throw new NotFoundException('원문 문서를 찾을 수 없습니다.');
     return document.attachmentId ?? null;
   }
 
-  private async syncSourceStatus(approval: Approval): Promise<void> {
+  private async syncSourceStatus(
+    approval: Approval,
+    manager?: EntityManager,
+  ): Promise<void> {
     const source =
       approval.refModule &&
       Object.hasOwn(SOURCE_DOCUMENTS, approval.refModule) &&
@@ -585,8 +832,11 @@ export class ApprovalsService {
     }
     // 결재 결과는 이미 저장됐다. 후속 모듈 실패를 기록하되 결재를 롤백하지 않는다.
     try {
-      if (approval.refModule === AppModuleKey.PREVENTIVE_MAINTENANCE) {
-        await this.preventiveMaintenanceService.syncApprovalStatus(
+      if (approval.refModule === ModuleCode.PMAINT) {
+        await this.inScope(
+          this.preventiveMaintenanceService,
+          manager,
+        ).syncApprovalStatus(
           approval.companyId,
           approval.refId,
           approval.status,
@@ -594,8 +844,8 @@ export class ApprovalsService {
         );
         return;
       }
-      if (approval.refModule === AppModuleKey.WORK_ORDER) {
-        await this.workOrderService.syncApprovalStatus(
+      if (approval.refModule === ModuleCode.WRKORD) {
+        await this.inScope(this.workOrderService, manager).syncApprovalStatus(
           approval.companyId,
           approval.refId,
           approval.status,
@@ -603,8 +853,8 @@ export class ApprovalsService {
         );
         return;
       }
-      if (approval.refModule === AppModuleKey.WORK_REQUEST) {
-        await this.workRequestService.syncApprovalStatus(
+      if (approval.refModule === ModuleCode.WRKREQ) {
+        await this.inScope(this.workRequestService, manager).syncApprovalStatus(
           approval.companyId,
           approval.refId,
           approval.status,
@@ -612,8 +862,8 @@ export class ApprovalsService {
         );
         return;
       }
-      if (approval.refModule === 'work_permit') {
-        await this.workPermitService.syncApprovalStatus(
+      if (approval.refModule === ModuleCode.PERMIT) {
+        await this.inScope(this.workPermitService, manager).syncApprovalStatus(
           approval.companyId,
           approval.refId,
           approval.status,
@@ -623,13 +873,13 @@ export class ApprovalsService {
         return;
       }
       if (
-        approval.refModule === 'purchase_request' ||
-        approval.refModule === 'purchase_order'
+        approval.refModule === ModuleCode.PURREQ ||
+        approval.refModule === ModuleCode.PURORD
       ) {
         await (
-          approval.refModule === 'purchase_request'
-            ? this.purchaseRequests
-            : this.purchaseOrders
+          approval.refModule === ModuleCode.PURREQ
+            ? this.inScope(this.purchaseRequests, manager)
+            : this.inScope(this.purchaseOrders, manager)
         ).syncApprovalStatus(
           approval.companyId,
           approval.refId,
@@ -663,9 +913,7 @@ export class ApprovalsService {
       approvalId,
     );
     if (approval.status !== DocumentStatus.PROGRESS) {
-      throw new ConflictException(
-        'Only in-progress approvals can be processed',
-      );
+      throw new ConflictException('결재 중인 문서만 처리할 수 있습니다.');
     }
 
     const steps = await this.findSteps(userContext.companyId, [
@@ -673,100 +921,10 @@ export class ApprovalsService {
     ]);
     const currentStep = this.findCurrentApprover(steps);
     if (!currentStep || currentStep.userId !== userContext.userId) {
-      throw new ForbiddenException('Approval is not pending for this user');
+      throw new ForbiddenException('현재 결재 차례가 아닙니다.');
     }
 
     return { approval, steps, currentStep };
-  }
-
-  private async findVisibleApprovals(
-    userContext: UserContext,
-  ): Promise<Approval[]> {
-    const userSteps = await this.approvalStepRepository.find({
-      where: {
-        companyId: userContext.companyId,
-        userId: userContext.userId,
-      },
-    });
-    const stepApprovalIds = userSteps.map((step) => step.approvalId);
-    const approvalIds = [...new Set(stepApprovalIds)];
-    const where = [
-      {
-        companyId: userContext.companyId,
-        submitterId: userContext.userId,
-        deleteYn: 'N',
-      },
-      ...(approvalIds.length > 0
-        ? [
-            {
-              companyId: userContext.companyId,
-              approvalId: In(approvalIds),
-              deleteYn: 'N',
-            },
-          ]
-        : []),
-    ];
-
-    return this.approvalRepository.find({
-      where,
-      order: {
-        createdAt: 'DESC',
-      },
-    });
-  }
-
-  private isInBox(
-    userContext: UserContext,
-    approval: Approval,
-    steps: ApprovalStep[],
-    box: ApprovalBox,
-  ): boolean {
-    if (box === 'submit') {
-      return approval.submitterId === userContext.userId;
-    }
-    if (box === 'pending') {
-      return (
-        approval.status === DocumentStatus.PROGRESS &&
-        this.findCurrentApprover(steps)?.userId === userContext.userId
-      );
-    }
-    if (box === 'processed') {
-      return (
-        approval.status === DocumentStatus.PROGRESS &&
-        steps.some(
-          (step) =>
-            this.isProcessingStep(step) &&
-            step.userId === userContext.userId &&
-            step.status === 'Y',
-        )
-      );
-    }
-    if (box === 'closed') {
-      return (
-        this.isClosed(approval) &&
-        (approval.submitterId === userContext.userId ||
-          steps.some(
-            (step) =>
-              this.isProcessingStep(step) && step.userId === userContext.userId,
-          ))
-      );
-    }
-    return (
-      approval.status === DocumentStatus.CONFIRMED &&
-      steps.some(
-        (step) =>
-          step.type === ApprovalStepType.REFERENCE &&
-          step.userId === userContext.userId,
-      )
-    );
-  }
-
-  private isClosed(approval: Approval): boolean {
-    return (
-      approval.status === DocumentStatus.CONFIRMED ||
-      approval.status === DocumentStatus.REJECTED ||
-      approval.status === DocumentStatus.CANCELLED
-    );
   }
 
   private canView(
@@ -810,6 +968,7 @@ export class ApprovalsService {
     steps: ApprovalStepInputDto[] | undefined,
   ): Promise<void> {
     const normalizedSteps = this.normalizeSteps(steps);
+    await this.validateParticipants(userContext, normalizedSteps);
     await this.approvalStepRepository.delete({
       companyId: userContext.companyId,
       approvalId,
@@ -847,21 +1006,25 @@ export class ApprovalsService {
       return [];
     }
 
-    return steps.map((step) => {
+    const normalized = steps.map((step) => {
       if (
         step.type !== ApprovalStepType.APPROVER &&
         step.type !== ApprovalStepType.AGREE &&
         step.type !== ApprovalStepType.REFERENCE
       ) {
         throw new BadRequestException(
-          'step type must be APPROVER, AGREE, or REFERENCE',
+          '결재선 유형은 결재·합의·참조 중에서 선택해 주세요.',
         );
       }
       return {
         type: step.type,
-        userId: this.requireTrimmedString(step.userId, 'step.userId'),
+        userId: this.requireTrimmedString(step.userId, '결재선 사용자 ID'),
       };
     });
+    return [
+      ...normalized.filter((step) => step.type !== ApprovalStepType.REFERENCE),
+      ...normalized.filter((step) => step.type === ApprovalStepType.REFERENCE),
+    ];
   }
 
   private async findApprovalOrThrow(
@@ -875,7 +1038,7 @@ export class ApprovalsService {
     });
 
     if (!approval) {
-      throw new NotFoundException('Approval not found');
+      throw new NotFoundException('결재 문서를 찾을 수 없습니다.');
     }
 
     return approval;
@@ -901,22 +1064,9 @@ export class ApprovalsService {
     });
   }
 
-  private groupSteps(steps: ApprovalStep[]): Map<string, ApprovalStep[]> {
-    const groupedSteps = new Map<string, ApprovalStep[]>();
-    for (const step of steps) {
-      groupedSteps.set(step.approvalId, [
-        ...(groupedSteps.get(step.approvalId) ?? []),
-        step,
-      ]);
-    }
-    return groupedSteps;
-  }
-
   private assertSubmitter(userContext: UserContext, approval: Approval): void {
     if (approval.submitterId !== userContext.userId) {
-      throw new ForbiddenException(
-        'Only the submitter can change this approval',
-      );
+      throw new ForbiddenException('상신자만 결재 문서를 변경할 수 있습니다.');
     }
   }
 
@@ -928,7 +1078,7 @@ export class ApprovalsService {
       box !== 'closed' &&
       box !== 'reference'
     ) {
-      throw new BadRequestException('Invalid approval box');
+      throw new BadRequestException('올바른 결재 문서함을 선택해 주세요.');
     }
   }
 
@@ -941,7 +1091,7 @@ export class ApprovalsService {
       value.type !== 'doc' ||
       ('content' in value && !Array.isArray(value.content))
     ) {
-      throw new BadRequestException('contentJson must be a Tiptap document');
+      throw new BadRequestException('본문 문서 형식을 확인해 주세요.');
     }
     return value;
   }
@@ -951,7 +1101,9 @@ export class ApprovalsService {
     fieldName: string,
   ): string {
     if (typeof value !== 'string' || value.trim() === '') {
-      throw new BadRequestException(`${fieldName} is required`);
+      throw new BadRequestException(
+        `${fieldName === 'title' ? '제목' : fieldName} 항목을 입력해 주세요.`,
+      );
     }
     return value.trim();
   }

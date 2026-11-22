@@ -1,5 +1,5 @@
 import { DocumentStatus } from '../../common/constants/document-status';
-import { ApprovalStepType } from '../entities/approval-step.entity';
+import { ApprovalStepType } from '../approval.constant';
 
 export interface ApprovalUserInfoDto {
   userId: string;
@@ -26,7 +26,19 @@ export interface ApprovalStepResponseDto {
   actedAt: Date | null;
 }
 
+// API 계약: frontend/src/modules/approvals/approvals.api.ts와 함께 수정한다.
+export interface ApprovalListItemDto {
+  approvalId: string;
+  documentNo: string;
+  title: string;
+  submitterId: string;
+  status: DocumentStatus;
+  createdAt: Date;
+}
+
 export interface ApprovalResponseDto {
+  // 결재 저장은 성공했으나 원문 동기화가 실패한 경우에만 반환한다. DB에는 저장하지 않는다.
+  sourceSyncWarning?: string;
   sourceAttachmentIds?: string[];
   companyId: string;
   approvalId: string;

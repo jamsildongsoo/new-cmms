@@ -1,7 +1,15 @@
 import { Type } from 'class-transformer';
-import { IsArray, ValidateNested, MaxLength, IsIn } from 'class-validator';
+import {
+  IsArray,
+  ValidateNested,
+  MaxLength,
+  IsIn,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  Matches,
+} from 'class-validator';
 import { InspectionItemDto } from './inspection-item.dto';
-import { IsNotEmpty, IsOptional, IsString, Matches } from 'class-validator';
 
 export class CreatePreventiveMaintenanceDto {
   @IsOptional()
@@ -21,11 +29,13 @@ export class CreatePreventiveMaintenanceDto {
 
   @IsString()
   @IsNotEmpty()
+  @MaxLength(50)
   equipmentId: string;
 
-  @IsOptional()
+  @IsString()
+  @IsNotEmpty({ message: '점검일을 입력해 주세요.' })
   @Matches(/^\d{8}$/)
-  inspectionDate?: string | null;
+  inspectionDate: string;
 
   @IsOptional()
   @Matches(/^\d{8}$/)
@@ -39,6 +49,7 @@ export class CreatePreventiveMaintenanceDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(50)
   typeCode?: string | null;
 
   @IsOptional()
@@ -59,7 +70,8 @@ export class CreatePreventiveMaintenanceDto {
   @IsOptional()
   @IsString()
   @MaxLength(30)
-  inspectionDeptId?: string | null;
+  // frontend/src/modules/maintenance/preventive-maintenance/preventiveMaintenance.api.ts와 함께 수정한다.
+  deptId?: string | null;
 
   @IsOptional()
   @IsString()

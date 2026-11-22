@@ -2,6 +2,7 @@
 export interface JwtPayload {
   sub: string;
   companyId: string;
+  tokenVersion: number;
   exp?: number;
   iat?: number;
 }

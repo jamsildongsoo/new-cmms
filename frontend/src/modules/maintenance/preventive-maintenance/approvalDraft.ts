@@ -1,5 +1,7 @@
+import { dateInput } from '@/shared/lib/format'
+// 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
 import { buildFieldTable, type ApprovalDraft } from '@/modules/approvals'
-import { dateInput } from '@/modules/maintenance/equipment'
+
 import {
   PM_MODULE,
   type PreventiveMaintenance,
@@ -28,7 +30,7 @@ export function toPreventiveMaintenanceDraft(
       ['다음 점검일', dateInput(document.nextInspectionDate)],
       ['점검 유형', document.typeCode],
       ['판정', document.result],
-      ['점검부서', document.inspectionDeptName || document.inspectionDeptId],
+      ['점검부서', document.deptName || document.deptId],
       ['점검자', document.inspectorName || document.inspectorId],
       ['작성자', document.requesterId],
       ['비고', document.note],

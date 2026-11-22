@@ -31,7 +31,7 @@ function fixture() {
     workDate: '20261105',
     siteId: 'S1',
     deptId: 'D1',
-    status: 'D',
+    status: 'C',
     createdBy: 'owner',
     deleteYn: 'N',
     laborItems: [],
@@ -76,8 +76,12 @@ function fixture() {
             (!query.params.scopeSiteId ||
               row.siteId === query.params.scopeSiteId) &&
             (!query.params.scopeDeptId ||
-              [query.params.scopeDeptId, 'CHILD'].includes(row.deptId)) &&
-            (!query.params.kind || row.orderKind === query.params.kind),
+              [query.params.scopeDeptId, 'CHILD'].some(
+                (deptId) => deptId === row.deptId,
+              )) &&
+            (!query.params.kind || row.orderKind === query.params.kind) &&
+            (!query.params.planStatus ||
+              row.status === query.params.planStatus),
         );
       const builder = {
         where: (sql: string, params: Record<string, unknown>) => {
@@ -92,6 +96,10 @@ function fixture() {
         },
         orderBy: () => builder,
         select: () => builder,
+        addOrderBy: () => builder,
+        skip: () => builder,
+        take: () => builder,
+        getManyAndCount: async () => [filtered(), filtered().length],
         getOne: async () => filtered()[0] ?? null,
         getMany: async () => filtered(),
       };
@@ -118,7 +126,7 @@ function fixture() {
     workOrderId,
     title: '실적',
     orderKind: 'ACTUAL' as const,
-    refModule: 'work_order',
+    refModule: 'WRKORD',
     refId: 'plan',
     equipmentId: 'EQ',
     workDate: '20261105',
@@ -141,7 +149,7 @@ describe('Work order independent documents', () => {
     const based = {
       ...input('p1'),
       orderKind: 'PLAN' as const,
-      refModule: 'work_request',
+      refModule: 'WRKREQ',
       refId: 'request',
     };
     expect((await service.create(actor(), based)).refId).toBe('request');
@@ -172,7 +180,7 @@ describe('Work order independent documents', () => {
       service.create(actor(), { ...input('bad'), refId: null }),
     ).rejects.toThrow('provided together');
     await expect(
-      service.create(actor(), { ...input('bad'), refModule: 'work_request' }),
+      service.create(actor(), { ...input('bad'), refModule: 'WRKREQ' }),
     ).rejects.toThrow('Actual work can only reference');
     requests.findForPlan.mockRejectedValueOnce(
       new Error('Only confirmed work requests') as never,
@@ -181,7 +189,7 @@ describe('Work order independent documents', () => {
       service.create(actor(), {
         ...input('bad'),
         orderKind: 'PLAN',
-        refModule: 'work_request',
+        refModule: 'WRKREQ',
         refId: 'draft',
       }),
     ).rejects.toThrow('Only confirmed');
@@ -207,7 +215,7 @@ describe('Work order independent documents', () => {
     ).toBe('new-files');
   });
 
-  it('allows multiple actuals against a draft plan without changing that plan', async () => {
+  it('allows multiple actuals against a confirmed plan without changing that plan', async () => {
     const { service, input, rows, plan } = fixture();
     const first = await service.create(actor(), input('actual-1'));
     const second = await service.create(actor(), input('actual-2'));
@@ -221,7 +229,7 @@ describe('Work order independent documents', () => {
       status: 'D',
       deleteYn: 'N',
     });
-    expect(plan.status).toBe('D');
+    expect(plan.status).toBe('C');
     expect(first.attachmentId).toBeNull();
   });
   it('supports actual work without any plan', async () => {
@@ -290,6 +298,7 @@ describe('Work order independent documents', () => {
   });
   it('keeps document affiliation and allows clearing all detail arrays', async () => {
     const { service, plan } = fixture();
+    plan.status = 'D';
     plan.laborItems = [{ workerName: '홍길동', content: '', hours: 1 }];
     const saved = await service.update(
       actor({ siteId: 'S2', deptId: 'D2' }),
@@ -308,6 +317,7 @@ describe('Work order independent documents', () => {
   });
   it('only allows the owner to update or soft delete a draft', async () => {
     const { service, plan } = fixture();
+    plan.status = 'D';
     await expect(
       service.update(actor({ userId: 'other' }), 'plan', { title: '수정' }),
     ).rejects.toThrow('Only the owner');
@@ -324,6 +334,7 @@ describe('Work order independent documents', () => {
   });
   it('checks owner, draft and document scope before a linked approval can submit', async () => {
     const { service, plan } = fixture();
+    plan.status = 'D';
     await expect(
       service.assertCanSubmit(actor({ userId: 'other' }), 'plan'),
     ).rejects.toThrow('Only the owner');
@@ -355,7 +366,7 @@ describe('Work order independent documents', () => {
       await service.create(actor(), input('a'));
       await service.syncApprovalStatus('A', 'a', status, 'approver');
       expect((await service.findOne(actor(), 'a')).status).toBe(status);
-      expect(plan.status).toBe('D');
+      expect(plan.status).toBe('C');
       await expect(
         service.syncApprovalStatus('B', 'a', status, 'approver'),
       ).rejects.toThrow('not found');
@@ -366,7 +377,9 @@ describe('Work order independent documents', () => {
 describe('Work order document access', () => {
   it('hides other-company and out-of-site records from reads, edits and plan selection', async () => {
     const { service, input } = fixture();
-    expect(await service.findAll(actor({ companyId: 'B' }))).toEqual([]);
+    expect((await service.findAll(actor({ companyId: 'B' }))).items).toEqual(
+      [],
+    );
     for (const user of [
       actor({ companyId: 'B' }),
       actor({ accessScope: 'OWN_SITE', siteId: 'S2' }),
@@ -385,25 +398,18 @@ describe('Work order document access', () => {
   it('includes subordinate departments and retains scope predicates when searching', async () => {
     const { service, plan, queries } = fixture();
     plan.deptId = 'CHILD';
-    const result = await service.findAll(
-      actor({ accessScope: 'OWN_DEPARTMENT' }),
-      {
-        searchType: 'title',
-        searchVal: '계획',
-        orderKind: 'PLAN',
-        status: 'D',
-        workDateFrom: '20261101',
-      },
-    );
+    const result = (
+      await service.findAll(actor({ accessScope: 'OWN_DEPARTMENT' }), {
+        search: '계획',
+      })
+    ).items;
     expect(result).toHaveLength(1);
     expect(queries[0].sql.join(' ')).toContain('WITH RECURSIVE');
     expect(queries[0].sql[0]).toContain('companyId');
     expect(queries[0].params).toMatchObject({
       companyId: 'A',
       scopeDeptId: 'D1',
-      orderKind: 'PLAN',
-      status: 'D',
-      dateFrom: '20261101',
+      search: '%계획%',
     });
   });
   it('fails closed when a restricted scope has no required affiliation', async () => {
@@ -466,7 +472,7 @@ it('generates PostgreSQL department-scope SQL with bound company, search and dep
   let generated: SelectQueryBuilder<WorkOrder> | undefined;
   jest.spyOn(repository, 'createQueryBuilder').mockImplementation((alias) => {
     generated = original(alias);
-    jest.spyOn(generated, 'getMany').mockResolvedValue([]);
+    jest.spyOn(generated, 'getManyAndCount').mockResolvedValue([[], 0]);
     return generated;
   });
   await new WorkOrderService(
@@ -474,12 +480,27 @@ it('generates PostgreSQL department-scope SQL with bound company, search and dep
     {} as Repository<Equipment>,
     {} as WorkRequestService,
   ).findAll(actor({ accessScope: 'OWN_DEPARTMENT' }), {
-    searchType: 'title',
-    searchVal: "x' OR 1=1",
+    search: "x' OR 1=1",
   });
   const [sql, params] = generated!.getQueryAndParameters();
   expect(sql).toContain('"wo"."deptId" IN');
   expect(sql).toContain('WITH RECURSIVE');
   expect(sql).not.toContain("x' OR 1=1");
   expect(params).toEqual(expect.arrayContaining(['A', 'D1', "%x' OR 1=1%"]));
+});
+
+it('applies common precision to new work-order material quantities and prices', async () => {
+  const { service, input } = fixture();
+  await expect(
+    service.create(actor(), {
+      ...input('precision'),
+      materials: [{ name: '자재', quantity: 1.234, unitPrice: 10 }],
+    }),
+  ).rejects.toThrow('소수점 2자리');
+  await expect(
+    service.create(actor(), {
+      ...input('precision'),
+      materials: [{ name: '자재', quantity: 1.23, unitPrice: 10.5 }],
+    }),
+  ).rejects.toThrow('소수점 0자리');
 });

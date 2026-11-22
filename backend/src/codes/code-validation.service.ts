@@ -12,7 +12,7 @@ export class CodeValidationService {
   constructor(private readonly codeItemsService: CodeItemsService) {}
 
   async assertValidItem(input: AssertValidCodeItemInput): Promise<void> {
-    await this.codeItemsService.findActiveByIdOrThrow(
+    await this.codeItemsService.findByIdOrThrow(
       input.companyId,
       input.codeId,
       input.codeItemId,

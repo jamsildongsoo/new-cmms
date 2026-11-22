@@ -1,7 +1,9 @@
+import { dateInput } from '@/shared/lib/format'
+// 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
 import { buildFieldTable, type ApprovalDraft } from '@/modules/approvals'
 import type { PurchaseRequestRecord } from './purchase-request.api'
 import { purchaseRequestLabel as purchaseLabel } from './purchase-request.api'
-import { inputDate } from '../common/purchase.utils'
+
 export function purchaseRequestDraft(
   row: PurchaseRequestRecord,
 ): ApprovalDraft {
@@ -11,8 +13,8 @@ export function purchaseRequestDraft(
     ['제목', row.title],
     ['사업장', row.siteId],
     ['부서', row.deptId],
-    ['요청/발주일', inputDate(row.requestDate)],
-    ['필요일/납기', inputDate(row.requiredDate)],
+    ['요청일', dateInput(row.requestDate)],
+    ['필요일', dateInput(row.requiredDate)],
     ['담당자', row.requesterId],
     ['비고', row.note],
   ]
@@ -25,8 +27,8 @@ export function purchaseRequestDraft(
     content: [paragraph(text)],
   })
   return {
-    refModule: 'purchase_request',
-    refId: row.requestId!,
+    refModule: 'PURREQ',
+    refId: row.requestId,
     attachmentId: row.attachmentId,
     title: `[${purchaseLabel}] ${row.title}`,
     contentJson: {
@@ -38,8 +40,8 @@ export function purchaseRequestDraft(
           content: [
             {
               type: 'tableRow',
-              content: ['자재번호', '자재명', '규격', '단위', '수량'].map((v) =>
-                cell(v, true),
+              content: ['자재번호', '자재명', '규격', '단위', '수량'].map(
+                (v) => cell(v, true),
               ),
             },
             ...row.items.map((i) => ({

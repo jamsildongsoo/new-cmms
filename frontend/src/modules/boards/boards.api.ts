@@ -13,8 +13,13 @@ export interface Board extends AuditFields {
 export interface BoardDetail extends Board {
   comments: BoardComment[]
 }
+// API 계약: backend/src/boards/boards.service.ts의 목록 select와 함께 수정한다.
+export type BoardListItem = Pick<
+  Board,
+  'boardId' | 'title' | 'createdBy' | 'createdAt'
+>
 export interface BoardPage {
-  items: Board[]
+  items: BoardListItem[]
   total: number
   page: number
   limit: number
@@ -33,12 +38,8 @@ export const boardApi = {
       })
     ).data,
   get: async (id: string) => (await http.get<BoardDetail>(path(id))).data,
-  create: async (payload: BoardPayload, requestKey: string) =>
-    (
-      await http.post<BoardDetail>('/boards', payload, {
-        headers: { 'Idempotency-Key': requestKey },
-      })
-    ).data,
+  create: async (payload: BoardPayload) =>
+    (await http.post<BoardDetail>('/boards', payload)).data,
   update: async (id: string, payload: BoardPayload) =>
     (await http.patch<BoardDetail>(path(id), payload)).data,
   remove: async (id: string) => http.delete(path(id)),

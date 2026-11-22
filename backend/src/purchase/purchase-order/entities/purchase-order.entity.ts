@@ -44,6 +44,9 @@ export class PurchaseOrder extends AuditEntity {
   @Column({ type: 'char', length: 1, default: 'N' })
   deleteYn: string;
 
+  // 입고 목적지. 발주 소속 siteId와 구분한다. 프런트 purchase-order.api.ts와 함께 수정한다.
+  @Column({ type: 'varchar', length: 30 }) toSiteId: string;
+
   @Column({ type: 'varchar', length: 30, nullable: true })
   siteId: string | null;
 
@@ -59,6 +62,8 @@ export class PurchaseOrder extends AuditEntity {
   @Column({ type: 'varchar', length: 300, nullable: true }) deliveryLocation:
     string | null;
   @Column({ type: 'varchar', length: 3, default: 'KRW' }) currency: string;
-  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
-  sourceRequestIds: string[];
+  // 선택적 원 요청 참조. 프런트 purchase-order.api.ts와 함께 수정한다.
+  @Column({ type: 'varchar', length: 50, nullable: true }) refModule:
+    string | null;
+  @Column({ type: 'varchar', length: 50, nullable: true }) refId: string | null;
 }

@@ -1,17 +1,14 @@
-/** 회사·모듈·발급월별 문서 채번, 동일 생성 요청의 재시도, 저장 후 첨부 연결을 공통 처리한다. */
+/** 회사·모듈·발급월별 문서 채번, 저장 후 첨부 연결을 공통 처리한다. */
 import {
   BadRequestException,
   ConflictException,
   Injectable,
-  NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { isUUID } from 'class-validator';
 import { DataSource, EntityManager } from 'typeorm';
-import { AppModuleKey, findModule } from '../common/constants/modules';
+import { ModuleCode, findModule } from '../common/constants/modules';
 import type { UserContext } from '../auth/types/user-context.type';
 import { Attachment } from '../attachments/entities/attachment.entity';
-import { DocumentRequest } from './entities/document-request.entity';
 import { NumberSequence } from './entities/number-sequence.entity';
 
 @Injectable()
@@ -37,160 +34,79 @@ export class NumberingService {
 
   async generateDocumentId(
     companyId: string,
-    moduleKey: AppModuleKey,
+    moduleCode: ModuleCode,
     date = new Date(),
   ): Promise<string> {
-    const module = findModule(moduleKey);
-    if (!module || !('documentPrefix' in module))
-      throw new BadRequestException('채번 대상 모듈이 아닙니다.');
-    const prefix = module.documentPrefix;
+    if (!findModule(moduleCode))
+      throw new BadRequestException('등록되지 않은 업무 모듈입니다.');
     const yyyymm = this.yearMonth(date);
     return this.db.transaction((manager) =>
-      this.next(manager, companyId, prefix, yyyymm),
+      this.next(manager, companyId, moduleCode, yyyymm),
     );
   }
 
   private async next(
     manager: EntityManager,
     companyId: string,
-    prefix: string,
+    moduleCode: ModuleCode,
     yyyymm: string,
   ) {
     await this.lock(
       manager,
-      `document-number:${companyId}:${prefix}:${yyyymm}`,
+      `document-number:${companyId}:${moduleCode}:${yyyymm}`,
     );
     const repo = manager.getRepository(NumberSequence);
-    const where = { companyId, moduleCode: prefix, yyyymm };
+    const where = { companyId, moduleCode, yyyymm };
     const row =
       (await repo.findOneBy(where)) ?? repo.create({ ...where, lastSerial: 0 });
     if (row.lastSerial >= 99999)
       throw new ConflictException('월별 문서번호 발급 한도를 초과했습니다.');
     row.lastSerial += 1;
     await repo.save(row);
-    return `${prefix}-${yyyymm}-${String(row.lastSerial).padStart(5, '0')}`;
+    return `${moduleCode}-${yyyymm}-${String(row.lastSerial).padStart(5, '0')}`;
   }
 
-  /** 번호 예약은 문서 저장과 별도로 확정한다. 실패 번호를 재사용하지 않는다. */
-  private async reserve(
-    user: UserContext,
-    moduleKey: AppModuleKey,
-    requestKey: string,
-  ) {
-    if (!isUUID(requestKey))
-      throw new BadRequestException(
-        '유효한 Idempotency-Key 헤더가 필요합니다.',
-      );
-    return this.db.transaction(async (manager) => {
-      await this.lock(
-        manager,
-        `document-reserve:${user.companyId}:${moduleKey}:${requestKey}`,
-      );
-      const repo = manager.getRepository(DocumentRequest);
-      const where = { companyId: user.companyId, moduleKey, requestKey };
-      const existing = await repo.findOneBy(where);
-      if (existing) {
-        if (existing.userId !== user.userId)
-          throw new ConflictException('다른 사용자의 생성 요청입니다.');
-        return existing.documentId;
-      }
-      const module = findModule(moduleKey);
-      if (!module || !('documentPrefix' in module))
-        throw new BadRequestException('채번 대상 모듈이 아닙니다.');
-      const documentId = await this.next(
-        manager,
-        user.companyId,
-        module.documentPrefix,
-        this.yearMonth(),
-      );
-      await repo.insert({ ...where, documentId, userId: user.userId });
-      return documentId;
-    });
-  }
-
+  /** 채번은 먼저 확정한다. 저장 실패 번호는 재사용하지 않으며, 재요청은 새 문서를 생성한다.
+   * frontend/src/modules 각 생성 API는 요청 키 없이 POST한다. 동작 변경 시 양쪽을 함께 수정한다.
+   */
   async createDocument<T>(
     user: UserContext,
-    moduleKey: AppModuleKey,
-    requestKey: string,
+    moduleCode: ModuleCode,
     create: (id: string) => Promise<T>,
-    read: (id: string) => Promise<T>,
     attachmentId?: string | null,
     linkedApproval = false,
-    recover?: (id: string) => Promise<T>,
   ): Promise<T> {
-    const id = await this.reserve(user, moduleKey, requestKey);
-    const where = { companyId: user.companyId, moduleKey, requestKey };
-    // 실행 중인 요청은 짧은 DB 트랜잭션으로 선점한다. 문서 서비스 호출 중 DB 연결을 잡아 두지 않는다.
-    const completed = await this.db.transaction(async (manager) => {
-      await this.lock(
-        manager,
-        `document-create:${user.companyId}:${moduleKey}:${requestKey}`,
-      );
-      const repo = manager.getRepository(DocumentRequest);
-      const request = await repo.findOneByOrFail(where);
-      if (request.processing)
-        throw new ConflictException(
-          '동일한 문서 저장이 처리 중입니다. 잠시 후 다시 시도하십시오.',
-        );
-      request.processing = true;
-      await repo.save(request);
-      return request.completed;
-    });
-    try {
-      let existing: T | undefined;
-      try {
-        existing = await read(id);
-      } catch (error) {
-        if (!(error instanceof NotFoundException)) throw error;
-      }
-      let result: T;
-      if (existing !== undefined) {
-        const savedAttachment = (existing as { attachmentId?: string | null })
-          .attachmentId;
-        if (!linkedApproval)
-          await this.bindAttachment(user, moduleKey, id, savedAttachment);
-        result = !completed && recover ? await recover(id) : existing;
-      } else {
-        result = await this.saveDocument(
-          user,
-          moduleKey,
-          id,
-          attachmentId,
-          () => create(id),
-          linkedApproval,
-        );
-      }
-      await this.db
-        .getRepository(DocumentRequest)
-        .update(where, { completed: true });
-      return result;
-    } finally {
-      await this.db
-        .getRepository(DocumentRequest)
-        .update(where, { processing: false });
-    }
+    const id = await this.generateDocumentId(user.companyId, moduleCode);
+    return this.saveDocument(
+      user,
+      moduleCode,
+      id,
+      attachmentId,
+      () => create(id),
+      linkedApproval,
+    );
   }
 
   async saveDocument<T>(
     user: UserContext,
-    moduleKey: AppModuleKey,
+    moduleCode: ModuleCode,
     id: string,
     attachmentId: string | null | undefined,
     save: () => Promise<T>,
     linkedApproval = false,
   ): Promise<T> {
     if (!linkedApproval)
-      await this.checkAttachment(user, moduleKey, id, attachmentId);
+      await this.checkAttachment(user, moduleCode, id, attachmentId);
     const result = await save();
     // 앞선 문서 저장은 첨부 연결 실패로 롤백하지 않는다.
     if (!linkedApproval)
-      await this.bindAttachment(user, moduleKey, id, attachmentId);
+      await this.bindAttachment(user, moduleCode, id, attachmentId);
     return result;
   }
 
   private async checkAttachment(
     user: UserContext,
-    moduleKey: AppModuleKey,
+    moduleCode: ModuleCode,
     id: string,
     attachmentId?: string | null,
   ) {
@@ -200,7 +116,7 @@ export class NumberingService {
       .findOneBy({ companyId: user.companyId, attachmentId, deleteYn: 'N' });
     if (
       !row ||
-      row.refModule !== moduleKey ||
+      row.refModule !== moduleCode ||
       (row.refId !== null && row.refId !== id)
     ) {
       throw new BadRequestException(
@@ -211,7 +127,7 @@ export class NumberingService {
 
   private async bindAttachment(
     user: UserContext,
-    moduleKey: AppModuleKey,
+    moduleCode: ModuleCode,
     id: string,
     attachmentId?: string | null,
   ) {
@@ -229,7 +145,7 @@ export class NumberingService {
       });
       if (
         !row ||
-        row.refModule !== moduleKey ||
+        row.refModule !== moduleCode ||
         (row.refId !== null && row.refId !== id)
       ) {
         throw new ConflictException(

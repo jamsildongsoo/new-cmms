@@ -1,3 +1,4 @@
+const metadata = require('./support/metadata.cjs')
 /** 실제 Chromium에서 분리된 구매·재고 화면과 API 경계를 검증한다. 서버 응답은 fixture다. */
 const assert = require('node:assert/strict')
 const fs = require('node:fs/promises')
@@ -6,7 +7,7 @@ const os = require('node:os')
 const http = require('node:http')
 const { spawn } = require('node:child_process')
 const { once } = require('node:events')
-const { CDP, until } = require('./auth-session.browser.cjs')
+const { CDP, until } = require('./support/browser.cjs')
 const dist = path.resolve(__dirname, '../dist')
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 async function main() {
@@ -33,7 +34,9 @@ async function main() {
   let chrome, cdp
   const failures = [],
     calls = [],
+    inventoryReads = [],
     saved = {}
+  let purchaseListFailure = false
   try {
     server.listen(0, '127.0.0.1')
     await once(server, 'listening')
@@ -76,12 +79,14 @@ async function main() {
       deptId: 'D1',
       accessScope: 'COMPANY_ALL',
       permissions: [
-        'purchase_request',
-        'purchase_order',
-        'inventory_document',
-        'stock_status',
-        'stock_ledger',
-        'monthly_closing',
+        'CODE',
+        'MATL',
+        'PURREQ',
+        'PURORD',
+        'INVDOC',
+        'STOCK',
+        'LEDGER',
+        'MCLOSE',
       ].flatMap((m) =>
         ['create', 'read', 'update', 'delete'].map((a) => `${m}:${a}`),
       ),
@@ -103,13 +108,10 @@ async function main() {
       contactName: `담당 ${i + 1}`,
       email: `v${i + 1}@example.com`,
     }))
-    const period = { yearMonth: '202611', locked: false, summaryDirty: true }
+    const period = { yearMonth: '202611', locked: false }
     const report = () => ({
       period,
       warehouses: [],
-      sites: [],
-      transits: [],
-      draftCount: 0,
       nextMonth: '202612',
     })
     cdp.handlers.push((event) => {
@@ -118,7 +120,7 @@ async function main() {
       if (event.method === 'Page.javascriptDialogOpening') {
         void cdp.send(
           'Page.handleJavaScriptDialog',
-          { accept: true },
+          { accept: true, promptText: '입력 오류 취소' },
           event.sessionId,
         )
         return
@@ -129,11 +131,94 @@ async function main() {
           route = new URL(data.request.url).pathname.replace(/^\/api/, ''),
           method = data.request.method
         let body = []
+        if (method === 'GET' && route.startsWith('/inventory-document'))
+          inventoryReads.push(route)
         if (method !== 'OPTIONS') {
-          if (route === '/auth/me') body = user
-          else if (route === '/purchase-request/options') body = baseOptions
+          if (route === '/system/metadata') body = metadata
+          else if (route === '/auth/me') body = user
+          else if (route === '/material/options')
+            body = {
+              types: [{ value: 'PART', label: '부품' }],
+              units: [
+                { value: 'EA', label: '개' },
+                { value: 'KG', label: '킬로그램' },
+              ],
+            }
+          else if (
+            (route === '/purchase-request' || route === '/purchase-order') &&
+            method === 'GET'
+          ) {
+            const url = new URL(data.request.url),
+              page = Number(url.searchParams.get('page') || 1),
+              search = url.searchParams.get('search') || ''
+            const rows = Array.from({ length: 21 }, (_, i) => ({
+              requestId: `REQ-${i + 1}`,
+              orderId: `PO-${i + 1}`,
+              documentNo: `관리-${i + 1}`,
+              title: `목록 문서 ${i + 1}`,
+              requestDate: '20261115',
+              orderDate: '20261115',
+              status: 'D',
+              totalAmount: '10',
+            })).filter((r) => `${r.documentNo} ${r.title}`.includes(search))
+            body = {
+              items: rows.slice((page - 1) * 20, page * 20),
+              total: rows.length,
+              page,
+              limit: 20,
+            }
+          } else if (route === '/purchase-request/options') body = baseOptions
           else if (route === '/purchase-order/options')
-            body = { ...baseOptions, vendors, requests: [] }
+            body = {
+              ...baseOptions,
+              vendors,
+              requests: [
+                {
+                  requestId: 'PURREQ-1',
+                  documentNo: '요청-1',
+                  title: '요청에서 가져온 제목',
+                },
+                {
+                  requestId: 'PURREQ-2',
+                  documentNo: '',
+                  title: '두 번째 요청',
+                },
+              ],
+            }
+          else if (route === '/purchase-order/request-preview') {
+            const payload = JSON.parse(data.request.postData)
+            body = {
+              title:
+                payload.requestId === 'PURREQ-1'
+                  ? '요청에서 가져온 제목'
+                  : '두 번째 요청',
+              content: '요청 본문',
+              note: '요청 비고',
+              expectedDeliveryDate: '20261201',
+              items: [
+                {
+                  itemId: crypto.randomUUID(),
+                  materialId: 'M1',
+                  materialName: '베어링',
+                  spec: '6205',
+                  baseUnit: 'EA',
+                  quantity: '10',
+                  note: null,
+                  unitPrice: null,
+                  amount: null,
+                },
+              ],
+            }
+          } else if (/^\/purchase-order\/request\/.+\/orders$/.test(route))
+            body = [
+              {
+                orderId: 'OLD-PO',
+                documentNo: '기존발주',
+                title: '반려된 발주',
+                status: 'R',
+                createdAt: '2026-11-01T00:00:00Z',
+              },
+            ]
           else if (
             /^\/purchase-(request|order)$/.test(route) &&
             method === 'POST'
@@ -155,7 +240,7 @@ async function main() {
               items: payload.items.map((i) => ({
                 ...i,
                 materialName: '베어링',
-                spec: '6205',
+                spec: i.spec ?? '6205',
                 baseUnit: 'EA',
                 amount: isOrder ? '30' : undefined,
               })),
@@ -164,44 +249,149 @@ async function main() {
                     vendor: vendors.find(
                       (v) => v.vendorId === payload.vendorId,
                     ),
-                    sourceRequestIds: [],
-                    allocations: [],
+                    refModule: payload.refModule ?? null,
+                    refId: payload.refId ?? null,
                     totalAmount: '30',
                   }
                 : {}),
             }
             saved[`${route}/${id}`] = body
+          } else if (route === '/inventory-document' && method === 'POST') {
+            const payload = JSON.parse(data.request.postData),
+              id = 'INVDOC-202611-00001'
+            calls.push({ route, payload })
+            body = {
+              ...payload,
+              inventoryDocumentId: id,
+              status: 'C',
+              postingSequence: '1',
+              createdBy: 'owner',
+              createdAt: '2026-11-15T00:00:00Z',
+              updatedBy: null,
+              updatedAt: null,
+              cancelReason: null,
+              cancelledBy: null,
+              cancelledAt: null,
+              items: payload.items.map((i) => ({
+                ...i,
+                materialName: '베어링',
+                spec: '6205',
+                baseUnit: 'EA',
+                amount: '20',
+              })),
+            }
+            saved[`${route}/${id}`] = body
+          } else if (
+            route.endsWith('/cancel') &&
+            route.startsWith('/inventory-document/')
+          ) {
+            const payload = JSON.parse(data.request.postData),
+              key = route.slice(0, -7)
+            calls.push({ route, payload })
+            body = {
+              ...saved[key],
+              status: 'X',
+              cancelReason: payload.reason,
+              cancelledBy: 'owner',
+              cancelledAt: '2026-11-15T01:00:00Z',
+            }
+            saved[key] = body
+          } else if (
+            route.endsWith('/confirm') &&
+            route.startsWith('/inventory-document/')
+          ) {
+            const payload = JSON.parse(data.request.postData),
+              key = route.slice(0, -8)
+            calls.push({ route, payload })
+            body = {
+              ...saved[key],
+              ...payload,
+              status: 'C',
+              postingSequence: '2',
+              confirmedBy: 'owner',
+              confirmedAt: '2026-11-15T02:00:00Z',
+            }
+            saved[key] = body
+          } else if (route === '/inventory-document/WAITING') {
+            body = saved[route] ??= {
+              ...saved['/inventory-document/INVDOC-202611-00001'],
+              inventoryDocumentId: 'WAITING',
+              title: '수령 대기 검증',
+              type: 'IN',
+              kind: 'TRANSFER',
+              status: 'W',
+              warehouseId: 'W2',
+              refModule: 'INVDOC',
+              refId: 'OUT-1',
+              postingSequence: null,
+              confirmedBy: null,
+              confirmedAt: null,
+              cancelledBy: null,
+              cancelledAt: null,
+              cancelReason: null,
+            }
           } else if (saved[route]) body = saved[route]
           else if (route === '/monthly-closing') body = [period]
           else if (route.startsWith('/monthly-closing/')) {
             if (method === 'POST') {
               calls.push({ route })
               period.locked = route.endsWith('/close')
-              period.summaryDirty = !period.locked
             }
             body = report()
           } else if (route === '/stock-status')
             body = { warehouses: [], sites: [] }
-          else if (route === '/inventory-document/options')
+          else if (route === '/inventory-document') {
+            const page = Number(
+              new URL(data.request.url).searchParams.get('page') || 1,
+            )
+            body = {
+              items: [
+                {
+                  inventoryDocumentId: `INV-${page}`,
+                  documentNo: '',
+                  title: `재고 목록 ${page}`,
+                  type: 'IN',
+                  kind: 'GENERAL',
+                  postingDate: '20261115',
+                  siteId: 'S1',
+                  warehouseId: 'W1',
+                  status: 'C',
+                },
+              ],
+              total: 21,
+              limit: 20,
+              page,
+            }
+          } else if (route === '/inventory-document/options')
             body = {
               ...baseOptions,
-              warehouses: [{ siteId: 'S1', warehouseId: 'W1', name: '창고' }],
+              warehouses: [
+                { siteId: 'S1', warehouseId: 'W1', name: '창고' },
+                { siteId: 'S1', warehouseId: 'W2', name: '수령 창고' },
+              ],
               orders: [],
               periods: [period],
-              transfers: [],
             }
         }
         await cdp.send(
           'Fetch.fulfillRequest',
           {
             requestId: data.requestId,
-            responseCode: method === 'OPTIONS' ? 204 : 200,
+            responseCode:
+              method === 'OPTIONS'
+                ? 204
+                : purchaseListFailure &&
+                    method === 'GET' &&
+                    (route === '/purchase-request' ||
+                      route === '/purchase-order')
+                  ? 500
+                  : 200,
             responseHeaders: [
               { name: 'Content-Type', value: 'application/json' },
               { name: 'Access-Control-Allow-Origin', value: origin },
               {
                 name: 'Access-Control-Allow-Headers',
-                value: 'authorization,content-type,idempotency-key',
+                value: 'authorization,content-type',
               },
               {
                 name: 'Access-Control-Allow-Methods',
@@ -239,15 +429,23 @@ async function main() {
       await until(
         () =>
           evalJS(
-            `document.body.textContent.includes(${JSON.stringify(title)}) && !document.body.textContent.includes('조회 중...')`,
-          ),
+            `(document.body?.textContent ?? '').includes(${JSON.stringify(title)}) && !(document.body?.textContent ?? '').includes('불러오는 중…')`,
+          ).catch(() => false),
         title,
       )
     }
-    const click = (label) =>
-      evalJS(
+    const click = async (label) => {
+      await until(
+        () =>
+          evalJS(
+            `[...document.querySelectorAll('button')].some(b=>b.textContent.trim()===${JSON.stringify(label)} && !b.disabled)`,
+          ),
+        `button ${label}`,
+      )
+      return evalJS(
         `(()=>{const el=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===${JSON.stringify(label)});if(!el||el.disabled)throw Error('Button unavailable: '+${JSON.stringify(label)});el.click()})()`,
       )
+    }
     const fill = (selector, value) =>
       evalJS(
         `(()=>{const el=document.querySelector(${JSON.stringify(selector)});if(!el)throw Error('Missing input');const proto=el.tagName==='SELECT'?HTMLSelectElement.prototype:HTMLInputElement.prototype;Object.getOwnPropertyDescriptor(proto,'value').set.call(el,${JSON.stringify(value)});el.dispatchEvent(new Event(el.tagName==='SELECT'?'change':'input',{bubbles:true}))})()`,
@@ -259,7 +457,7 @@ async function main() {
     await open('/purchase-request/new', '구매요청서')
     assert.equal(
       await evalJS(
-        "[...document.querySelectorAll('label')].some(l=>l.textContent.startsWith('벤더'))",
+        "[...document.querySelectorAll('label')].some(l=>l.textContent.startsWith('거래처'))",
       ),
       false,
     )
@@ -267,7 +465,7 @@ async function main() {
     await click('품목 추가')
     await fill('[aria-label="1행 자재"]', 'M1')
     await fill('[aria-label="1행 수량"]', '3')
-    await click('저장')
+    await click('임시저장')
     await until(
       () => calls.some((c) => c.route === '/purchase-request'),
       'request saved',
@@ -277,9 +475,11 @@ async function main() {
     ).payload
     for (const key of [
       'vendorId',
+      'toSiteId',
       'orderDate',
       'expectedDeliveryDate',
-      'requestIds',
+      'refModule',
+      'refId',
       'deliveryLocation',
     ])
       assert.equal(key in requestPayload, false, key)
@@ -288,15 +488,15 @@ async function main() {
       'PASS purchase request saves only request fields and quantities',
     )
     await open('/purchase-order/new', '구매발주서')
-    await field('발주명', '벤더 발주')
-    await field('벤더', 'V1')
+    await field('발주명', '거래처 발주')
+    await field('거래처', 'V1')
     assert.equal(
       await evalJS(
         "[...document.querySelectorAll('input')].some(i=>i.value==='업체 1'&&i.readOnly)",
       ),
       true,
     )
-    await field('벤더', 'V2')
+    await field('거래처', 'V2')
     assert.equal(
       await evalJS(
         "[...document.querySelectorAll('input')].some(i=>i.value==='업체 2'&&i.readOnly)",
@@ -307,7 +507,7 @@ async function main() {
     await fill('[aria-label="1행 자재"]', 'M1')
     await fill('[aria-label="1행 수량"]', '3')
     await fill('[aria-label="1행 단가"]', '10')
-    await click('저장')
+    await click('임시저장')
     await until(
       () => calls.some((c) => c.route === '/purchase-order'),
       'order saved',
@@ -325,6 +525,156 @@ async function main() {
     console.log(
       'PASS purchase order switches vendor details and saves order pricing without supplier fields',
     )
+    await open('/purchase-order/new', '구매발주서')
+    await field('참조 구매요청', 'PURREQ-1')
+    await until(
+      () =>
+        evalJS(
+          "document.querySelector('[aria-label=\"1행 수량\"]')?.value==='10'",
+        ),
+      'request copied',
+    )
+    assert.equal(
+      await evalJS(
+        "[...document.querySelectorAll('label')].find(l=>l.textContent.startsWith('발주명')).querySelector('input').value",
+      ),
+      '요청에서 가져온 제목',
+    )
+    assert.equal(
+      await evalJS(
+        'document.querySelector(\'[aria-label="1행 수량"]\').disabled',
+      ),
+      false,
+    )
+    await fill('[aria-label="1행 수량"]', '4')
+    await fill('[aria-label="1행 규격"]', '발주 수정 규격')
+    await click('품목 추가')
+    await until(
+      () => evalJS('!!document.querySelector(\'[aria-label="2행 자재"]\')'),
+      'extra line added',
+    )
+    await evalJS(
+      "[...document.querySelectorAll('tbody tr')][1].querySelector('button').click()",
+    )
+    await field('참조 구매요청', '')
+    assert.equal(
+      await evalJS('document.querySelector(\'[aria-label="1행 수량"]\').value'),
+      '4',
+    )
+    await field('참조 구매요청', 'PURREQ-1')
+    await until(
+      () =>
+        evalJS(
+          "document.querySelector('[aria-label=\"1행 수량\"]').value==='10'",
+        ),
+      'request reloaded',
+    )
+    await fill('[aria-label="1행 수량"]', '4')
+    await fill('[aria-label="1행 규격"]', '발주 수정 규격')
+    await fill('[aria-label="1행 단가"]', '20')
+    await field('거래처', 'V1')
+    await until(
+      () => evalJS("document.body.textContent.includes('반려된 발주')"),
+      'linked history shown',
+    )
+    await click('임시저장')
+    await until(
+      () => calls.filter((c) => c.route === '/purchase-order').length === 2,
+      'linked order saved',
+    )
+    const linkedPayload = calls.filter((c) => c.route === '/purchase-order')[1]
+      .payload
+    assert.equal(linkedPayload.refModule, 'PURREQ')
+    assert.equal(linkedPayload.refId, 'PURREQ-1')
+    assert.equal(linkedPayload.items[0].quantity, '4')
+    assert.equal(linkedPayload.items[0].spec, '발주 수정 규격')
+    assert.equal('requestIds' in linkedPayload, false)
+    await until(
+      () =>
+        evalJS(
+          "document.querySelector('[aria-label=\"1행 수량\"]')?.value==='4'",
+        ),
+      'saved copied edits retained',
+    )
+    console.log(
+      'PASS single request copies once, editable items, detach keeps inputs, reload copies and linked history remains visible',
+    )
+    for (const route of ['/purchase-request', '/purchase-order']) {
+      await open(route, route.endsWith('request') ? '구매요청서' : '구매발주서')
+      await until(
+        () => evalJS("document.body.textContent.includes('총 21건')"),
+        'list total',
+      )
+      assert.equal(
+        await evalJS(
+          "[...document.querySelectorAll('select[aria-label=상태],input[type=date]')].length",
+        ),
+        0,
+      )
+      await click('다음')
+      await until(
+        () =>
+          evalJS(
+            "document.body.textContent.includes('2 / 2 페이지') && document.body.textContent.includes('목록 문서 21')",
+          ),
+        'second page',
+      )
+      await fill('[aria-label="검색어"]', '관리-21')
+      await click('검색')
+      await until(
+        () =>
+          evalJS(
+            "document.body.textContent.includes('총 1건') && document.body.textContent.includes('1 / 1 페이지')",
+          ),
+        'search resets page',
+      )
+      purchaseListFailure = true
+      await click('검색')
+      await until(
+        () => evalJS("!!document.querySelector('[role=alert]')"),
+        'list error',
+      )
+      assert.equal(
+        await evalJS("document.body.textContent.includes('목록 문서 21')"),
+        false,
+      )
+      assert.equal(
+        await evalJS(
+          "[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='인쇄').disabled",
+        ),
+        true,
+      )
+      purchaseListFailure = false
+    }
+    console.log(
+      'PASS purchase lists paginate, reset search page, and hide stale results on failure',
+    )
+    const beforeList = inventoryReads.length
+    await open('/inventory-in', '입고')
+    await until(
+      () => evalJS("document.body.textContent.includes('재고 목록 1')"),
+      'inventory list',
+    )
+    await click('다음')
+    await until(
+      () => evalJS("document.body.textContent.includes('재고 목록 2')"),
+      'inventory next page',
+    )
+    assert.deepEqual(inventoryReads.slice(beforeList), [
+      '/inventory-document',
+      '/inventory-document',
+    ])
+    assert.equal(
+      inventoryReads.slice(beforeList).includes('/inventory-document/options'),
+      false,
+    )
+    assert.equal(
+      await evalJS(
+        "[...document.querySelectorAll('main button')].some(b => b.textContent.trim() === '입고 대기')",
+      ),
+      false,
+    )
+    console.log('PASS inventory menus use paginated lists without pending tabs')
     await open('/monthly-closing', '재고 월 마감')
     await click('마감')
     await until(
@@ -332,7 +682,7 @@ async function main() {
       'month closed',
     )
     await until(
-      () => evalJS("document.body.textContent.includes('마감(Lock)')"),
+      () => evalJS("document.body.textContent.includes('월 마감')"),
       'closed month shown',
     )
     console.log(
@@ -340,7 +690,169 @@ async function main() {
     )
     await open('/stock-status', '재고 현황')
     await open('/stock-ledger', '재고 수불장')
-    await open('/inventory-document/new', '재고전표')
+    period.locked = false
+    await open('/inventory-in/new', '입고')
+    await field('전기일', '2026-11-15')
+    await until(
+      () =>
+        evalJS(
+          "[...document.querySelectorAll('main button')].find(b=>b.textContent.trim()==='확정')?.disabled===false",
+        ),
+      'open posting month',
+    )
+    assert.equal(
+      await evalJS(
+        "[...document.querySelectorAll('main button')].some(b=>b.textContent.trim()==='저장'||b.textContent.trim()==='임시저장')",
+      ),
+      false,
+    )
+    assert.equal(
+      await evalJS(
+        "[...document.querySelectorAll('main label')].find(l=>l.textContent.startsWith('담당부서')).querySelector('input').readOnly",
+      ),
+      true,
+    )
+    await field('전표명', '일반입고 검증')
+    await field('수불 유형', 'IN:GENERAL')
+    await field('입고 창고', 'W1')
+    await click('품목 추가')
+    await fill('[aria-label="1행 자재"]', 'M1')
+    await fill('[aria-label="1행 수량"]', '2')
+    await fill('[aria-label="1행 단가"]', '10')
+    await click('확정')
+    await until(
+      () => calls.some((c) => c.route === '/inventory-document'),
+      'atomic inventory created',
+    )
+    const inventoryPayload = calls.find(
+      (c) => c.route === '/inventory-document',
+    ).payload
+    assert.equal(inventoryPayload.type, 'IN')
+    assert.equal(inventoryPayload.kind, 'GENERAL')
+    assert.equal('typeCode' in inventoryPayload, false)
+    await until(
+      () =>
+        evalJS(
+          "location.pathname.includes('INVDOC-202611-00001') && [...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='확정 취소')",
+        ),
+      'confirmed detail',
+    )
+    await click('확정 취소')
+    await until(
+      () => evalJS("document.body.textContent.includes('입력 오류 취소')"),
+      'cancellation detail',
+    )
+    assert.equal(
+      calls.find((c) => c.route.endsWith('/cancel')).payload.reason,
+      '입력 오류 취소',
+    )
+    await click('인쇄')
+    const printText = await evalJS(
+      "[...document.querySelectorAll('iframe')].at(-1).contentDocument.body.textContent",
+    )
+    assert.ok(
+      printText.includes('취소사유') && printText.includes('입력 오류 취소'),
+    )
+    await open('/inventory-transfer/new', '타창고출고')
+    await until(
+      () => evalJS("document.body.textContent.includes('수령 창고')"),
+      'transfer form',
+    )
+    assert.equal(
+      await evalJS(
+        "[...document.querySelectorAll('main label')].find(l=>l.textContent.startsWith('수령 창고')).querySelector('select').required",
+      ),
+      true,
+    )
+    await field('수령 창고', JSON.stringify(['S1', 'W2']))
+    assert.equal(
+      await evalJS(
+        "[...document.querySelectorAll('main label')].find(l=>l.textContent.startsWith('수령 사업장')).querySelector('input').value",
+      ),
+      'S1',
+    )
+    assert.equal(
+      await evalJS(
+        "[...document.querySelectorAll('main label')].find(l=>l.textContent.startsWith('수불 유형')).querySelector('select').options.length",
+      ),
+      1,
+    )
+    console.log(
+      'PASS transfer menu fixes the variant and derives destination site from the required warehouse',
+    )
+
+    await open('/inventory-document/WAITING', '수령 대기')
+    await field('전기일', '2026-11-16')
+    await click('입고 확정')
+    await until(
+      () => calls.some((c) => c.route.endsWith('/WAITING/confirm')),
+      'receipt confirmation',
+    )
+    await until(
+      () =>
+        evalJS(
+          "[...document.querySelectorAll('main button')].some(b=>b.textContent.trim()==='확정 취소')",
+        ),
+      'receipt confirmed',
+    )
+    assert.equal(saved['/inventory-document/WAITING'].items[0].amount, '20')
+    assert.equal(
+      calls.find((c) => c.route.endsWith('/WAITING/confirm')).payload
+        .postingDate,
+      '20261116',
+    )
+    console.log(
+      'PASS waiting receipt confirms the existing document and preserves its amount',
+    )
+
+    await open('/material/new', '자재')
+    await until(
+      () =>
+        evalJS(
+          "[...document.querySelectorAll('main select')].some(select => [...select.options].some(option => option.value === 'EA' && option.text.includes('개')) && [...select.options].some(option => option.value === 'KG'))",
+        ),
+      'common UNIT choices loaded',
+    )
+    console.log('PASS material unit choices come from the common UNIT group')
+    await open('/code-items?codeId=UNIT', '공통코드 관리')
+    await until(
+      () =>
+        evalJS(
+          "[...document.querySelectorAll('select option')].some(o => o.value === 'EQUIP_TYPE' && o.textContent.includes('설비 유형'))",
+        ),
+      'metadata code groups',
+    )
+    await open('/code-items/new?codeId=EQUIP_TYPE', '공통코드 신규 작성')
+    assert.equal(
+      await evalJS(
+        "document.body.textContent.includes('EQUIP_TYPE - 설비 유형')",
+      ),
+      true,
+    )
+    assert.equal(
+      await evalJS(
+        "[...document.querySelectorAll('a')].some(a => a.getAttribute('href') === '/permissions')",
+      ),
+      false,
+    )
+    console.log(
+      'PASS common code editor uses metadata groups and permission CRUD navigation is absent',
+    )
+    const originalPermissions = user.permissions
+    user.permissions = []
+    const readsBeforeDenied = inventoryReads.length
+    await open('/inventory-in', '조회 권한이 없습니다.')
+    assert.equal(inventoryReads.length, readsBeforeDenied)
+    assert.equal(
+      await evalJS(
+        'document.querySelector(\'nav a[href="/inventory-transfer"]\') !== null && document.querySelector(\'nav a[href="/purchase-order"]\') !== null',
+      ),
+      true,
+    )
+    user.permissions = originalPermissions
+    console.log(
+      'PASS menus remain visible while a denied page makes no inventory requests',
+    )
     assert.deepEqual(failures, [])
     console.log(
       'PASS stock reports and inventory transaction screens render without runtime errors',

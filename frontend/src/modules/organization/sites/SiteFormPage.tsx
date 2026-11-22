@@ -1,3 +1,4 @@
+// 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Navigate, useNavigate, useParams } from 'react-router-dom'
@@ -58,15 +59,15 @@ export function SiteFormPage({ mode }: { mode: FormMode }) {
 
   const requiredPermission =
     mode === 'create'
-      ? 'site:create'
+      ? 'SITE:create'
       : mode === 'edit'
-        ? 'site:update'
-        : 'site:read'
+        ? 'SITE:update'
+        : 'SITE:read'
   if (!hasPermission(requiredPermission)) {
     return <Navigate to="/sites" replace />
   }
 
-  const readOnly = mode !== 'create' && !hasPermission('site:update')
+  const readOnly = mode !== 'create' && !hasPermission('SITE:update')
 
   const update = (key: keyof SiteFormState, value: string) =>
     setForm((current) => ({ ...current, [key]: value }))
@@ -77,16 +78,14 @@ export function SiteFormPage({ mode }: { mode: FormMode }) {
     setIsSaving(true)
     setError(null)
     try {
-      if (mode !== 'create' && id) {
-        // Key fields are immutable, so the backend update DTO does not accept them.
-        const payload: Partial<SiteFormState> = { ...form }
-        delete payload.siteId
-        await updateSite(id, payload as Omit<SiteFormState, 'siteId'>)
-      } else {
-        await createSite({ ...form })
-      }
-      setSavedForm(JSON.stringify(form))
-      navigate(`/sites/${encodeURIComponent(form.siteId)}`, {
+      const saved =
+        mode !== 'create' && id
+          ? await updateSite(id, { name: form.name })
+          : await createSite({ ...form })
+      const loaded = { siteId: saved.siteId, name: saved.name }
+      setForm(loaded)
+      setSavedForm(JSON.stringify(loaded))
+      navigate(`/sites/${encodeURIComponent(saved.siteId)}`, {
         replace: mode === 'create',
       })
     } catch (saveError) {
@@ -100,7 +99,7 @@ export function SiteFormPage({ mode }: { mode: FormMode }) {
     if (
       !id ||
       isSaving ||
-      !hasPermission('site:delete') ||
+      !hasPermission('SITE:delete') ||
       !window.confirm('이 정보를 삭제하시겠습니까?')
     )
       return
@@ -117,24 +116,8 @@ export function SiteFormPage({ mode }: { mode: FormMode }) {
   return (
     <section className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-base font-semibold text-slate-900">사업장</h1>
-        <div className="flex flex-wrap justify-end gap-2">
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={mode === 'create' || isLoading || isSaving}
-            onClick={() =>
-              printDocument({
-                title: '사업장',
-                fields: Object.entries(form).map(([key, value]) => [
-                  key,
-                  value,
-                ]),
-              })
-            }
-          >
-            인쇄
-          </Button>
+        <h1 className="text-lg font-semibold text-slate-900">사업장</h1>
+        <div className="page-actions">
           <Button
             type="button"
             variant="secondary"
@@ -145,6 +128,33 @@ export function SiteFormPage({ mode }: { mode: FormMode }) {
           >
             목록
           </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={mode === 'create' || isLoading || isSaving}
+            onClick={() =>
+              printDocument({
+                title: '사업장',
+                fields: [
+                  ['사업장코드', form.siteId],
+                  ['사업장명', form.name],
+                ],
+              })
+            }
+          >
+            인쇄
+          </Button>
+          {mode !== 'create' && hasPermission('SITE:delete') && (
+            <Button
+              className="sm:ml-2"
+              type="button"
+              variant="danger"
+              disabled={isSaving || isLoading}
+              onClick={() => void remove()}
+            >
+              삭제
+            </Button>
+          )}
           {!readOnly && (
             <Button
               type="submit"
@@ -152,16 +162,6 @@ export function SiteFormPage({ mode }: { mode: FormMode }) {
               disabled={isSaving || isLoading}
             >
               저장
-            </Button>
-          )}
-          {mode !== 'create' && hasPermission('site:delete') && (
-            <Button
-              type="button"
-              variant="danger"
-              disabled={isSaving || isLoading}
-              onClick={() => void remove()}
-            >
-              삭제
             </Button>
           )}
         </div>
@@ -175,20 +175,24 @@ export function SiteFormPage({ mode }: { mode: FormMode }) {
 
       <form
         id="sites-form"
-        className="border border-slate-200 bg-white p-3"
+        className="rounded-lg border border-slate-200 bg-white p-4 md:p-5"
         onSubmit={(event) => void save(event)}
       >
         <div className="grid gap-3 md:grid-cols-2">
-          <Field label="Site ID" required>
+          <Field label="사업장코드" required>
             <Input
               value={form.siteId}
+              required
+              maxLength={30}
               disabled={mode !== 'create' || isLoading}
               onChange={(event) => update('siteId', event.target.value)}
             />
           </Field>
-          <Field label="Name" required>
+          <Field label="사업장명" required>
             <Input
               value={form.name}
+              required
+              maxLength={100}
               disabled={readOnly || isLoading}
               onChange={(event) => update('name', event.target.value)}
             />

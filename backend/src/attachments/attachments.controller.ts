@@ -22,7 +22,8 @@ import {
 } from './attachments.service';
 import { CreateAttachmentDto } from './dto/create-attachment.dto';
 
-// 첨부 API는 공통 인증을 적용하고, 회사 범위는 서비스에서 인증 정보로 제한한다.
+// 첨부 API는 JWT 인증만 적용한다. 개별 업무 권한·작성자·원문 접근 권한은 검사하지 않는다.
+// 프런트의 첨부 키를 사용하되 회사는 전송값이 아닌 인증된 UserContext로 확인한다.
 @UseGuards(JwtAuthGuard)
 @Controller('attachments')
 export class AttachmentsController {
@@ -43,7 +44,7 @@ export class AttachmentsController {
     return this.attachmentsService.findItems(user, attachmentId);
   }
 
-  // multipart의 files 필드를 메모리 버퍼로 받은 뒤 서비스에서 검증·저장한다.
+  // 수신 단계에서 크기·개수를 제한하고, 서비스에서 인증 회사·합계 용량·유형을 확인한다.
   @Post(':attachmentId/items')
   @UseInterceptors(FilesInterceptor('files'))
   uploadItems(

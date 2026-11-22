@@ -11,27 +11,34 @@ import {
 
 export class CreateEquipmentDto {
   @IsString()
+  @MaxLength(50)
   equipmentId: string;
 
   @IsString()
+  @MaxLength(30)
   siteId: string;
 
   @IsString()
+  @MaxLength(150)
   name: string;
 
   @IsString()
+  @MaxLength(50)
   typeCode: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(200)
   location?: string | null;
 
   @IsOptional()
   @IsString()
+  @MaxLength(100)
   maker?: string | null;
 
   @IsOptional()
   @IsString()
+  @MaxLength(100)
   model?: string | null;
 
   @IsOptional()
@@ -40,6 +47,7 @@ export class CreateEquipmentDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(100)
   serialNo?: string | null;
 
   @IsOptional()
@@ -47,6 +55,7 @@ export class CreateEquipmentDto {
   installDate?: string | null;
 
   @IsString()
+  @MaxLength(30)
   deptId: string;
 
   @IsOptional()
@@ -57,6 +66,7 @@ export class CreateEquipmentDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(20)
   inspectionUnit?: string | null;
 
   @IsOptional()
@@ -75,10 +85,12 @@ export class CreateEquipmentDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(20)
   legalInspectionUnit?: string | null;
 
   @IsOptional()
   @IsString()
+  @MaxLength(50)
   attachmentId?: string | null;
 
   @IsOptional()

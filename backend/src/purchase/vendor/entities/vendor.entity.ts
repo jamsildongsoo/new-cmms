@@ -1,7 +1,7 @@
 import { Column, Entity, PrimaryColumn } from 'typeorm';
 import { AuditEntity } from '../../../common/entities/audit.entity';
 
-// 벤더는 회사 공통 구매 기준정보이며 조직/사업장에 종속되지 않는다.
+// 거래처는 회사 공통 구매 기준정보이며 조직/사업장에 종속되지 않는다.
 @Entity('vendor')
 export class Vendor extends AuditEntity {
   @PrimaryColumn({ type: 'varchar', length: 30 })

@@ -1,3 +1,4 @@
+// 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
 import { useEffect, useState, type FormEvent } from 'react'
 import { Navigate, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '@/modules/auth'
@@ -41,6 +42,7 @@ function MaterialEditor({ mode, id }: { mode: FormMode; id?: string }) {
   const [record, setRecord] = useState<Material | null>(null)
   const [options, setOptions] = useState<MaterialOptions>({
     types: [],
+    units: [],
   })
   const [isLoading, setIsLoading] = useState(true)
   const [isReady, setIsReady] = useState(false)
@@ -76,15 +78,15 @@ function MaterialEditor({ mode, id }: { mode: FormMode; id?: string }) {
   if (
     !hasPermission(
       mode === 'create'
-        ? 'material:create'
+        ? 'MATL:create'
         : mode === 'edit'
-          ? 'material:update'
-          : 'material:read',
+          ? 'MATL:update'
+          : 'MATL:read',
     )
   ) {
     return <Navigate to="/material" replace />
   }
-  const readOnly = mode !== 'create' && !hasPermission('material:update')
+  const readOnly = mode !== 'create' && !hasPermission('MATL:update')
   const busy = isLoading || isSaving || attachmentBusy
   const blocked = busy || !isReady
   const update = (key: keyof MaterialForm, value: string) =>
@@ -120,7 +122,7 @@ function MaterialEditor({ mode, id }: { mode: FormMode; id?: string }) {
     if (
       !id ||
       blocked ||
-      !hasPermission('material:delete') ||
+      !hasPermission('MATL:delete') ||
       !window.confirm('이 자재를 삭제하시겠습니까?')
     )
       return
@@ -139,7 +141,12 @@ function MaterialEditor({ mode, id }: { mode: FormMode; id?: string }) {
     const required = ['materialId', 'name', 'typeCode', 'baseUnit'].includes(
       key,
     )
-    const choices = key === 'typeCode' ? options.types : null
+    const choices =
+      key === 'typeCode'
+        ? options.types
+        : key === 'baseUnit'
+          ? (options.units ?? [])
+          : null
     const disabled =
       readOnly ||
       blocked ||
@@ -165,9 +172,7 @@ function MaterialEditor({ mode, id }: { mode: FormMode; id?: string }) {
             onChange={(e) => update(key, e.target.value)}
           >
             <option value="">선택</option>
-            {form[key] && !choices.some((c) => c.value === form[key]) && (
-              <option value={form[key]}>{form[key]} (기존 값)</option>
-            )}
+
             {choices.map((c) => (
               <option key={c.value} value={c.value}>
                 {c.label} ({c.value})
@@ -196,8 +201,18 @@ function MaterialEditor({ mode, id }: { mode: FormMode; id?: string }) {
   return (
     <section className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-base font-semibold text-slate-900">자재 마스터</h1>
-        <div className="flex gap-2">
+        <h1 className="text-lg font-semibold text-slate-900">자재 마스터</h1>
+        <div className="page-actions">
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={busy}
+            onClick={() => {
+              if (confirmLeave()) navigate('/material')
+            }}
+          >
+            목록
+          </Button>
           <Button
             type="button"
             variant="secondary"
@@ -214,29 +229,20 @@ function MaterialEditor({ mode, id }: { mode: FormMode; id?: string }) {
           >
             인쇄
           </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={busy}
-            onClick={() => {
-              if (confirmLeave()) navigate('/material')
-            }}
-          >
-            목록
-          </Button>
-          {!readOnly && (
-            <Button type="submit" form="material-form" disabled={blocked}>
-              저장
-            </Button>
-          )}
-          {mode !== 'create' && hasPermission('material:delete') && (
+          {mode !== 'create' && hasPermission('MATL:delete') && (
             <Button
+              className="sm:ml-2"
               type="button"
               variant="danger"
               disabled={blocked}
               onClick={() => void remove()}
             >
               삭제
+            </Button>
+          )}
+          {!readOnly && (
+            <Button type="submit" form="material-form" disabled={blocked}>
+              저장
             </Button>
           )}
         </div>
@@ -252,16 +258,16 @@ function MaterialEditor({ mode, id }: { mode: FormMode; id?: string }) {
       <form
         id="material-form"
         onSubmit={(e) => void save(e)}
-        className="space-y-4 border border-slate-200 bg-white p-3"
+        className="space-y-4 rounded-lg border border-slate-200 bg-white p-4 md:p-5"
       >
         <div className="grid gap-3 md:grid-cols-2">
           {materialFields.map(renderField)}
         </div>
       </form>
-      <div className="border border-slate-200 bg-white p-3">
+      <div className="rounded-lg border border-slate-200 bg-white p-4 md:p-5">
         <AttachmentManager
           attachmentId={form.attachmentId}
-          refModule="material"
+          refModule="MATL"
           refId={form.materialId.trim()}
           disabled={
             readOnly ||

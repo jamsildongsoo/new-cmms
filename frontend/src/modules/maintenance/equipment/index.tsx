@@ -1,4 +1,4 @@
-export { dateInput, isInspectionOverdue } from './equipmentForm'
+export { isInspectionOverdue } from './equipmentForm'
 import type { RouteObject } from 'react-router-dom'
 import { EquipmentFormPage } from './EquipmentFormPage'
 import { EquipmentListPage } from './EquipmentListPage'

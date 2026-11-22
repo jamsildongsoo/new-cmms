@@ -31,19 +31,26 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       typeof claims.sub !== 'string' ||
       !claims.sub.trim() ||
       claims.sub.length > 50 ||
+      !Number.isInteger(claims.tokenVersion) ||
+      (claims.tokenVersion as number) < 0 ||
       typeof claims.exp !== 'number' ||
       !Number.isFinite(claims.exp) ||
       claims.exp <= Date.now() / 1000
     ) {
-      throw new UnauthorizedException('Invalid token claims');
+      throw new UnauthorizedException(
+        '로그인 정보가 유효하지 않습니다. 다시 로그인해 주세요.',
+      );
     }
     const userContext = await this.authService.buildUserContext(
       claims.companyId,
       claims.sub,
+      claims.tokenVersion as number,
     );
 
     if (!userContext) {
-      throw new UnauthorizedException('Invalid token user');
+      throw new UnauthorizedException(
+        '로그인이 만료되었거나 비밀번호가 변경되었습니다. 다시 로그인해 주세요.',
+      );
     }
 
     return userContext;

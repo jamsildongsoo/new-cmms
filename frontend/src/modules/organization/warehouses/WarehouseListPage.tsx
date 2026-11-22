@@ -1,3 +1,4 @@
+// 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { printDocument } from '@/shared/lib/print'
@@ -14,7 +15,7 @@ export function WarehouseListPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const canCreate = hasPermission('warehouse:create')
+  const canCreate = hasPermission('WHSE:create')
 
   useEffect(() => {
     let active = true
@@ -29,11 +30,11 @@ export function WarehouseListPage() {
 
   return (
     <section className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-base font-semibold text-slate-900">Warehouses</h1>
+          <h1 className="text-lg font-semibold text-slate-900">창고 관리</h1>
         </div>
-        <div className="flex shrink-0 gap-2">
+        <div className="page-actions">
           <Button
             variant="secondary"
             disabled={isLoading}
@@ -55,7 +56,7 @@ export function WarehouseListPage() {
             onClick={() => navigate('/warehouses/new')}
             disabled={!canCreate}
           >
-            신규
+            신규 작성
           </Button>
         </div>
       </div>
@@ -71,7 +72,7 @@ export function WarehouseListPage() {
         columns={[
           {
             key: 'warehouseId',
-            label: 'Warehouse ID',
+            label: '창고번호',
             render: (row) => (
               <Link
                 className="text-blue-700 underline"
@@ -81,15 +82,15 @@ export function WarehouseListPage() {
               </Link>
             ),
           },
-          { key: 'name', label: 'Name', render: (row) => row.name },
+          { key: 'name', label: '명칭', render: (row) => row.name },
           {
             key: 'siteId',
-            label: 'Site ID',
+            label: '사업장코드',
             render: (row) => row.siteId ?? '-',
           },
         ]}
         rows={rows}
-        emptyText={isLoading ? 'Loading...' : 'No warehouses'}
+        emptyText={isLoading ? '불러오는 중…' : '조회된 창고가 없습니다.'}
       />
     </section>
   )

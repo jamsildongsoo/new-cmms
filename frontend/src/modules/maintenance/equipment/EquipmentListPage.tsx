@@ -1,3 +1,7 @@
+import { Pagination } from '@/shared/ui/Pagination'
+import { dateInput } from '@/shared/lib/format'
+// 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
+import { SearchActions } from '@/shared/ui/SearchActions'
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/modules/auth'
@@ -16,11 +20,7 @@ import {
   type EquipmentSearch,
 } from './equipment.api'
 import { EquipmentTree } from './EquipmentTree'
-import {
-  dateInput,
-  inspectionUnits,
-  isInspectionOverdue,
-} from './equipmentForm'
+import { inspectionUnits, isInspectionOverdue } from './equipmentForm'
 export function EquipmentListPage() {
   const navigate = useNavigate(),
     { hasPermission } = useAuth()
@@ -70,7 +70,7 @@ export function EquipmentListPage() {
       active = false
     }
   }, [query])
-  if (!hasPermission('equipment:read')) return <Navigate to="/" replace />
+  if (!hasPermission('EQUIP:read')) return <Navigate to="/" replace />
   const changeQuery = (q: EquipmentSearch) => {
     setLoading(true)
     setError(null)
@@ -94,9 +94,9 @@ export function EquipmentListPage() {
   const displayRows = view === 'tree' ? tree : rows
   return (
     <section className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
-        <h1 className="text-base font-semibold">설비 마스터</h1>
-        <div className="flex gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-lg font-semibold">설비 마스터</h1>
+        <div className="page-actions">
           <Button
             variant="secondary"
             disabled={loading || Boolean(error)}
@@ -138,14 +138,14 @@ export function EquipmentListPage() {
             인쇄
           </Button>
           <Button
-            disabled={!hasPermission('equipment:create')}
+            disabled={!hasPermission('EQUIP:create')}
             onClick={() => navigate('/equipment/new')}
           >
-            신규
+            신규 작성
           </Button>
         </div>
       </div>
-      <div className="flex gap-2">
+      <div className="page-actions">
         <Button
           variant={view === 'list' ? 'primary' : 'secondary'}
           onClick={() => setView('list')}
@@ -159,7 +159,20 @@ export function EquipmentListPage() {
           트리
         </Button>
       </div>
-      <form onSubmit={search} className="grid gap-2 md:grid-cols-4">
+      <form
+        onReset={() => {
+          setFilters({
+            siteId: '',
+            deptId: '',
+            parentEquipmentId: '',
+            searchType: 'name',
+            searchVal: '',
+          })
+          changeQuery({ page: 1 })
+        }}
+        onSubmit={search}
+        className="search-form"
+      >
         <Select
           aria-label="사업장 필터"
           value={filters.siteId}
@@ -198,12 +211,17 @@ export function EquipmentListPage() {
               aria-label="상위 설비 필터"
               value={filters.parentEquipmentId}
               onChange={(e) =>
-                setFilters((v) => ({ ...v, parentEquipmentId: e.target.value }))
+                setFilters((v) => ({
+                  ...v,
+                  parentEquipmentId: e.target.value,
+                }))
               }
             >
               <option value="">전체 상위 설비</option>
               {tree
-                .filter((i) => !filters.siteId || i.siteId === filters.siteId)
+                .filter(
+                  (i) => !filters.siteId || i.siteId === filters.siteId,
+                )
                 .map((i) => (
                   <option key={i.equipmentId} value={i.equipmentId}>
                     {i.equipmentId} / {i.name}
@@ -233,9 +251,7 @@ export function EquipmentListPage() {
             />
           </>
         )}
-        <Button type="submit" variant="secondary" disabled={loading}>
-          조회
-        </Button>
+        <SearchActions loading={loading} />
       </form>
       {error && (
         <p role="alert" className="text-xs text-red-700">
@@ -243,7 +259,7 @@ export function EquipmentListPage() {
         </p>
       )}
       {view === 'tree' ? (
-        <section className="border bg-white p-3">
+        <section className="rounded-lg border border-slate-200 bg-white p-4 md:p-5">
           <Input
             aria-label="설비 트리 검색"
             placeholder="설비번호 또는 설비명 검색"
@@ -251,13 +267,14 @@ export function EquipmentListPage() {
             onChange={(e) => setTreeSearch(e.target.value)}
           />
           {loading ? (
-            <p>조회 중...</p>
+            <p>불러오는 중…</p>
           ) : (
             <>
               {[...new Set(tree.map((i) => i.siteId))].map((site) => (
                 <div key={site} className="my-2">
-                  <h2 className="text-sm font-semibold">
-                    {options.sites.find((s) => s.value === site)?.label ?? site}
+                  <h2 className="text-base font-semibold">
+                    {options.sites.find((s) => s.value === site)?.label ??
+                      site}
                   </h2>
                   <EquipmentTree
                     items={tree.filter((i) => i.siteId === site)}
@@ -274,7 +291,9 @@ export function EquipmentListPage() {
             <div className="min-w-[1300px]">
               <DataTable<Equipment>
                 rows={loading || error ? [] : rows}
-                emptyText={loading ? '조회 중...' : '등록된 설비가 없습니다.'}
+                emptyText={
+                  loading ? '불러오는 중…' : '등록된 설비가 없습니다.'
+                }
                 gridTemplateColumns="110px 1.5fr 1.4fr 90px 90px 90px 80px 100px 110px 110px 110px"
                 columns={[
                   {
@@ -324,12 +343,14 @@ export function EquipmentListPage() {
                   {
                     key: 'pm',
                     label: '예방점검 대상',
-                    render: (r) => (r.pmTargetYn === 'Y' ? '예' : '아니오'),
+                    render: (r) =>
+                      r.pmTargetYn === 'Y' ? '예' : '아니오',
                   },
                   {
                     key: 'permit',
                     label: '허가 대상',
-                    render: (r) => (r.permitTargetYn === 'Y' ? '예' : '아니오'),
+                    render: (r) =>
+                      r.permitTargetYn === 'Y' ? '예' : '아니오',
                   },
                   {
                     key: 'date',
@@ -367,25 +388,14 @@ export function EquipmentListPage() {
               />
             </div>
           </div>
-          <div className="flex justify-end gap-2 text-xs">
-            <span>
-              전체 {total}건 / {query.page} 페이지
-            </span>
-            <Button
-              variant="secondary"
-              disabled={loading || query.page <= 1}
-              onClick={() => changeQuery({ ...query, page: query.page - 1 })}
-            >
-              이전
-            </Button>
-            <Button
-              variant="secondary"
-              disabled={loading || query.page * limit >= total}
-              onClick={() => changeQuery({ ...query, page: query.page + 1 })}
-            >
-              다음
-            </Button>
-          </div>
+          <Pagination
+            page={query.page}
+            limit={limit}
+            total={total}
+            loading={loading}
+            error={Boolean(error)}
+            onChange={(page) => changeQuery({ ...query, page })}
+          />
         </>
       )}
     </section>

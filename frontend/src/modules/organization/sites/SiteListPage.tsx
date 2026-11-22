@@ -1,3 +1,4 @@
+// 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { printDocument } from '@/shared/lib/print'
@@ -14,7 +15,7 @@ export function SiteListPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const canCreate = hasPermission('site:create')
+  const canCreate = hasPermission('SITE:create')
 
   useEffect(() => {
     let active = true
@@ -29,11 +30,11 @@ export function SiteListPage() {
 
   return (
     <section className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-base font-semibold text-slate-900">Sites</h1>
+          <h1 className="text-lg font-semibold text-slate-900">사업장 관리</h1>
         </div>
-        <div className="flex shrink-0 gap-2">
+        <div className="page-actions">
           <Button
             variant="secondary"
             disabled={isLoading}
@@ -48,7 +49,7 @@ export function SiteListPage() {
             인쇄
           </Button>
           <Button onClick={() => navigate('/sites/new')} disabled={!canCreate}>
-            신규
+            신규 작성
           </Button>
         </div>
       </div>
@@ -64,7 +65,7 @@ export function SiteListPage() {
         columns={[
           {
             key: 'siteId',
-            label: 'Site ID',
+            label: '사업장코드',
             render: (row) => (
               <Link
                 className="text-blue-700 underline"
@@ -74,10 +75,10 @@ export function SiteListPage() {
               </Link>
             ),
           },
-          { key: 'name', label: 'Name', render: (row) => row.name },
+          { key: 'name', label: '명칭', render: (row) => row.name },
         ]}
         rows={rows}
-        emptyText={isLoading ? 'Loading...' : 'No sites'}
+        emptyText={isLoading ? '불러오는 중…' : '조회된 사업장이 없습니다.'}
       />
     </section>
   )

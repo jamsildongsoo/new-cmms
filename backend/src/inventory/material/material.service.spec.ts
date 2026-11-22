@@ -44,7 +44,11 @@ function fixture() {
     getManyAndCount: jest.fn(async () => [[row], 1]),
   };
   const types = {
-    find: jest.fn(async () => [{ codeItemId: 'PART', name: '부품' }]),
+    find: jest.fn(async (query: { where: { codeId: string } }) =>
+      query.where.codeId === 'UNIT'
+        ? [{ codeItemId: 'EA', name: '개' }]
+        : [{ codeItemId: 'PART', name: '부품' }],
+    ),
   };
   const repository = {
     findOneBy: jest.fn(
@@ -103,7 +107,7 @@ describe('Material master', () => {
     expect(saved).not.toHaveProperty('status');
     expect(codes.assertValidItem).toHaveBeenCalledWith({
       companyId: 'A',
-      codeId: 'MATERIAL_TYPE',
+      codeId: 'MATL_TYPE',
       codeItemId: 'PART',
     });
   });
@@ -223,14 +227,15 @@ describe('Material master', () => {
       service.update(actor, 'MAT-1', { baseUnit: '  ' }),
     ).rejects.toMatchObject({ status: 400 });
   });
-  it('provides material type choices from the current company', async () => {
+  it('provides material type and common UNIT choices from the current company', async () => {
     const { service, types } = fixture();
     expect(await service.getOptions(actor)).toEqual({
       types: [{ value: 'PART', label: '부품' }],
+      units: [{ value: 'EA', label: '개' }],
     });
     expect(types.find).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { companyId: 'A', codeId: 'MATERIAL_TYPE' },
+        where: { companyId: 'A', codeId: 'MATL_TYPE' },
       }),
     );
   });
@@ -285,6 +290,6 @@ describe('Material controller RBAC', () => {
         REQUIRED_PERMISSIONS_KEY,
         MaterialController.prototype[method],
       ),
-    ).toEqual([`material:${action}`]);
+    ).toEqual([`MATL:${action}`]);
   });
 });

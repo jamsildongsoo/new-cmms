@@ -1,11 +1,14 @@
+// 결재 코드 원본: backend/src/approvals/approval.constant.ts.
+// 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
+import type { ApprovalStepType, ApprovalStepResult } from './approval.constant'
 import type { AuditFields } from '@/shared/types/audit'
-import type { DocumentStatus } from '@/shared/types/document'
+import type { DocumentStatus } from '@/shared/constants/document-status'
 import { http } from '@/shared/api/http'
 
 export type ApprovalBox =
   'submit' | 'pending' | 'processed' | 'closed' | 'reference'
 
-export type ApprovalStepType = 'SUBMITTER' | 'APPROVER' | 'AGREE' | 'REFERENCE'
+export type { ApprovalStepType } from './approval.constant'
 
 export interface ApprovalStep {
   companyId: string
@@ -18,12 +21,25 @@ export interface ApprovalStep {
   deptName: string | null
   title: string | null
   position: string | null
-  status: string | null
+  status: ApprovalStepResult | null
   comment: string | null
   actedAt: string | null
 }
 
+// API 계약: backend/src/approvals/dto/approval-response.dto.ts와 함께 수정한다.
+export type ApprovalListItem = Pick<
+  Approval,
+  'approvalId' | 'documentNo' | 'title' | 'submitterId' | 'status' | 'createdAt'
+>
+export interface ApprovalPage {
+  items: ApprovalListItem[]
+  total: number
+  page: number
+  limit: number
+}
+
 export interface Approval extends AuditFields {
+  sourceSyncWarning?: string
   sourceAttachmentIds?: string[]
   companyId: string
   approvalId: string
@@ -88,8 +104,13 @@ export interface ApprovalActionPayload {
   comment?: string | null
 }
 
-export async function getApprovalBox(box: ApprovalBox) {
-  const response = await http.get<Approval[]>(`/approvals/boxes/${box}`)
+export async function getApprovalBox(
+  box: ApprovalBox,
+  params: { page: number; limit: number; search?: string; status?: string },
+) {
+  const response = await http.get<ApprovalPage>(`/approvals/boxes/${box}`, {
+    params,
+  })
   return response.data
 }
 
@@ -98,14 +119,8 @@ export async function getApproval(approvalId: string) {
   return response.data
 }
 
-export async function createApproval(
-  payload: ApprovalCreatePayload,
-  requestKey: string,
-) {
-  const response = await http.post<Approval>('/approvals', payload, {
-    headers: { 'Idempotency-Key': requestKey },
-  })
-  return response.data
+export async function createApproval(payload: ApprovalCreatePayload) {
+  return (await http.post<Approval>('/approvals', payload)).data
 }
 
 export async function updateApproval(

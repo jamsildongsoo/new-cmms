@@ -1,3 +1,4 @@
+// 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { printDocument } from '@/shared/lib/print'
@@ -14,7 +15,7 @@ export function DepartmentListPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const canCreate = hasPermission('department:create')
+  const canCreate = hasPermission('DEPT:create')
 
   useEffect(() => {
     let active = true
@@ -29,13 +30,11 @@ export function DepartmentListPage() {
 
   return (
     <section className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-base font-semibold text-slate-900">
-            Departments
-          </h1>
+          <h1 className="text-lg font-semibold text-slate-900">부서 관리</h1>
         </div>
-        <div className="flex shrink-0 gap-2">
+        <div className="page-actions">
           <Button
             variant="secondary"
             disabled={isLoading}
@@ -57,7 +56,7 @@ export function DepartmentListPage() {
             onClick={() => navigate('/departments/new')}
             disabled={!canCreate}
           >
-            신규
+            신규 작성
           </Button>
         </div>
       </div>
@@ -73,7 +72,7 @@ export function DepartmentListPage() {
         columns={[
           {
             key: 'deptId',
-            label: 'Department ID',
+            label: '부서코드',
             render: (row) => (
               <Link
                 className="text-blue-700 underline"
@@ -83,15 +82,15 @@ export function DepartmentListPage() {
               </Link>
             ),
           },
-          { key: 'name', label: 'Name', render: (row) => row.name },
+          { key: 'name', label: '명칭', render: (row) => row.name },
           {
             key: 'parentDeptId',
-            label: 'Parent',
+            label: '상위 항목',
             render: (row) => row.parentDeptId ?? '-',
           },
         ]}
         rows={rows}
-        emptyText={isLoading ? 'Loading...' : 'No departments'}
+        emptyText={isLoading ? '불러오는 중…' : '조회된 부서가 없습니다.'}
       />
     </section>
   )

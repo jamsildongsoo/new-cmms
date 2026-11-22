@@ -3,7 +3,6 @@ import type { ReportRow } from '../common/report.types'
 export interface Period {
   yearMonth: string
   locked: boolean
-  summaryDirty: boolean
   createdBy: string
   createdAt: string
   updatedBy: string | null
@@ -12,9 +11,6 @@ export interface Period {
 export interface MonthlyReport {
   period: Period | null
   warehouses: ReportRow[]
-  sites: ReportRow[]
-  transits: ReportRow[]
-  draftCount: number
   nextMonth: string
 }
 export const monthlyClosingApi = {

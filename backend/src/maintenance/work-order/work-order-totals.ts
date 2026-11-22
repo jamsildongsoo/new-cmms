@@ -1,3 +1,4 @@
+import { scaled } from '../../common/utils/decimal.util';
 import { BadRequestException } from '@nestjs/common';
 import {
   CostItem,
@@ -28,9 +29,10 @@ function safe(value: bigint): number {
 export function materialAmount(quantity: number, price: number) {
   nonNegative(quantity, 'quantity');
   nonNegative(price, 'unitPrice', 2);
-  const scaled = (value: number, digits: number) =>
-    BigInt(value.toFixed(digits).replace('.', ''));
-  return safe((scaled(quantity, 4) * scaled(price, 2) + 500000n) / 1000000n);
+  return safe(
+    (scaled(quantity.toFixed(4), 4) * scaled(price.toFixed(2), 2) + 500000n) /
+      1000000n,
+  );
 }
 export function workOrderTotals(
   labor: LaborItem[],

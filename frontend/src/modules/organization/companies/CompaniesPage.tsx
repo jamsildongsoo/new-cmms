@@ -1,3 +1,4 @@
+// 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
 import { useEffect, useState, type FormEvent } from 'react'
 import { useAuth } from '@/modules/auth'
 import { toMessage } from '@/shared/api/errors'
@@ -11,7 +12,7 @@ import { getCompany, updateCompany, type Company } from './companies.api'
 export function CompaniesPage() {
   const { hasPermission } = useAuth()
   const [company, setCompany] = useState<Company | null>(null)
-  const editing = hasPermission('company:update')
+  const editing = hasPermission('COMP:update')
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -32,7 +33,7 @@ export function CompaniesPage() {
 
   async function save(event: FormEvent) {
     event.preventDefault()
-    if (!company || !editing || isSaving || !hasPermission('company:update'))
+    if (!company || !editing || isSaving || !hasPermission('COMP:update'))
       return
     setIsSaving(true)
     setError(null)
@@ -48,7 +49,7 @@ export function CompaniesPage() {
           note,
         }),
       )
-      setNotice('Company updated')
+      setNotice('회사 정보를 저장했습니다.')
     } catch (e) {
       setError(toMessage(e))
     } finally {
@@ -61,9 +62,9 @@ export function CompaniesPage() {
 
   return (
     <section className="space-y-3">
-      <div className="flex items-center justify-between gap-2">
-        <h1 className="text-base font-semibold">회사 정보</h1>
-        <div className="flex gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-lg font-semibold">회사 정보</h1>
+        <div className="page-actions">
           <Button
             type="button"
             variant="secondary"
@@ -97,8 +98,8 @@ export function CompaniesPage() {
         </div>
       </div>
       <p className="text-xs text-slate-500">
-        Company code is managed during setup. Company information can be edited
-        here.
+        회사 코드는 초기 설정에서 관리합니다. 이 화면에서는 회사 정보를 수정할
+        수 있습니다.
       </p>
       {error && (
         <div
@@ -113,28 +114,30 @@ export function CompaniesPage() {
         <form
           id="company-form"
           onSubmit={(event) => void save(event)}
-          className="space-y-3 border border-slate-200 bg-white p-3"
+          className="space-y-3 rounded-lg border border-slate-200 bg-white p-4 md:p-5"
         >
           <div className="grid gap-3 md:grid-cols-2">
-            <Field label="Company ID">
+            <Field label="회사코드">
               <Input value={company.companyId} disabled />
             </Field>
-            <Field label="Company Name" required>
+            <Field label="회사명" required>
               <Input
                 required
                 value={company.name}
+                maxLength={100}
                 disabled={!editing || isSaving}
                 onChange={(e) => update('name', e.target.value)}
               />
             </Field>
-            <Field label="Registration Number">
+            <Field label="사업자등록번호">
               <Input
                 value={company.registrationNumber ?? ''}
+                maxLength={50}
                 disabled={!editing || isSaving}
                 onChange={(e) => update('registrationNumber', e.target.value)}
               />
             </Field>
-            <Field label="Contact Name">
+            <Field label="담당자명">
               <Input
                 value={company.contactName ?? ''}
                 maxLength={100}
@@ -142,7 +145,7 @@ export function CompaniesPage() {
                 onChange={(e) => update('contactName', e.target.value)}
               />
             </Field>
-            <Field label="Phone Number">
+            <Field label="전화번호">
               <Input
                 value={company.phoneNumber ?? ''}
                 maxLength={50}
@@ -150,7 +153,7 @@ export function CompaniesPage() {
                 onChange={(e) => update('phoneNumber', e.target.value)}
               />
             </Field>
-            <Field label="Note" className="md:col-span-2">
+            <Field label="비고" className="md:col-span-2">
               <Textarea
                 value={company.note ?? ''}
                 disabled={!editing || isSaving}

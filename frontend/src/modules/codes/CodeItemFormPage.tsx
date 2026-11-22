@@ -1,18 +1,20 @@
+// 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
 import { Edit3, Save, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { toMessage } from '@/shared/api/errors'
 import {
-  createCodeItem,
-  getCodeItem,
-  updateCodeItem,
-} from './codes.api'
+  Navigate,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from 'react-router-dom'
+import { toMessage } from '@/shared/api/errors'
+import { createCodeItem, getCodeItem, updateCodeItem } from './codes.api'
 import { useAuth } from '../auth/useAuth'
 import { Button } from '@/shared/ui/Button'
 import { Field } from '@/shared/ui/Field'
 import { Input } from '@/shared/ui/Input'
-import { CODES, isCodeId } from '@/shared/constants/code'
+import { useMetadata } from '@/shared/metadata/metadata'
 import type { FormMode } from '@/shared/types/form'
 
 interface CodeItemFormState {
@@ -24,20 +26,24 @@ interface CodeItemFormState {
 const emptyForm: CodeItemFormState = { codeItemId: '', name: '', sortOrder: '' }
 
 const titles: Record<FormMode, string> = {
-  create: 'New Code Item',
-  edit: 'Edit Code Item',
-  view: 'View Code Item',
+  create: '공통코드 신규 작성',
+  edit: '공통코드 수정',
+  view: '공통코드 조회',
 }
 
 export function CodeItemFormPage({ mode }: { mode: FormMode }) {
+  const { codeGroups } = useMetadata()
+  const isCodeGroupId = (value: string | null | undefined): value is string =>
+    typeof value === 'string' && codeGroups.some((g) => g.codeId === value)
   const navigate = useNavigate()
   const { hasPermission } = useAuth()
   const params = useParams()
   const [searchParams] = useSearchParams()
 
-  const paramCodeId = mode === 'create' ? searchParams.get('codeId') : params.codeId
+  const paramCodeId =
+    mode === 'create' ? searchParams.get('codeId') : params.codeId
   const codeItemId = params.codeItemId
-  const codeId = isCodeId(paramCodeId) ? paramCodeId : null
+  const codeId = isCodeGroupId(paramCodeId) ? paramCodeId : null
   const listPath = `/code-items?codeId=${codeId ?? ''}`
 
   const [form, setForm] = useState<CodeItemFormState>(emptyForm)
@@ -71,12 +77,17 @@ export function CodeItemFormPage({ mode }: { mode: FormMode }) {
     return <Navigate to="/code-items" replace />
   }
 
-  const requiredPermission = mode === 'create' ? 'code:create' : mode === 'edit' ? 'code:update' : 'code:read'
+  const requiredPermission =
+    mode === 'create'
+      ? 'CODE:create'
+      : mode === 'edit'
+        ? 'CODE:update'
+        : 'CODE:read'
   if (!hasPermission(requiredPermission)) {
     return <Navigate to={listPath} replace />
   }
 
-  const codeName = CODES.find((code) => code.codeId === codeId)?.name
+  const codeName = codeGroups.find((code) => code.codeId === codeId)?.label
   const readOnly = mode === 'view'
 
   const save = async (event: FormEvent<HTMLFormElement>) => {
@@ -106,7 +117,7 @@ export function CodeItemFormPage({ mode }: { mode: FormMode }) {
   return (
     <section className="space-y-3">
       <div>
-        <h1 className="text-base font-semibold text-slate-900">{titles[mode]}</h1>
+        <h1 className="text-lg font-semibold text-slate-900">{titles[mode]}</h1>
         <p className="text-xs text-slate-500">
           {codeId} - {codeName}
         </p>
@@ -119,11 +130,11 @@ export function CodeItemFormPage({ mode }: { mode: FormMode }) {
       )}
 
       <form
-        className="border border-slate-200 bg-white p-3"
+        className="rounded-lg border border-slate-200 bg-white p-4 md:p-5"
         onSubmit={(event) => void save(event)}
       >
         <div className="grid gap-3 md:grid-cols-2">
-          <Field label="Item ID" required>
+          <Field label="항목 ID" required>
             <Input
               value={form.codeItemId}
               disabled={mode !== 'create' || isLoading}
@@ -131,7 +142,7 @@ export function CodeItemFormPage({ mode }: { mode: FormMode }) {
               required
             />
           </Field>
-          <Field label="Name" required>
+          <Field label="명칭" required>
             <Input
               value={form.name}
               disabled={readOnly || isLoading}
@@ -139,7 +150,7 @@ export function CodeItemFormPage({ mode }: { mode: FormMode }) {
               required
             />
           </Field>
-          <Field label="Sort Order">
+          <Field label="정렬 순서">
             <Input
               type="number"
               min={0}
@@ -157,21 +168,21 @@ export function CodeItemFormPage({ mode }: { mode: FormMode }) {
             disabled={isSaving}
           >
             <X className="h-4 w-4" />
-            {readOnly ? 'Close' : 'Cancel'}
+            {readOnly ? '닫기' : '취소'}
           </Button>
           {readOnly ? (
             <Button
               type="button"
               onClick={() => navigate('edit')}
-              disabled={!hasPermission('code:update') || isLoading}
+              disabled={!hasPermission('CODE:update') || isLoading}
             >
               <Edit3 className="h-4 w-4" />
-              Edit
+              수정
             </Button>
           ) : (
             <Button type="submit" disabled={isSaving || isLoading}>
               <Save className="h-4 w-4" />
-              Save
+              저장
             </Button>
           )}
         </div>

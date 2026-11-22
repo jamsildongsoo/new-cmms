@@ -1,3 +1,7 @@
+import { Pagination } from '@/shared/ui/Pagination'
+import { dateInput } from '@/shared/lib/format'
+// 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
+import { SearchActions } from '@/shared/ui/SearchActions'
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/modules/auth'
@@ -6,50 +10,57 @@ import { printDocument } from '@/shared/lib/print'
 import { Button } from '@/shared/ui/Button'
 import { DataTable } from '@/shared/ui/DataTable'
 import { Input } from '@/shared/ui/Input'
-import { Select } from '@/shared/ui/Select'
 import { StatusBadge } from '@/shared/ui/StatusBadge'
 import {
   getWorkOrders,
-  type WorkOrder,
+  type WorkOrderListItem,
   type WorkOrderSearch,
 } from './workOrder.api'
-import { dateInput, kindName, money } from './workOrderForm'
+import { kindName, money } from './workOrderForm'
 
 export function WorkOrderListPage() {
   const navigate = useNavigate()
   const { hasPermission } = useAuth()
-  const [rows, setRows] = useState<WorkOrder[]>([])
-  const [search, setSearch] = useState<WorkOrderSearch>({ searchType: 'title' })
-  const [query, setQuery] = useState<WorkOrderSearch>({})
+  const [rows, setRows] = useState<WorkOrderListItem[]>([])
+  const [search, setSearch] = useState('')
+  const [query, setQuery] = useState<WorkOrderSearch>({ page: 1 })
+  const [total, setTotal] = useState(0)
+  const [limit, setLimit] = useState(20)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   useEffect(() => {
     let active = true
     getWorkOrders(query)
-      .then((result) => active && setRows(result))
-      .catch((e) => active && setError(toMessage(e)))
+      .then((data) => {
+        if (!active) return
+        setRows(data.items)
+        setTotal(data.total)
+        setLimit(data.limit)
+        setError(null)
+      })
+      .catch((e) => {
+        if (!active) return
+        setRows([])
+        setTotal(0)
+        setError(toMessage(e))
+      })
       .finally(() => active && setLoading(false))
     return () => {
       active = false
     }
   }, [query])
-  if (!hasPermission('work_order:read')) return <Navigate to="/" replace />
+  if (!hasPermission('WRKORD:read')) return <Navigate to="/" replace />
   const filter = (e: FormEvent) => {
     e.preventDefault()
     setLoading(true)
     setError(null)
-    setQuery({
-      ...search,
-      workDateFrom: search.workDateFrom?.replaceAll('-', '') || undefined,
-      workDateTo: search.workDateTo?.replaceAll('-', '') || undefined,
-      searchVal: search.searchVal?.trim() || undefined,
-    })
+    setQuery({ page: 1, search: search.trim() || undefined })
   }
   return (
     <section className="space-y-3">
-      <div className="flex items-center justify-between gap-2">
-        <h1 className="text-base font-semibold">작업 오더</h1>
-        <div className="flex gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-lg font-semibold">작업 오더</h1>
+        <div className="page-actions">
           <Button
             variant="secondary"
             disabled={loading || Boolean(error)}
@@ -79,100 +90,34 @@ export function WorkOrderListPage() {
               })
             }
           >
-            인쇄
+            현재 페이지 인쇄
           </Button>
           <Button
-            disabled={!hasPermission('work_order:create')}
+            disabled={!hasPermission('WRKORD:create')}
             onClick={() => navigate('/work-order/new')}
           >
-            신규
+            신규 작성
           </Button>
         </div>
       </div>
       <form
+        className="search-form"
         onSubmit={filter}
-        className="grid gap-2 sm:grid-cols-3 lg:grid-cols-7"
+        onReset={() => {
+          setSearch('')
+          setLoading(true)
+          setError(null)
+          setQuery({ page: 1 })
+        }}
       >
-        <Select
-          aria-label="계획/실적 필터"
-          value={search.orderKind ?? ''}
-          onChange={(e) =>
-            setSearch((s) => ({
-              ...s,
-              orderKind:
-                (e.target.value as WorkOrderSearch['orderKind']) || undefined,
-            }))
-          }
-        >
-          <option value="">전체 구분</option>
-          <option value="PLAN">계획</option>
-          <option value="ACTUAL">실적</option>
-        </Select>
-        <Select
-          aria-label="상태 필터"
-          value={search.status ?? ''}
-          onChange={(e) =>
-            setSearch((s) => ({
-              ...s,
-              status:
-                (e.target.value as WorkOrderSearch['status']) || undefined,
-            }))
-          }
-        >
-          <option value="">전체 상태</option>
-          {[
-            ['D', '작성'],
-            ['P', '진행'],
-            ['C', '완결'],
-            ['R', '반려'],
-            ['X', '취소'],
-          ].map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </Select>
-        <Select
-          aria-label="검색 기준"
-          value={search.searchType ?? 'title'}
-          onChange={(e) =>
-            setSearch((s) => ({
-              ...s,
-              searchType: e.target.value as WorkOrderSearch['searchType'],
-            }))
-          }
-        >
-          <option value="title">작업명</option>
-          <option value="documentNo">관리번호</option>
-          <option value="equipmentId">설비번호</option>
-        </Select>
         <Input
           aria-label="검색어"
-          value={search.searchVal ?? ''}
-          onChange={(e) =>
-            setSearch((s) => ({ ...s, searchVal: e.target.value }))
-          }
+          placeholder="문서번호·관리번호·제목·설비번호"
+          maxLength={200}
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
         />
-        <Input
-          aria-label="작업일 시작"
-          type="date"
-          value={search.workDateFrom ?? ''}
-          onChange={(e) =>
-            setSearch((s) => ({ ...s, workDateFrom: e.target.value }))
-          }
-        />
-        <Input
-          aria-label="작업일 종료"
-          type="date"
-          min={search.workDateFrom}
-          value={search.workDateTo ?? ''}
-          onChange={(e) =>
-            setSearch((s) => ({ ...s, workDateTo: e.target.value }))
-          }
-        />
-        <Button variant="secondary" type="submit" disabled={loading}>
-          조회
-        </Button>
+        <SearchActions loading={loading} />
       </form>
       {error && (
         <div role="alert" className="text-xs text-red-700">
@@ -180,13 +125,13 @@ export function WorkOrderListPage() {
         </div>
       )}
       <div className="overflow-x-auto">
-        <div className="min-w-[800px]">
-          <DataTable<WorkOrder>
-            gridTemplateColumns="190px 70px 120px 1fr 120px 110px 110px 70px"
+        <div className="min-w-[1100px]">
+          <DataTable<WorkOrderListItem>
+            gridTemplateColumns="70px 200px 150px minmax(180px,1fr) 120px 110px 110px 70px"
             rows={loading || error ? [] : rows}
             emptyText={
               loading
-                ? '조회 중...'
+                ? '불러오는 중…'
                 : error
                   ? '조회에 실패했습니다.'
                   : '등록된 작업 오더가 없습니다.'
@@ -243,6 +188,17 @@ export function WorkOrderListPage() {
           />
         </div>
       </div>
+      <Pagination
+        page={query.page ?? 1}
+        limit={limit}
+        total={total}
+        loading={loading}
+        error={Boolean(error)}
+        onChange={(page) => {
+          setLoading(true)
+          setQuery((value) => ({ ...value, page }))
+        }}
+      />
     </section>
   )
 }

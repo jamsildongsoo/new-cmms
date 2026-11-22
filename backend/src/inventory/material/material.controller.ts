@@ -15,7 +15,7 @@ import { RequirePermission } from '../../auth/decorators/require-permissions.dec
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import type { UserContext } from '../../auth/types/user-context.type';
-import { AppModuleKey } from '../../common/constants/modules';
+import { ModuleCode } from '../../common/constants/modules';
 import { PermissionAction } from '../../common/constants/permissions';
 import { CreateMaterialDto } from './dto/create-material.dto';
 import { SearchMaterialDto } from './dto/search-material.dto';
@@ -31,20 +31,20 @@ export class MaterialController {
   ) {}
 
   // List material with optional module-specific search.
-  @RequirePermission(AppModuleKey.MATERIAL, PermissionAction.READ)
+  @RequirePermission(ModuleCode.MATL, PermissionAction.READ)
   @Get()
   findAll(@CurrentUser() user: UserContext, @Query() query: SearchMaterialDto) {
     return this.materialService.findAll(user, query);
   }
 
-  @RequirePermission(AppModuleKey.MATERIAL, PermissionAction.READ)
+  @RequirePermission(ModuleCode.MATL, PermissionAction.READ)
   @Get('options')
   getOptions(@CurrentUser() user: UserContext) {
     return this.materialService.getOptions(user);
   }
 
   // Get one material master record.
-  @RequirePermission(AppModuleKey.MATERIAL, PermissionAction.READ)
+  @RequirePermission(ModuleCode.MATL, PermissionAction.READ)
   @Get(':materialId')
   findOne(
     @CurrentUser() user: UserContext,
@@ -54,12 +54,12 @@ export class MaterialController {
   }
 
   // Create one material master record.
-  @RequirePermission(AppModuleKey.MATERIAL, PermissionAction.CREATE)
+  @RequirePermission(ModuleCode.MATL, PermissionAction.CREATE)
   @Post()
   create(@CurrentUser() user: UserContext, @Body() dto: CreateMaterialDto) {
     return this.numbering.saveDocument(
       user,
-      AppModuleKey.MATERIAL,
+      ModuleCode.MATL,
       dto.materialId.trim(),
       dto.attachmentId,
       () => this.materialService.create(user, dto),
@@ -67,7 +67,7 @@ export class MaterialController {
   }
 
   // Update one material master record.
-  @RequirePermission(AppModuleKey.MATERIAL, PermissionAction.UPDATE)
+  @RequirePermission(ModuleCode.MATL, PermissionAction.UPDATE)
   @Patch(':materialId')
   update(
     @CurrentUser() user: UserContext,
@@ -76,7 +76,7 @@ export class MaterialController {
   ) {
     return this.numbering.saveDocument(
       user,
-      AppModuleKey.MATERIAL,
+      ModuleCode.MATL,
       materialId,
       dto.attachmentId,
       () => this.materialService.update(user, materialId, dto),
@@ -84,7 +84,7 @@ export class MaterialController {
   }
 
   // Soft-delete one material master record.
-  @RequirePermission(AppModuleKey.MATERIAL, PermissionAction.DELETE)
+  @RequirePermission(ModuleCode.MATL, PermissionAction.DELETE)
   @Delete(':materialId')
   remove(
     @CurrentUser() user: UserContext,

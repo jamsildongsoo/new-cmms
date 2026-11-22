@@ -1,13 +1,8 @@
 import { AuditEntity } from '../../../common/entities/audit.entity';
 import { Column, Entity, PrimaryColumn } from 'typeorm';
 
-export const AccessScope = {
-  OWN_DEPARTMENT: 'OWN_DEPARTMENT',
-  OWN_SITE: 'OWN_SITE',
-  COMPANY_ALL: 'COMPANY_ALL',
-} as const;
-
-export type AccessScope = (typeof AccessScope)[keyof typeof AccessScope];
+import { AccessScope } from '../user.constant';
+export { AccessScope } from '../user.constant';
 
 @Entity('user')
 export class User extends AuditEntity {
@@ -19,6 +14,9 @@ export class User extends AuditEntity {
 
   @Column({ type: 'varchar', length: 255 })
   passwordHash: string;
+
+  @Column({ type: 'integer', default: 0 })
+  tokenVersion: number;
 
   @Column({ type: 'varchar', length: 100 })
   name: string;

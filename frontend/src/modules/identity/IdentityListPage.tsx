@@ -1,3 +1,4 @@
+// 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/modules/auth'
@@ -48,31 +49,29 @@ export function IdentityListPage({ resource }: { resource: Resource }) {
     },
     {
       key: 'name',
-      label: 'Name',
+      label: '명칭',
       render: (row: IdentityRow) => String(row.name ?? ''),
     },
     ...(resource === 'users'
       ? [
           {
             key: 'site',
-            label: 'Site',
-            render: (row: IdentityRow) =>
-              `${row.siteName || row.siteId || '-'}${row.siteDeleted ? ' (deleted)' : ''}`,
+            label: '사업장',
+            render: (row: IdentityRow) => String(row.siteName || ''),
           },
           {
             key: 'department',
-            label: 'Department',
-            render: (row: IdentityRow) =>
-              `${row.deptName || row.deptId || '-'}${row.deptDeleted ? ' (deleted)' : ''}`,
+            label: '부서',
+            render: (row: IdentityRow) => String(row.deptName || ''),
           },
         ]
       : []),
   ]
   return (
     <section className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h1 className="text-base font-semibold">{config.title}</h1>
-        <div className="flex gap-2">
+      <div className="flex flex-wrap items-center justify-between">
+        <h1 className="text-lg font-semibold">{config.title}</h1>
+        <div className="page-actions">
           <Button
             variant="secondary"
             disabled={loading}
@@ -85,7 +84,12 @@ export function IdentityListPage({ resource }: { resource: Resource }) {
                     : [config.fields[0].label, '명칭'],
                 rows: rows.map((row) =>
                   resource === 'users'
-                    ? [String(row[config.idKey]), String(row.name ?? ''), String(row.siteName || row.siteId || ''), String(row.deptName || row.deptId || '')]
+                    ? [
+                        String(row[config.idKey]),
+                        String(row.name ?? ''),
+                        String(row.siteName || row.siteId || ''),
+                        String(row.deptName || row.deptId || ''),
+                      ]
                     : [String(row[config.idKey]), String(row.name ?? '')],
                 ),
               })
@@ -97,7 +101,7 @@ export function IdentityListPage({ resource }: { resource: Resource }) {
             disabled={!hasPermission(`${config.permission}:create`)}
             onClick={() => navigate(`/${resource}/new`)}
           >
-            신규
+            신규 작성
           </Button>
         </div>
       </div>
@@ -112,7 +116,7 @@ export function IdentityListPage({ resource }: { resource: Resource }) {
         gridTemplateColumns={
           resource === 'users' ? '140px 1fr 1fr 1fr' : '180px 1fr'
         }
-        emptyText={loading ? 'Loading...' : `No ${resource}`}
+        emptyText={loading ? '불러오는 중…' : '조회된 내역이 없습니다.'}
       />
     </section>
   )

@@ -1,3 +1,6 @@
+import { formatStockValue } from './report-format'
+import { useMetadata } from '@/shared/metadata/metadata'
+
 import { DataTable } from '@/shared/ui/DataTable'
 import type { ReportRow } from './report.types'
 export type ReportColumn = [string, string]
@@ -10,9 +13,10 @@ export function ReportTable({
   rows: ReportRow[]
   columns: ReportColumn[]
 }) {
+  const { numericPrecision } = useMetadata()
   return (
     <section className="space-y-2">
-      <h2 className="text-sm font-semibold">{title}</h2>
+      <h2 className="text-base font-semibold">{title}</h2>
       <div className="overflow-x-auto">
         <div style={{ minWidth: columns.length * 110 }}>
           <DataTable<ReportRow>
@@ -24,7 +28,8 @@ export function ReportTable({
             columns={columns.map(([key, label]) => ({
               key,
               label,
-              render: (r) => String(r[key] ?? ''),
+              render: (r) =>
+                formatStockValue(key, r[key], numericPrecision),
             }))}
           />
         </div>

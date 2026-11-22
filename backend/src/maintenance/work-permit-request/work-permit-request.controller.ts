@@ -1,5 +1,5 @@
+import { SearchPermitDto } from '../work-permit/dto/search-permit.dto';
 import { NumberingService } from '../../numbering/numbering.service';
-import { Headers } from '@nestjs/common';
 import {
   Body,
   Controller,
@@ -8,6 +8,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
@@ -15,7 +16,7 @@ import { RequirePermission } from '../../auth/decorators/require-permissions.dec
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import type { UserContext } from '../../auth/types/user-context.type';
-import { AppModuleKey } from '../../common/constants/modules';
+import { ModuleCode } from '../../common/constants/modules';
 import { PermissionAction } from '../../common/constants/permissions';
 import {
   CreatePermitRequestDto,
@@ -23,6 +24,7 @@ import {
 } from './dto/work-permit-request.dto';
 import { WorkPermitRequestService } from './work-permit-request.service';
 
+/** 작업허가요청 API. 신청 완료는 허가요청의 확정이며 작업허가서 발행·전자결재와 구분한다. */
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('work-permit-request')
 export class WorkPermitRequestController {
@@ -31,13 +33,13 @@ export class WorkPermitRequestController {
     private readonly service: WorkPermitRequestService,
   ) {}
 
-  @RequirePermission(AppModuleKey.WORK_PERMIT_REQUEST, PermissionAction.READ)
+  @RequirePermission(ModuleCode.PERREQ, PermissionAction.READ)
   @Get()
-  findAll(@CurrentUser() user: UserContext) {
-    return this.service.findAll(user);
+  findAll(@CurrentUser() user: UserContext, @Query() query: SearchPermitDto) {
+    return this.service.findAll(user, query);
   }
 
-  @RequirePermission(AppModuleKey.WORK_PERMIT_REQUEST, PermissionAction.READ)
+  @RequirePermission(ModuleCode.PERREQ, PermissionAction.READ)
   @Get(':workPermitRequestId')
   findOne(
     @CurrentUser() user: UserContext,
@@ -46,28 +48,25 @@ export class WorkPermitRequestController {
     return this.service.findOne(user, workPermitRequestId);
   }
 
-  @RequirePermission(AppModuleKey.WORK_PERMIT_REQUEST, PermissionAction.CREATE)
+  @RequirePermission(ModuleCode.PERREQ, PermissionAction.CREATE)
   @Post()
   create(
     @CurrentUser() user: UserContext,
     @Body() dto: CreatePermitRequestDto,
-    @Headers('idempotency-key') requestKey: string,
   ) {
     return this.numbering.createDocument(
       user,
-      AppModuleKey.WORK_PERMIT_REQUEST,
-      requestKey,
+      ModuleCode.PERREQ,
       (documentId) =>
         this.service.create(
           user,
           Object.assign({}, dto, { workPermitRequestId: documentId }),
         ),
-      (documentId) => this.service.findOne(user, documentId),
       dto.attachmentId,
     );
   }
 
-  @RequirePermission(AppModuleKey.WORK_PERMIT_REQUEST, PermissionAction.UPDATE)
+  @RequirePermission(ModuleCode.PERREQ, PermissionAction.UPDATE)
   @Patch(':workPermitRequestId')
   update(
     @CurrentUser() user: UserContext,
@@ -76,14 +75,14 @@ export class WorkPermitRequestController {
   ) {
     return this.numbering.saveDocument(
       user,
-      AppModuleKey.WORK_PERMIT_REQUEST,
+      ModuleCode.PERREQ,
       workPermitRequestId,
       dto.attachmentId,
       () => this.service.update(user, workPermitRequestId, dto),
     );
   }
 
-  @RequirePermission(AppModuleKey.WORK_PERMIT_REQUEST, PermissionAction.DELETE)
+  @RequirePermission(ModuleCode.PERREQ, PermissionAction.DELETE)
   @Delete(':workPermitRequestId')
   remove(
     @CurrentUser() user: UserContext,
@@ -91,7 +90,7 @@ export class WorkPermitRequestController {
   ) {
     return this.service.remove(user, workPermitRequestId);
   }
-  @RequirePermission(AppModuleKey.WORK_PERMIT_REQUEST, PermissionAction.UPDATE)
+  @RequirePermission(ModuleCode.PERREQ, PermissionAction.UPDATE)
   @Post(':workPermitRequestId/submit')
   submit(
     @CurrentUser() user: UserContext,

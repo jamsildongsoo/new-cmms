@@ -1,3 +1,4 @@
+// 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Navigate, useNavigate, useParams } from 'react-router-dom'
@@ -103,15 +104,15 @@ function WarehouseEditor({
 
   const requiredPermission =
     mode === 'create'
-      ? 'warehouse:create'
+      ? 'WHSE:create'
       : mode === 'edit'
-        ? 'warehouse:update'
-        : 'warehouse:read'
+        ? 'WHSE:update'
+        : 'WHSE:read'
   if (!hasPermission(requiredPermission)) {
     return <Navigate to="/warehouses" replace />
   }
 
-  const readOnly = mode !== 'create' && !hasPermission('warehouse:update')
+  const readOnly = mode !== 'create' && !hasPermission('WHSE:update')
 
   const update = (key: keyof WarehouseFormState, value: string) =>
     setForm((current) => ({ ...current, [key]: value }))
@@ -154,8 +155,10 @@ function WarehouseEditor({
       !siteId ||
       isLoading ||
       isSaving ||
-      !hasPermission('warehouse:delete') ||
-      !window.confirm('이 정보를 삭제하시겠습니까?')
+      !hasPermission('WHSE:delete') ||
+      !window.confirm(
+        '삭제 전 이 창고의 현재고 수량·금액과 수령 대기 입고가 없는지 확인하세요. 삭제 후에는 이 창고로 대기 중인 입고를 확정할 수 없습니다. 확인하고 삭제하시겠습니까?',
+      )
     )
       return
     setIsSaving(true)
@@ -171,24 +174,8 @@ function WarehouseEditor({
   return (
     <section className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-base font-semibold text-slate-900">창고</h1>
-        <div className="flex flex-wrap justify-end gap-2">
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={mode === 'create' || isLoading || isSaving}
-            onClick={() =>
-              printDocument({
-                title: '창고',
-                fields: Object.entries(form).map(([key, value]) => [
-                  key,
-                  value,
-                ]),
-              })
-            }
-          >
-            인쇄
-          </Button>
+        <h1 className="text-lg font-semibold text-slate-900">창고</h1>
+        <div className="page-actions">
           <Button
             type="button"
             variant="secondary"
@@ -199,6 +186,34 @@ function WarehouseEditor({
           >
             목록
           </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={mode === 'create' || isLoading || isSaving}
+            onClick={() =>
+              printDocument({
+                title: '창고',
+                fields: [
+                  ['창고번호', form.warehouseId],
+                  ['창고명', form.name],
+                  ['사업장코드', form.siteId],
+                ],
+              })
+            }
+          >
+            인쇄
+          </Button>
+          {mode !== 'create' && hasPermission('WHSE:delete') && (
+            <Button
+              className="sm:ml-2"
+              type="button"
+              variant="danger"
+              disabled={isSaving || isLoading}
+              onClick={() => void remove()}
+            >
+              삭제
+            </Button>
+          )}
           {!readOnly && (
             <Button
               type="submit"
@@ -206,16 +221,6 @@ function WarehouseEditor({
               disabled={isSaving || isLoading}
             >
               저장
-            </Button>
-          )}
-          {mode !== 'create' && hasPermission('warehouse:delete') && (
-            <Button
-              type="button"
-              variant="danger"
-              disabled={isSaving || isLoading}
-              onClick={() => void remove()}
-            >
-              삭제
             </Button>
           )}
         </div>
@@ -229,7 +234,7 @@ function WarehouseEditor({
 
       <form
         id="warehouses-form"
-        className="border border-slate-200 bg-white p-3"
+        className="rounded-lg border border-slate-200 bg-white p-4 md:p-5"
         onSubmit={(event) => void save(event)}
       >
         <div className="grid gap-3 md:grid-cols-2">
@@ -259,10 +264,7 @@ function WarehouseEditor({
               onChange={(event) => update('siteId', event.target.value)}
             >
               <option value="">사업장 선택</option>
-              {form.siteId &&
-                !sites.some((site) => site.siteId === form.siteId) && (
-                  <option value={form.siteId}>{form.siteId} (기존 값)</option>
-                )}
+
               {sites.map((site) => (
                 <option key={site.siteId} value={site.siteId}>
                   {site.siteId} · {site.name}

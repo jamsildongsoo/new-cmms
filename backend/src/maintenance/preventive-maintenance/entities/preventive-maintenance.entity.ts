@@ -43,8 +43,13 @@ export class PreventiveMaintenance extends AuditEntity {
   @Column({ type: 'varchar', length: 3, nullable: true })
   result: 'OK' | 'NOK' | null;
 
+  // 사업장은 작성 시 인증 사용자에서 저장하며 입력으로 변경하지 않는다.
   @Column({ type: 'varchar', length: 30, nullable: true })
-  inspectionDeptId: string | null;
+  siteId: string | null;
+
+  // 문서 담당 부서이며 접근 범위에도 사용한다. 프런트 preventiveMaintenance.api.ts와 함께 수정한다.
+  @Column({ type: 'varchar', length: 30, nullable: true })
+  deptId: string | null;
 
   @Column({ type: 'varchar', length: 50, nullable: true })
   inspectorId: string | null;

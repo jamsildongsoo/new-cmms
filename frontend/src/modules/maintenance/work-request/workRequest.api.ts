@@ -1,12 +1,13 @@
 import { http } from '@/shared/api/http'
 import type { AuditFields } from '@/shared/types/audit'
-import type { DocumentStatus } from '@/shared/types/document'
+import type { DocumentStatus } from '@/shared/constants/document-status'
 export interface WorkRequestPayload {
   documentNo: string
   title: string
   equipmentId: string
   occurredDate: string
   content: string
+  // 참고값: priority.ts에서 선택하며 백엔드 허용값 검증은 하지 않는다.
   priorityCode: string | null
   attachmentId: string | null
   note: string | null
@@ -22,7 +23,6 @@ export interface WorkRequest extends WorkRequestPayload, AuditFields {
 }
 export interface WorkRequestOptions {
   equipment: { value: string; label: string }[]
-  priorities: { value: string; label: string }[]
   siteId: string | null
   deptId: string | null
 }
@@ -33,16 +33,29 @@ export interface RelatedPlan {
   workDate: string
   status: DocumentStatus
 }
+// API 계약: backend/src/maintenance/work-request의 목록 DTO·응답과 함께 수정한다.
 export interface WorkRequestSearch {
-  status?: DocumentStatus
-  priorityCode?: string
-  searchType?: 'title' | 'documentNo' | 'equipmentId'
-  searchVal?: string
-  occurredDateFrom?: string
-  occurredDateTo?: string
+  page?: number
+  search?: string
+}
+export type WorkRequestListItem = Pick<
+  WorkRequest,
+  | 'workRequestId'
+  | 'documentNo'
+  | 'title'
+  | 'equipmentId'
+  | 'occurredDate'
+  | 'priorityCode'
+  | 'status'
+>
+export interface WorkRequestPage {
+  items: WorkRequestListItem[]
+  total: number
+  page: number
+  limit: number
 }
 export async function getWorkRequests(params: WorkRequestSearch = {}) {
-  return (await http.get<WorkRequest[]>('/work-request', { params })).data
+  return (await http.get<WorkRequestPage>('/work-request', { params })).data
 }
 export async function getWorkRequest(id: string) {
   return (
@@ -59,16 +72,10 @@ export async function getRelatedPlans(id: string) {
     )
   ).data
 }
-export async function createWorkRequest(
-  requestKey: string,
-  payload: WorkRequestPayload,
-) {
-  return (
-    await http.post<WorkRequest>('/work-request', payload, {
-      headers: { 'Idempotency-Key': requestKey },
-    })
-  ).data
+export async function createWorkRequest(payload: WorkRequestPayload) {
+  return (await http.post<WorkRequest>('/work-request', payload)).data
 }
+
 export async function updateWorkRequest(
   id: string,
   payload: WorkRequestPayload,

@@ -1,20 +1,26 @@
+import { dateInput } from '@/shared/lib/format'
+// 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
 import { buildFieldTable, type ApprovalDraft } from '@/modules/approvals'
 import type { PurchaseOrderRecord } from './purchase-order.api'
 import { purchaseOrderLabel as purchaseLabel } from './purchase-order.api'
-import { inputDate } from '../common/purchase.utils'
-export function purchaseOrderDraft(row: PurchaseOrderRecord): ApprovalDraft {
+
+export function purchaseOrderDraft(
+  row: PurchaseOrderRecord,
+): ApprovalDraft {
   const fields: [string, string | null | undefined][] = [
     ['문서번호', row.orderId],
     ['관리번호', row.documentNo],
     ['제목', row.title],
+    ['참조 구매요청', row.refId],
     ['사업장', row.siteId],
+    ['입고 예정 사업장', row.toSiteId],
     ['부서', row.deptId],
-    ['요청/발주일', inputDate(row.orderDate)],
-    ['필요일/납기', inputDate(row.expectedDeliveryDate)],
+    ['발주일', dateInput(row.orderDate)],
+    ['납기', dateInput(row.expectedDeliveryDate)],
     ['담당자', row.requesterId],
     ['공급처', row.vendor?.name],
-    ['벤더번호', row.vendorId] as [string, string | null | undefined],
-    ['금액 합계', row.totalAmount] as [string, string | undefined],
+    ['거래처번호', row.vendorId],
+    ['금액 합계', row.totalAmount],
     ['비고', row.note],
   ]
   const paragraph = (text: string) => ({
@@ -26,8 +32,8 @@ export function purchaseOrderDraft(row: PurchaseOrderRecord): ApprovalDraft {
     content: [paragraph(text)],
   })
   return {
-    refModule: 'purchase_order',
-    refId: row.orderId!,
+    refModule: 'PURORD',
+    refId: row.orderId,
     attachmentId: row.attachmentId,
     title: `[${purchaseLabel}] ${row.title}`,
     contentJson: {

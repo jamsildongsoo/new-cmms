@@ -1,3 +1,4 @@
+// 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
 import { ChildEquipmentList, ParentEquipmentSelect } from './EquipmentTree'
 import { useEffect, useState, type FormEvent } from 'react'
 import { Navigate, useNavigate, useParams } from 'react-router-dom'
@@ -21,15 +22,7 @@ import {
   type Equipment,
   type EquipmentOptions,
 } from './equipment.api'
-import {
-  emptyEquipmentForm,
-  equipmentFields,
-  equipmentFieldGroups,
-  equipmentPayload,
-  equipmentToForm,
-  inspectionUnits,
-  type EquipmentForm,
-} from './equipmentForm'
+import { emptyEquipmentForm, equipmentFields, equipmentFieldGroups, equipmentPayload, equipmentToForm, inspectionUnits, type EquipmentForm } from './equipmentForm'
 
 export function EquipmentFormPage({ mode }: { mode: FormMode }) {
   const id = useParams().equipmentId
@@ -81,15 +74,15 @@ function EquipmentEditor({ mode, id }: { mode: FormMode; id?: string }) {
   if (
     !hasPermission(
       mode === 'create'
-        ? 'equipment:create'
+        ? 'EQUIP:create'
         : mode === 'edit'
-          ? 'equipment:update'
-          : 'equipment:read',
+          ? 'EQUIP:update'
+          : 'EQUIP:read',
     )
   ) {
     return <Navigate to="/equipment" replace />
   }
-  const readOnly = mode !== 'create' && !hasPermission('equipment:update')
+  const readOnly = mode !== 'create' && !hasPermission('EQUIP:update')
   const busy = isLoading || isSaving || attachmentBusy
   const blocked = busy || !isReady
   const update = (key: keyof EquipmentForm, value: string) =>
@@ -132,7 +125,7 @@ function EquipmentEditor({ mode, id }: { mode: FormMode; id?: string }) {
     if (
       !id ||
       blocked ||
-      !hasPermission('equipment:delete') ||
+      !hasPermission('EQUIP:delete') ||
       !window.confirm('이 설비를 삭제하시겠습니까?')
     )
       return
@@ -208,9 +201,7 @@ function EquipmentEditor({ mode, id }: { mode: FormMode; id?: string }) {
             onChange={(e) => update(key, e.target.value)}
           >
             <option value="">선택</option>
-            {form[key] && !choices.some((c) => c.value === form[key]) && (
-              <option value={form[key]}>{form[key]} (기존 값)</option>
-            )}
+
             {choices.map((c) => (
               <option key={c.value} value={c.value}>
                 {c.label} ({c.value})
@@ -248,8 +239,18 @@ function EquipmentEditor({ mode, id }: { mode: FormMode; id?: string }) {
   return (
     <section className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-base font-semibold text-slate-900">설비 마스터</h1>
-        <div className="flex gap-2">
+        <h1 className="text-lg font-semibold text-slate-900">설비 마스터</h1>
+        <div className="page-actions">
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={busy}
+            onClick={() => {
+              if (confirmLeave()) navigate('/equipment')
+            }}
+          >
+            목록
+          </Button>
           <Button
             type="button"
             variant="secondary"
@@ -266,29 +267,20 @@ function EquipmentEditor({ mode, id }: { mode: FormMode; id?: string }) {
           >
             인쇄
           </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={busy}
-            onClick={() => {
-              if (confirmLeave()) navigate('/equipment')
-            }}
-          >
-            목록
-          </Button>
-          {!readOnly && (
-            <Button type="submit" form="equipment-form" disabled={blocked}>
-              저장
-            </Button>
-          )}
-          {mode !== 'create' && hasPermission('equipment:delete') && (
+          {mode !== 'create' && hasPermission('EQUIP:delete') && (
             <Button
+              className="sm:ml-2"
               type="button"
               variant="danger"
               disabled={blocked}
               onClick={() => void remove()}
             >
               삭제
+            </Button>
+          )}
+          {!readOnly && (
+            <Button type="submit" form="equipment-form" disabled={blocked}>
+              저장
             </Button>
           )}
         </div>
@@ -304,11 +296,11 @@ function EquipmentEditor({ mode, id }: { mode: FormMode; id?: string }) {
       <form
         id="equipment-form"
         onSubmit={(e) => void save(e)}
-        className="space-y-4 border border-slate-200 bg-white p-3"
+        className="space-y-4 rounded-lg border border-slate-200 bg-white p-4 md:p-5"
       >
         {equipmentFieldGroups.map((group) => (
           <section key={group.label} className="space-y-2">
-            <h2 className="text-sm font-semibold">{group.label}</h2>
+            <h2 className="text-base font-semibold">{group.label}</h2>
             <div className="grid gap-3 md:grid-cols-2">
               {equipmentFields
                 .filter(([key]) => group.keys.includes(key))
@@ -317,10 +309,10 @@ function EquipmentEditor({ mode, id }: { mode: FormMode; id?: string }) {
           </section>
         ))}
       </form>
-      <div className="border border-slate-200 bg-white p-3">
+      <div className="rounded-lg border border-slate-200 bg-white p-4 md:p-5">
         <AttachmentManager
           attachmentId={form.attachmentId}
-          refModule="equipment"
+          refModule="EQUIP"
           refId={form.equipmentId.trim()}
           disabled={
             readOnly ||

@@ -1,3 +1,6 @@
+import { Pagination } from '@/shared/ui/Pagination'
+// 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
+import { SearchActions } from '@/shared/ui/SearchActions'
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/modules/auth'
@@ -49,15 +52,17 @@ export function MaterialListPage() {
     event.preventDefault()
     changeQuery({
       page: 1,
-      ...(searchVal.trim() ? { searchType, searchVal: searchVal.trim() } : {}),
+      ...(searchVal.trim()
+        ? { searchType, searchVal: searchVal.trim() }
+        : {}),
     })
   }
-  if (!hasPermission('material:read')) return <Navigate to="/" replace />
+  if (!hasPermission('MATL:read')) return <Navigate to="/" replace />
   return (
     <section className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
-        <h1 className="text-base font-semibold">자재 마스터</h1>
-        <div className="flex gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-lg font-semibold">자재 마스터</h1>
+        <div className="page-actions">
           <Button
             variant="secondary"
             disabled={loading || Boolean(error)}
@@ -88,18 +93,28 @@ export function MaterialListPage() {
             인쇄
           </Button>
           <Button
-            disabled={!hasPermission('material:create')}
+            disabled={!hasPermission('MATL:create')}
             onClick={() => navigate('/material/new')}
           >
-            신규
+            신규 작성
           </Button>
         </div>
       </div>
-      <form onSubmit={search} className="flex flex-wrap gap-2">
+      <form
+        onReset={() => {
+          setSearchType('name')
+          setSearchVal('')
+          changeQuery({ page: 1 })
+        }}
+        onSubmit={search}
+        className="search-form"
+      >
         <Select
           aria-label="검색 기준"
           value={searchType}
-          onChange={(e) => setSearchType(e.target.value as typeof searchType)}
+          onChange={(e) =>
+            setSearchType(e.target.value as typeof searchType)
+          }
         >
           <option value="name">자재명</option>
           <option value="materialId">자재번호</option>
@@ -111,9 +126,7 @@ export function MaterialListPage() {
           maxLength={200}
           onChange={(e) => setSearchVal(e.target.value)}
         />
-        <Button type="submit" variant="secondary" disabled={loading}>
-          조회
-        </Button>
+        <SearchActions loading={loading} />
       </form>
       {error && (
         <p role="alert" className="text-xs text-red-700">
@@ -124,7 +137,9 @@ export function MaterialListPage() {
         <div className="min-w-[950px]">
           <DataTable<Material>
             rows={loading || error ? [] : rows}
-            emptyText={loading ? '조회 중...' : '등록된 자재가 없습니다.'}
+            emptyText={
+              loading ? '불러오는 중…' : '등록된 자재가 없습니다.'
+            }
             gridTemplateColumns="130px 1.5fr 100px 90px 1.5fr 120px 120px"
             columns={[
               {
@@ -157,25 +172,14 @@ export function MaterialListPage() {
           />
         </div>
       </div>
-      <div className="flex items-center justify-end gap-2 text-xs">
-        <span>
-          전체 {total}건 / {query.page} 페이지
-        </span>
-        <Button
-          variant="secondary"
-          disabled={loading || query.page <= 1}
-          onClick={() => changeQuery({ ...query, page: query.page - 1 })}
-        >
-          이전
-        </Button>
-        <Button
-          variant="secondary"
-          disabled={loading || query.page * limit >= total}
-          onClick={() => changeQuery({ ...query, page: query.page + 1 })}
-        >
-          다음
-        </Button>
-      </div>
+      <Pagination
+        page={query.page}
+        limit={limit}
+        total={total}
+        loading={loading}
+        error={Boolean(error)}
+        onChange={(page) => changeQuery({ ...query, page })}
+      />
     </section>
   )
 }

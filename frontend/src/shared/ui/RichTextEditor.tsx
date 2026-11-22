@@ -92,7 +92,7 @@ export function RichTextEditor({
     editorProps: {
       attributes: {
         class:
-          'min-h-52 border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:border-slate-700',
+          'min-h-52 rounded-md border border-slate-300 bg-white px-3 py-2 text-xs leading-relaxed text-slate-800 outline-none focus:border-blue-600',
       },
     },
     onUpdate: ({ editor: currentEditor }) => {
@@ -192,7 +192,7 @@ export function RichTextEditor({
           }}
           className="h-7 border border-slate-300 bg-white px-1 text-xs text-slate-700"
         >
-          <option value="">Size</option>
+          <option value="">크기</option>
           {[10, 12, 14, 16, 18, 20, 24, 28, 32].map((size) => (
             <option key={size} value={`${size}px`}>
               {size}

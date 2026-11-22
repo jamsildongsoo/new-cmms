@@ -31,12 +31,21 @@ export interface PurchaseRequestSave {
     note?: string | null
   }[]
 }
+export type PurchaseRequestListItem = Pick<
+  PurchaseRequestRecord,
+  'requestId' | 'documentNo' | 'title' | 'requestDate' | 'status'
+>
+import type { PurchaseListQuery, PurchasePage } from '../common/purchase.types'
 export const purchaseRequestBase = '/purchase-request'
 export const purchaseRequestLabel = '구매요청서'
 export const purchaseRequestApi = {
-  list: async (params: Record<string, string>) =>
-    (await http.get<PurchaseRequestRecord[]>(purchaseRequestBase, { params }))
-      .data,
+  list: async (params: PurchaseListQuery) =>
+    (
+      await http.get<PurchasePage<PurchaseRequestListItem>>(
+        purchaseRequestBase,
+        { params },
+      )
+    ).data,
   get: async (id: string) =>
     (
       await http.get<PurchaseRequestRecord>(
@@ -53,7 +62,7 @@ export const purchaseRequestApi = {
           ? purchaseRequestBase
           : `${purchaseRequestBase}/${encodeURIComponent(id)}`,
         method: create ? 'POST' : 'PATCH',
-        headers: create ? { 'Idempotency-Key': id } : undefined,
+
         data: body,
       })
     ).data,

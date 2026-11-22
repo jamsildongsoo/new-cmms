@@ -1,3 +1,8 @@
+import { SearchPermitDto } from '../work-permit/dto/search-permit.dto';
+import { normalizePaginationQuery } from '../../common/utils/pagination.util';
+import { ForbiddenException } from '@nestjs/common';
+import { DocumentStatus } from '../../common/constants/document-status';
+import type { EntityManager } from 'typeorm';
 /** 허가요청은 작성자 초안에서 신청 완료로 확정하며 전자결재와 분리한다. */
 import {
   ConflictException,
@@ -7,7 +12,6 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { UserContext } from '../../auth/types/user-context.type';
-import { applyDocumentScope } from '../../common/utils/document-scope.util';
 import {
   permitOwner,
   validatePermitData,
@@ -19,19 +23,75 @@ import {
 } from './dto/work-permit-request.dto';
 @Injectable()
 export class WorkPermitRequestService {
+  withManager(manager: EntityManager): WorkPermitRequestService {
+    return new WorkPermitRequestService(
+      manager.getRepository(WorkPermitRequest),
+    );
+  }
+
   constructor(
     @InjectRepository(WorkPermitRequest)
     private readonly repository: Repository<WorkPermitRequest>,
   ) {}
   private query(user: UserContext) {
-    return applyDocumentScope(
-      this.repository.createQueryBuilder('r'),
-      user,
-      'r',
+    // 이 모듈의 조회 정책이다. 기본 조건 뒤에는 andWhere로 업무 조건을 추가한다.
+    const query = this.repository.createQueryBuilder('r');
+    query
+      .where('r.companyId = :companyId', { companyId: user.companyId })
+      .andWhere('r.deleteYn = :deleteYn', { deleteYn: 'N' });
+    if (user.accessScope === 'COMPANY_ALL') return query;
+    if (user.accessScope === 'OWN_SITE' && user.siteId)
+      return query.andWhere('r.siteId = :scopeSiteId', {
+        scopeSiteId: user.siteId,
+      });
+    if (user.accessScope === 'OWN_DEPARTMENT' && user.deptId)
+      return query.andWhere(
+        `r.deptId IN (
+        WITH RECURSIVE scope_departments AS (
+          SELECT "deptId" FROM "department" WHERE "companyId" = :companyId AND "deptId" = :scopeDeptId AND "deleteYn" = 'N'
+          UNION
+          SELECT d."deptId" FROM "department" d JOIN scope_departments p ON d."parentDeptId" = p."deptId"
+          WHERE d."companyId" = :companyId AND d."deleteYn" = 'N'
+        ) SELECT "deptId" FROM scope_departments
+      )`,
+        { scopeDeptId: user.deptId },
+      );
+    throw new ForbiddenException(
+      'Document access scope or affiliation is missing',
     );
   }
-  findAll(user: UserContext) {
-    return this.query(user).orderBy('r.createdAt', 'DESC').getMany();
+  async findAll(user: UserContext, filter: SearchPermitDto = {}) {
+    const { page, limit, offset } = normalizePaginationQuery(filter);
+    const query = this.query(user).select([
+      'r.workPermitRequestId',
+      'r.documentNo',
+      'r.data',
+      'r.status',
+    ]);
+    // 설비번호는 직접 입력 참고값이다. 검색 대상은 문서번호·관리번호·작업명만 둔다.
+    if (filter.search?.trim())
+      query.andWhere(
+        "(r.workPermitRequestId ILIKE :search OR r.documentNo ILIKE :search OR r.data->>'title' ILIKE :search)",
+        { search: `%${filter.search.trim().replace(/[\\%_]/g, '\\$&')}%` },
+      );
+    const [rows, total] = await query
+      .orderBy('r.createdAt', 'DESC')
+      .addOrderBy('r.workPermitRequestId', 'DESC')
+      .skip(offset)
+      .take(limit)
+      .getManyAndCount();
+    return {
+      items: rows.map((row) => ({
+        workPermitRequestId: row.workPermitRequestId,
+        documentNo: row.documentNo,
+        title: row.data.title,
+        applicantName: row.data.applicantName,
+        status: row.status,
+      })),
+      total,
+      page,
+      limit,
+    };
   }
   async findOne(user: UserContext, id: string) {
     const row = await this.query(user)
@@ -41,7 +101,6 @@ export class WorkPermitRequestService {
     return row;
   }
   async create(user: UserContext, dto: CreatePermitRequestDto) {
-    this.query(user);
     validatePermitData(dto.data);
     if (
       await this.repository.findOneBy({
@@ -59,7 +118,7 @@ export class WorkPermitRequestService {
         attachmentId: dto.attachmentId ?? null,
         siteId: user.siteId ?? null,
         deptId: user.deptId || null,
-        status: 'D',
+        status: DocumentStatus.DRAFT,
         deleteYn: 'N',
         createdBy: user.userId,
       }),
@@ -91,7 +150,7 @@ export class WorkPermitRequestService {
     permitOwner(user, row);
     validatePermitData(row.data);
     // 신청 자체가 요청 내용의 확정이다. 작업허가서의 발행·결재와 분리한다.
-    row.status = 'C';
+    row.status = DocumentStatus.CONFIRMED;
     row.updatedBy = user.userId;
     row.updatedAt = new Date();
     return this.repository.save(row);

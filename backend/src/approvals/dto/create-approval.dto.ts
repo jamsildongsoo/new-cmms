@@ -31,6 +31,7 @@ export class CreateApprovalDto {
   refId?: string | null;
 
   @IsString()
+  @MaxLength(200, { message: '제목은 200자 이내로 입력해 주세요.' })
   title: string;
 
   @IsDefined()

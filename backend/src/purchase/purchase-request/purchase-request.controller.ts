@@ -1,5 +1,4 @@
 import { NumberingService } from '../../numbering/numbering.service';
-import { Headers } from '@nestjs/common';
 import { PurchaseSearchDto } from '../common/purchase-search.dto';
 import {
   Body,
@@ -17,12 +16,13 @@ import { RequirePermission } from '../../auth/decorators/require-permissions.dec
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import type { UserContext } from '../../auth/types/user-context.type';
-import { AppModuleKey } from '../../common/constants/modules';
+import { ModuleCode } from '../../common/constants/modules';
 import { PermissionAction } from '../../common/constants/permissions';
 import { CreatePurchaseRequestDto } from './dto/create-purchase-request.dto';
 import { UpdatePurchaseRequestDto } from './dto/update-purchase-request.dto';
 import { PurchaseRequestService } from './purchase-request.service';
 
+/** 구매요청 API. 문서 ID·첨부 연결은 NumberingService를 거치고 요청 품목 저장은 업무 Service에 맡긴다. */
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('purchase-request')
 export class PurchaseRequestController {
@@ -31,19 +31,19 @@ export class PurchaseRequestController {
     private readonly service: PurchaseRequestService,
   ) {}
 
-  @RequirePermission(AppModuleKey.PURCHASE_REQUEST, PermissionAction.READ)
+  @RequirePermission(ModuleCode.PURREQ, PermissionAction.READ)
   @Get()
   findAll(@CurrentUser() user: UserContext, @Query() query: PurchaseSearchDto) {
     return this.service.findAll(user, query);
   }
 
-  @RequirePermission(AppModuleKey.PURCHASE_REQUEST, PermissionAction.READ)
+  @RequirePermission(ModuleCode.PURREQ, PermissionAction.READ)
   @Get('options')
   options(@CurrentUser() user: UserContext) {
     return this.service.options(user);
   }
 
-  @RequirePermission(AppModuleKey.PURCHASE_REQUEST, PermissionAction.READ)
+  @RequirePermission(ModuleCode.PURREQ, PermissionAction.READ)
   @Get(':requestId')
   findOne(
     @CurrentUser() user: UserContext,
@@ -52,28 +52,25 @@ export class PurchaseRequestController {
     return this.service.findOne(user, requestId);
   }
 
-  @RequirePermission(AppModuleKey.PURCHASE_REQUEST, PermissionAction.CREATE)
+  @RequirePermission(ModuleCode.PURREQ, PermissionAction.CREATE)
   @Post()
   create(
     @CurrentUser() user: UserContext,
     @Body() dto: CreatePurchaseRequestDto,
-    @Headers('idempotency-key') requestKey: string,
   ) {
     return this.numbering.createDocument(
       user,
-      AppModuleKey.PURCHASE_REQUEST,
-      requestKey,
+      ModuleCode.PURREQ,
       (documentId) =>
         this.service.create(
           user,
           Object.assign({}, dto, { requestId: documentId }),
         ),
-      (documentId) => this.service.findOne(user, documentId),
       dto.attachmentId,
     );
   }
 
-  @RequirePermission(AppModuleKey.PURCHASE_REQUEST, PermissionAction.UPDATE)
+  @RequirePermission(ModuleCode.PURREQ, PermissionAction.UPDATE)
   @Patch(':requestId')
   update(
     @CurrentUser() user: UserContext,
@@ -82,14 +79,14 @@ export class PurchaseRequestController {
   ) {
     return this.numbering.saveDocument(
       user,
-      AppModuleKey.PURCHASE_REQUEST,
+      ModuleCode.PURREQ,
       requestId,
       dto.attachmentId,
       () => this.service.update(user, requestId, dto),
     );
   }
 
-  @RequirePermission(AppModuleKey.PURCHASE_REQUEST, PermissionAction.DELETE)
+  @RequirePermission(ModuleCode.PURREQ, PermissionAction.DELETE)
   @Delete(':requestId')
   remove(
     @CurrentUser() user: UserContext,

@@ -49,16 +49,6 @@ export class CompaniesService {
     return this.toResponse(await this.companyRepository.save(company));
   }
 
-  async removeMine(userContext: UserContext): Promise<CompanyResponseDto> {
-    const company = await this.findMineOrThrow(userContext.companyId);
-
-    company.deleteYn = 'Y';
-    company.updatedBy = userContext.userId;
-    company.updatedAt = new Date();
-
-    return this.toResponse(await this.companyRepository.save(company));
-  }
-
   private async findMineOrThrow(companyId: string): Promise<Company> {
     const company = await this.companyRepository.findOneBy({
       companyId,

@@ -8,7 +8,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { UserContext } from '../../auth/types/user-context.type';
-import { isCode } from '../../common/constants/code';
+import { isCodeGroupId } from '../../common/constants/code';
 import { CodeItemResponseDto } from './dto/code-item-response.dto';
 import { CreateCodeItemDto } from './dto/create-code-item.dto';
 import { UpdateCodeItemDto } from './dto/update-code-item.dto';
@@ -25,7 +25,7 @@ export class CodeItemsService {
     userContext: UserContext,
     codeId: string,
   ): Promise<CodeItemResponseDto[]> {
-    return this.findActiveItems(
+    return this.findItems(
       userContext.companyId,
       this.assertKnownCode(codeId),
     );
@@ -36,7 +36,7 @@ export class CodeItemsService {
     codeId: string,
     codeItemId: string,
   ): Promise<CodeItemResponseDto> {
-    const item = await this.findActiveByIdOrThrow(
+    const item = await this.findByIdOrThrow(
       userContext.companyId,
       codeId,
       codeItemId,
@@ -57,7 +57,7 @@ export class CodeItemsService {
     });
 
     if (existingItem) {
-      throw new ConflictException('Code item already exists');
+      throw new ConflictException('CodeGroup item already exists');
     }
 
     const item = this.codeItemRepository.create({
@@ -77,7 +77,7 @@ export class CodeItemsService {
     codeItemId: string,
     dto: UpdateCodeItemDto,
   ): Promise<CodeItemResponseDto> {
-    const item = await this.findActiveByIdOrThrow(
+    const item = await this.findByIdOrThrow(
       userContext.companyId,
       codeId,
       codeItemId,
@@ -98,7 +98,7 @@ export class CodeItemsService {
     codeId: string,
     codeItemId: string,
   ): Promise<CodeItemResponseDto> {
-    const item = await this.findActiveByIdOrThrow(
+    const item = await this.findByIdOrThrow(
       userContext.companyId,
       codeId,
       codeItemId,
@@ -109,7 +109,7 @@ export class CodeItemsService {
     return this.toResponse(item);
   }
 
-  async findActiveByIdOrThrow(
+  async findByIdOrThrow(
     companyId: string,
     codeId: string,
     codeItemId: string,
@@ -121,13 +121,13 @@ export class CodeItemsService {
     });
 
     if (!item) {
-      throw new NotFoundException('Code item not found');
+      throw new NotFoundException('CodeGroup item not found');
     }
 
     return item;
   }
 
-  private async findActiveItems(
+  private async findItems(
     companyId: string,
     codeId: string,
   ): Promise<CodeItemResponseDto[]> {
@@ -157,7 +157,7 @@ export class CodeItemsService {
 
   private assertKnownCode(codeId: string | undefined): string {
     const normalized = this.requireTrimmedString(codeId, 'codeId');
-    if (!isCode(normalized)) {
+    if (!isCodeGroupId(normalized)) {
       throw new NotFoundException('Code not found');
     }
     return normalized;

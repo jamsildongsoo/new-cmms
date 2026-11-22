@@ -1,6 +1,8 @@
+import { dateInput } from '@/shared/lib/format'
+// 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
 import { buildFieldTable, type ApprovalDraft } from '@/modules/approvals'
 import type { WorkOrder } from './workOrder.api'
-import { dateInput, kindName, money } from './workOrderForm'
+import { kindName, money } from './workOrderForm'
 
 const paragraph = (value: string) => ({
   type: 'paragraph',
@@ -89,13 +91,15 @@ export function toWorkOrderDraft(
     paragraph(
       `자재비: ${money(document.materialTotal)}원 / 기타 비용: ${money(document.costTotal)}원`,
     ),
-    paragraph(`총 비용: ${money(document.totalCost)}원 (원화, 부가세 제외)`),
+    paragraph(
+      `총 비용: ${money(document.totalCost)}원 (원화, 부가세 제외)`,
+    ),
     paragraph('비고'),
     ...(document.note || '').split('\n').map(paragraph),
   )
   return {
     attachmentId: document.attachmentId,
-    refModule: 'work_order',
+    refModule: 'WRKORD',
     refId: document.workOrderId,
     title: `[작업 오더 ${kindName(document.orderKind)}] ${document.title}`,
     contentJson: { type: 'doc', content },

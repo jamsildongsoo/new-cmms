@@ -1,8 +1,9 @@
+// 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
 import { buildSnapshot, type ApprovalDraft } from '@/modules/approvals'
 import type { WorkRequest } from './workRequest.api'
 export function toWorkRequestDraft(row: WorkRequest): ApprovalDraft {
   return {
-    refModule: 'work_request',
+    refModule: 'WRKREQ',
     refId: row.workRequestId,
     attachmentId: row.attachmentId,
     title: `[작업의뢰] ${row.title}`,

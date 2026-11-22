@@ -7,4 +7,6 @@ export class StockBalance {
   @PrimaryColumn({ type: 'varchar', length: 50 }) materialId: string;
   @Column({ type: 'numeric', precision: 20, scale: 6, default: 0 })
   quantity: string;
+  @Column({ type: 'numeric', precision: 20, scale: 0, default: 0 })
+  amount: string;
 }

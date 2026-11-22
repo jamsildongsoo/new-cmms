@@ -10,7 +10,7 @@ import { PermitDataDto } from '../../work-permit/dto/permit-data.dto';
 export class SavePermitRequestDto {
   @IsOptional() @IsString() @MaxLength(50) documentNo?: string;
   @IsDefined() @ValidateNested() @Type(() => PermitDataDto) data: PermitDataDto;
-  @IsOptional() @IsString() attachmentId?: string | null;
+  @IsOptional() @IsString() @MaxLength(50) attachmentId?: string | null;
 }
 export class CreatePermitRequestDto extends SavePermitRequestDto {
   @IsOptional() @IsString() @MaxLength(50) workPermitRequestId: string;

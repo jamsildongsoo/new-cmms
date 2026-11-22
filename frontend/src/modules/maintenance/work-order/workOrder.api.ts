@@ -1,6 +1,7 @@
+// 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
 import { http } from '@/shared/api/http'
 import type { AuditFields } from '@/shared/types/audit'
-import type { DocumentStatus } from '@/shared/types/document'
+import type { DocumentStatus } from '@/shared/constants/document-status'
 
 export type OrderKind = 'PLAN' | 'ACTUAL'
 export interface LaborItem {
@@ -53,6 +54,8 @@ export interface WorkOrder
   totalCost: number
 }
 export interface WorkOrderOptions {
+  // 백엔드 해당 업무 options API의 units(공통코드 UNIT)와 함께 수정한다.
+  units: { value: string; label: string }[]
   equipment: { value: string; label: string }[]
   types: { value: string; label: string }[]
   plans: {
@@ -70,16 +73,30 @@ export interface WorkOrderOptions {
     status: DocumentStatus
   }[]
 }
+// API 계약: backend/src/maintenance/work-order의 목록 DTO·응답과 함께 수정한다.
 export interface WorkOrderSearch {
-  orderKind?: OrderKind
-  status?: DocumentStatus
-  searchType?: 'title' | 'documentNo' | 'equipmentId'
-  searchVal?: string
-  workDateFrom?: string
-  workDateTo?: string
+  page?: number
+  search?: string
+}
+export type WorkOrderListItem = Pick<
+  WorkOrder,
+  | 'workOrderId'
+  | 'documentNo'
+  | 'title'
+  | 'orderKind'
+  | 'equipmentId'
+  | 'workDate'
+  | 'totalCost'
+  | 'status'
+>
+export interface WorkOrderPage {
+  items: WorkOrderListItem[]
+  total: number
+  page: number
+  limit: number
 }
 export async function getWorkOrders(params: WorkOrderSearch = {}) {
-  return (await http.get<WorkOrder[]>('/work-order', { params })).data
+  return (await http.get<WorkOrderPage>('/work-order', { params })).data
 }
 export async function getWorkOrder(id: string) {
   return (await http.get<WorkOrder>(`/work-order/${encodeURIComponent(id)}`))
@@ -89,20 +106,11 @@ export async function getWorkOrderOptions() {
   return (await http.get<WorkOrderOptions>('/work-order/options')).data
 }
 export async function createWorkOrder(
-  requestKey: string,
   orderKind: OrderKind,
   payload: WorkOrderPayload,
 ) {
-  return (
-    await http.post<WorkOrder>(
-      '/work-order',
-      {
-        orderKind,
-        ...payload,
-      },
-      { headers: { 'Idempotency-Key': requestKey } },
-    )
-  ).data
+  return (await http.post<WorkOrder>('/work-order', { orderKind, ...payload }))
+    .data
 }
 export async function updateWorkOrder(id: string, payload: WorkOrderPayload) {
   return (

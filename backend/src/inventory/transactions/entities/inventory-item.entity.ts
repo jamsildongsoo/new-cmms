@@ -11,7 +11,7 @@ export class InventoryItem {
   @Column({ type: 'text', nullable: true }) spec: string | null;
   @Column({ type: 'numeric', precision: 20, scale: 6, default: 0 })
   quantity: string;
-  @Column({ type: 'numeric', precision: 24, scale: 8, default: 0 })
+  @Column({ type: 'numeric', precision: 24, scale: 0, default: 0 })
   unitPrice: string;
   @Column({ type: 'numeric', precision: 24, scale: 0, default: 0 })
   amount: string;

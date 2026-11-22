@@ -1,6 +1,6 @@
 import { WorkRequest } from '../maintenance/work-request/entities/work-request.entity';
 import { EntityTarget } from 'typeorm';
-import { AppModuleKey } from '../common/constants/modules';
+import { ModuleCode } from '../common/constants/modules';
 import { PreventiveMaintenance } from '../maintenance/preventive-maintenance/entities/preventive-maintenance.entity';
 import { WorkOrder } from '../maintenance/work-order/entities/work-order.entity';
 import { WorkPermit } from '../maintenance/work-permit/entities/work-permit.entity';
@@ -14,27 +14,27 @@ interface SourceDocument {
 
 // Document modules whose status follows their approval (refModule -> entity).
 export const SOURCE_DOCUMENTS: Record<string, SourceDocument> = {
-  [AppModuleKey.WORK_REQUEST]: {
+  [ModuleCode.WRKREQ]: {
     entity: WorkRequest,
     idField: 'workRequestId',
   },
-  [AppModuleKey.PREVENTIVE_MAINTENANCE]: {
+  [ModuleCode.PMAINT]: {
     entity: PreventiveMaintenance,
     idField: 'pmId',
   },
-  [AppModuleKey.WORK_ORDER]: {
+  [ModuleCode.WRKORD]: {
     entity: WorkOrder,
     idField: 'workOrderId',
   },
-  [AppModuleKey.WORK_PERMIT]: {
+  [ModuleCode.PERMIT]: {
     entity: WorkPermit,
     idField: 'workPermitId',
   },
-  [AppModuleKey.PURCHASE_REQUEST]: {
+  [ModuleCode.PURREQ]: {
     entity: PurchaseRequest,
     idField: 'requestId',
   },
-  [AppModuleKey.PURCHASE_ORDER]: {
+  [ModuleCode.PURORD]: {
     entity: PurchaseOrder,
     idField: 'orderId',
   },

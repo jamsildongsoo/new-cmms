@@ -18,10 +18,12 @@ function fixture() {
     deleteYn: 'N',
   } as User;
   const manager = {
-    findOneBy: jest.fn(async (entity: unknown, _where: unknown) =>
-      entity === Site
-        ? { name: 'Old site', deleteYn: 'Y' }
-        : { name: 'Old department', deleteYn: 'Y' },
+    findOneBy: jest.fn(async (entity: unknown, where: unknown) =>
+      (where as { deleteYn?: string }).deleteYn === 'N'
+        ? null
+        : entity === Site
+          ? { name: 'Old site', deleteYn: 'Y' }
+          : { name: 'Old department', deleteYn: 'Y' },
     ),
     find: jest.fn(async (_entity: unknown, _options: unknown) => []),
   };
@@ -31,6 +33,15 @@ function fixture() {
     find: jest.fn(async () => [user]),
     create: (value: User) => value,
     save: jest.fn(async (value: User) => value),
+    update: jest.fn(async (_where: unknown, patch: Partial<User>) => {
+      Object.assign(
+        user,
+        Object.fromEntries(
+          Object.entries(patch).filter(([, value]) => value !== undefined),
+        ),
+      );
+      return { affected: 1 };
+    }),
   };
   return {
     service: new UsersService(repository as unknown as Repository<User>),
@@ -41,20 +52,18 @@ function fixture() {
 }
 
 describe('UsersService organization selection', () => {
-  it('keeps deleted site/department links and their names during profile changes', async () => {
+  it('keeps deleted site/department IDs while active-only display lookups return no name', async () => {
     const { service, manager } = fixture();
     const saved = await service.update(context, 'worker', { name: 'Renamed' });
     expect(saved).toMatchObject({
       name: 'Renamed',
       siteId: 'OLD-SITE',
       deptId: 'OLD-DEPT',
-      siteName: 'Old site',
-      siteDeleted: true,
-      deptName: 'Old department',
-      deptDeleted: true,
+      siteName: null,
+      deptName: null,
     });
     for (const call of manager.findOneBy.mock.calls) {
-      expect(call[1]).not.toHaveProperty('deleteYn');
+      expect(call[1]).toMatchObject({ companyId: 'CR', deleteYn: 'N' });
     }
   });
 

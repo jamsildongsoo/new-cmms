@@ -1,12 +1,8 @@
 import type { RouteObject } from 'react-router-dom'
-import {
-  PurchaseRequestList,
-  PurchaseRequestForm,
-} from './purchase-request/PurchaseRequestPages'
-import {
-  PurchaseOrderList,
-  PurchaseOrderForm,
-} from './purchase-order/PurchaseOrderPages'
+import { PurchaseRequestList } from './purchase-request/PurchaseRequestList'
+import { PurchaseRequestForm } from './purchase-request/PurchaseRequestForm'
+import { PurchaseOrderList } from './purchase-order/PurchaseOrderList'
+import { PurchaseOrderForm } from './purchase-order/PurchaseOrderForm'
 export const purchaseRoutes: RouteObject[] = [
   { path: 'purchase-request', element: <PurchaseRequestList /> },
   { path: 'purchase-request/new', element: <PurchaseRequestForm /> },

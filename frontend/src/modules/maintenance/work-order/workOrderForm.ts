@@ -1,9 +1,15 @@
-import type { OrderKind, WorkOrder, WorkOrderPayload } from './workOrder.api'
+import { scaledDecimal } from '@/shared/lib/numeric'
+import { dateInput, dateValue } from '@/shared/lib/format'
+// 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
+import type {
+  OrderKind,
+  WorkOrder,
+  WorkOrderPayload,
+} from './workOrder.api'
 
-export const kindName = (kind: OrderKind) => (kind === 'PLAN' ? '계획' : '실적')
+export const kindName = (kind: OrderKind) =>
+  kind === 'PLAN' ? '계획' : '실적'
 export const money = (value: number) => value.toLocaleString('ko-KR')
-export const dateInput = (value: string) =>
-  value ? `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}` : ''
 export interface LaborRow {
   workerName: string
   content: string
@@ -66,11 +72,11 @@ export function toForm(row: WorkOrder): WorkOrderForm {
     typeCode: row.typeCode ?? '',
     content: row.content ?? '',
     note: row.note ?? '',
-    laborItems: (row.laborItems ?? []).map((item) => ({
+    laborItems: row.laborItems.map((item) => ({
       ...item,
       hours: String(item.hours),
     })),
-    materials: (row.materials ?? []).map(
+    materials: row.materials.map(
       ({ name, spec, quantity, unit, unitPrice }) => ({
         name,
         spec,
@@ -79,7 +85,7 @@ export function toForm(row: WorkOrder): WorkOrderForm {
         unitPrice: String(unitPrice),
       }),
     ),
-    costItems: (row.costItems ?? []).map((item) => ({
+    costItems: row.costItems.map((item) => ({
       ...item,
       amount: String(item.amount),
     })),
@@ -93,17 +99,23 @@ export function toPayload(form: WorkOrderForm): WorkOrderPayload {
     refModule: form.refModule || null,
     refId: form.refId || null,
     equipmentId: form.equipmentId,
-    workDate: form.workDate.replaceAll('-', ''),
+    workDate: dateValue(form.workDate),
     typeCode: form.typeCode || null,
     content: form.content || null,
     note: form.note || null,
-    laborItems: form.laborItems.map((r) => ({ ...r, hours: Number(r.hours) })),
+    laborItems: form.laborItems.map((r) => ({
+      ...r,
+      hours: Number(r.hours),
+    })),
     materials: form.materials.map((r) => ({
       ...r,
       quantity: Number(r.quantity),
       unitPrice: Number(r.unitPrice),
     })),
-    costItems: form.costItems.map((r) => ({ ...r, amount: Number(r.amount) })),
+    costItems: form.costItems.map((r) => ({
+      ...r,
+      amount: Number(r.amount),
+    })),
   }
 }
 /** 수량·단가를 정수로 환산하여 서버와 같은 원 단위 반올림으로 표시한다. */
@@ -120,8 +132,7 @@ export function amount(quantity: string, price: string) {
   )
     return 0
   return Number(
-    (BigInt(q.toFixed(4).replace('.', '')) *
-      BigInt(p.toFixed(2).replace('.', '')) +
+    (scaledDecimal(q.toFixed(4), 4) * scaledDecimal(p.toFixed(2), 2) +
       500000n) /
       1000000n,
   )

@@ -1,3 +1,5 @@
+import { PermissionAction } from '../../common/constants/permissions';
+import { ModuleCode } from '../../common/constants/modules';
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { RequirePermission } from '../../auth/decorators/require-permissions.decorator';
@@ -10,7 +12,7 @@ import { StockQueryService } from './stock-query.service';
 @Controller('stock-ledger')
 export class StockLedgerController {
   constructor(private readonly service: StockQueryService) {}
-  @Get() @RequirePermission('stock_ledger', 'read') list(
+  @Get() @RequirePermission(ModuleCode.LEDGER, PermissionAction.READ) list(
     @CurrentUser() user: UserContext,
     @Query() query: InventorySearchDto,
   ) {

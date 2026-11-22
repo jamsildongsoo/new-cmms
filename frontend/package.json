@@ -9,7 +9,11 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "node test/auth-session.browser.cjs",
-    "test:purchase-inventory": "node test/purchase-inventory.browser.cjs"
+    "test:purchase-inventory": "node test/purchase-inventory.browser.cjs",
+    "test:ui": "node test/ui-approvals.browser.cjs",
+    "test:browser": "npm run build && node test/auth-session.browser.cjs && node test/purchase-inventory.browser.cjs && node test/ui-approvals.browser.cjs",
+    "test:numeric": "node test/numeric.test.cjs",
+    "test:format": "node test/format.test.cjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",

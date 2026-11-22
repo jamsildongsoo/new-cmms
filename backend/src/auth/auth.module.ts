@@ -9,9 +9,13 @@ import { AuthController } from './auth.controller';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { PermissionsGuard } from './guards/permissions.guard';
 import { JwtStrategy } from './strategies/jwt.strategy';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { LoginHistory } from './entities/login-history.entity';
+import { LoginHistoryService } from './login-history.service';
 
 @Module({
   imports: [
+    TypeOrmModule.forFeature([LoginHistory]),
     PassportModule,
     UsersModule,
     RolesModule,
@@ -32,7 +36,13 @@ import { JwtStrategy } from './strategies/jwt.strategy';
       },
     }),
   ],
-  providers: [AuthService, JwtStrategy, JwtAuthGuard, PermissionsGuard],
+  providers: [
+    AuthService,
+    LoginHistoryService,
+    JwtStrategy,
+    JwtAuthGuard,
+    PermissionsGuard,
+  ],
   controllers: [AuthController],
   exports: [JwtAuthGuard, PermissionsGuard],
 })

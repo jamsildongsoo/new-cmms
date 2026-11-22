@@ -1,3 +1,6 @@
+import { Pagination } from '@/shared/ui/Pagination'
+// 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
+import { SearchActions } from '@/shared/ui/SearchActions'
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '@/modules/auth'
@@ -11,7 +14,7 @@ import { Input } from '@/shared/ui/Input'
 import { Textarea } from '@/shared/ui/Textarea'
 import { vendorApi, type Vendor, type VendorFields } from './vendor.api'
 const fields = [
-  ['name', '벤더명', 150],
+  ['name', '거래처명', 150],
   ['registrationNumber', '사업자번호', 50],
   ['representativeName', '대표자', 100],
   ['contactName', '담당자', 100],
@@ -33,7 +36,10 @@ const emptyForm = {
 type VendorForm = typeof emptyForm
 function toForm(row: Vendor): VendorForm {
   return Object.fromEntries(
-    Object.keys(emptyForm).map((key) => [key, row[key as keyof Vendor] ?? '']),
+    Object.keys(emptyForm).map((key) => [
+      key,
+      row[key as keyof Vendor] ?? '',
+    ]),
   ) as VendorForm
 }
 export function VendorListPage() {
@@ -66,21 +72,21 @@ export function VendorListPage() {
     setError('')
     setQuery({ page, search: value })
   }
-  if (!hasPermission('vendor:read')) return <Navigate to="/" replace />
+  if (!hasPermission('VENDOR:read')) return <Navigate to="/" replace />
   return (
     <section className="space-y-3">
-      <div className="flex justify-between">
-        <h1 className="text-base font-semibold">벤더 관리</h1>
-        <div className="flex gap-2">
+      <div className="flex flex-wrap justify-between">
+        <h1 className="text-lg font-semibold">거래처 관리</h1>
+        <div className="page-actions">
           <Button
             variant="secondary"
             disabled={loading || !!error}
             onClick={() =>
               printDocument({
-                title: '벤더 목록 (현재 페이지)',
+                title: '거래처 목록 (현재 페이지)',
                 columns: [
-                  '벤더번호',
-                  '벤더명',
+                  '거래처번호',
+                  '거래처명',
                   '사업자번호',
                   '담당자',
                   '연락처',
@@ -100,29 +106,31 @@ export function VendorListPage() {
             인쇄
           </Button>
           <Button
-            disabled={!hasPermission('vendor:create')}
+            disabled={!hasPermission('VENDOR:create')}
             onClick={() => navigate('/vendor/new')}
           >
-            신규
+            신규 작성
           </Button>
         </div>
       </div>
       <form
-        className="flex gap-2"
+        onReset={() => {
+          setSearch('')
+          change(1, '')
+        }}
+        className="search-form"
         onSubmit={(e) => {
           e.preventDefault()
           change(1, search.trim())
         }}
       >
         <Input
-          aria-label="벤더 검색"
-          placeholder="벤더번호·벤더명·사업자번호"
+          aria-label="거래처 검색"
+          placeholder="거래처번호·거래처명·사업자번호"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <Button type="submit" variant="secondary">
-          조회
-        </Button>
+        <SearchActions loading={loading} />
       </form>
       {error && (
         <p role="alert" className="text-xs text-red-700">
@@ -130,13 +138,13 @@ export function VendorListPage() {
         </p>
       )}
       <DataTable<Vendor>
-        rows={result.items}
-        emptyText={loading ? '조회 중...' : '등록된 벤더가 없습니다.'}
+        rows={loading || error ? [] : result.items}
+        emptyText={loading ? '불러오는 중…' : '등록된 거래처가 없습니다.'}
         gridTemplateColumns="130px 1fr 160px 130px 150px"
         columns={[
           {
             key: 'vendorId',
-            label: '벤더번호',
+            label: '거래처번호',
             render: (r) => (
               <Link
                 className="text-blue-700 underline"
@@ -146,35 +154,32 @@ export function VendorListPage() {
               </Link>
             ),
           },
-          { key: 'name', label: '벤더명', render: (r) => r.name },
+          { key: 'name', label: '거래처명', render: (r) => r.name },
           {
             key: 'registrationNumber',
             label: '사업자번호',
             render: (r) => r.registrationNumber,
           },
-          { key: 'contactName', label: '담당자', render: (r) => r.contactName },
-          { key: 'phoneNumber', label: '연락처', render: (r) => r.phoneNumber },
+          {
+            key: 'contactName',
+            label: '담당자',
+            render: (r) => r.contactName,
+          },
+          {
+            key: 'phoneNumber',
+            label: '연락처',
+            render: (r) => r.phoneNumber,
+          },
         ]}
       />
-      <div className="flex items-center justify-end gap-2 text-xs">
-        <span>
-          총 {result.total}건 · {query.page}페이지
-        </span>
-        <Button
-          variant="secondary"
-          disabled={loading || query.page === 1}
-          onClick={() => change(query.page - 1)}
-        >
-          이전
-        </Button>
-        <Button
-          variant="secondary"
-          disabled={loading || query.page * result.limit >= result.total}
-          onClick={() => change(query.page + 1)}
-        >
-          다음
-        </Button>
-      </div>
+      <Pagination
+        page={query.page}
+        limit={result.limit}
+        total={result.total}
+        loading={loading}
+        error={Boolean(error)}
+        onChange={change}
+      />
     </section>
   )
 }
@@ -212,9 +217,9 @@ function VendorEditor({ id }: { id?: string }) {
       active = false
     }
   }, [id])
-  if (!hasPermission(id ? 'vendor:read' : 'vendor:create'))
+  if (!hasPermission(id ? 'VENDOR:read' : 'VENDOR:create'))
     return <Navigate to="/" replace />
-  const readOnly = !hasPermission(id ? 'vendor:update' : 'vendor:create'),
+  const readOnly = !hasPermission(id ? 'VENDOR:update' : 'VENDOR:create'),
     disabled = readOnly || busy || !ready
   async function save(e: FormEvent) {
     e.preventDefault()
@@ -252,8 +257,8 @@ function VendorEditor({ id }: { id?: string }) {
       const { purchaseOrderCount } = await vendorApi.deletionInfo(id)
       const message =
         purchaseOrderCount > 0
-          ? `이 벤더로 등록된 발주가 ${purchaseOrderCount}건 있습니다. 기존 발주 정보는 유지됩니다. 벤더를 삭제하시겠습니까?`
-          : '벤더를 삭제하시겠습니까?'
+          ? `이 거래처로 등록된 발주가 ${purchaseOrderCount}건 있습니다. 기존 발주 정보는 유지됩니다. 거래처를 삭제하시겠습니까?`
+          : '거래처를 삭제하시겠습니까?'
       if (!window.confirm(message)) return
       await vendorApi.remove(id)
       navigate('/vendor')
@@ -265,31 +270,12 @@ function VendorEditor({ id }: { id?: string }) {
   }
   return (
     <form
-      className="space-y-3 border bg-white p-3"
+      className="space-y-3 rounded-lg border border-slate-200 bg-white p-4 md:p-5"
       onSubmit={(e) => void save(e)}
     >
-      <div className="flex justify-between">
-        <h1 className="text-base font-semibold">벤더 관리</h1>
-        <div className="flex gap-2">
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={!ready || busy}
-            onClick={() =>
-              printDocument({
-                title: '벤더 정보',
-                fields: [
-                  ['벤더번호', form.vendorId],
-                  ...fields.map(
-                    ([key, label]) => [label, form[key]] as [string, string],
-                  ),
-                  ['비고', form.note],
-                ],
-              })
-            }
-          >
-            인쇄
-          </Button>
+      <div className="flex flex-wrap justify-between">
+        <h1 className="text-lg font-semibold">거래처 관리</h1>
+        <div className="page-actions">
           <Button
             type="button"
             variant="secondary"
@@ -300,19 +286,40 @@ function VendorEditor({ id }: { id?: string }) {
           >
             목록
           </Button>
-          {!readOnly && (
-            <Button type="submit" disabled={disabled}>
-              저장
-            </Button>
-          )}
-          {id && hasPermission('vendor:delete') && (
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={!ready || busy}
+            onClick={() =>
+              printDocument({
+                title: '거래처 정보',
+                fields: [
+                  ['거래처번호', form.vendorId],
+                  ...fields.map(
+                    ([key, label]) =>
+                      [label, form[key]] as [string, string],
+                  ),
+                  ['비고', form.note],
+                ],
+              })
+            }
+          >
+            인쇄
+          </Button>
+          {id && hasPermission('VENDOR:delete') && (
             <Button
+              className="sm:ml-2"
               type="button"
               variant="danger"
               disabled={busy || !ready}
               onClick={() => void remove()}
             >
               삭제
+            </Button>
+          )}
+          {!readOnly && (
+            <Button type="submit" disabled={disabled}>
+              저장
             </Button>
           )}
         </div>
@@ -322,9 +329,9 @@ function VendorEditor({ id }: { id?: string }) {
           {error}
         </p>
       )}
-      {!ready && !error && <p className="text-xs">조회 중...</p>}
+      {!ready && !error && <p className="text-xs">불러오는 중…</p>}
       <div className="grid gap-3 md:grid-cols-2">
-        <Field label="벤더번호" required>
+        <Field label="거래처번호" required>
           <Input
             required
             maxLength={50}
@@ -353,7 +360,9 @@ function VendorEditor({ id }: { id?: string }) {
         <Textarea
           value={form.note}
           disabled={disabled}
-          onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))}
+          onChange={(e) =>
+            setForm((f) => ({ ...f, note: e.target.value }))
+          }
         />
       </Field>
       {record && (

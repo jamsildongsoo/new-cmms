@@ -1,3 +1,12 @@
+import { businessDate } from '../../common/utils/date.util';
+import { normalizePaginationQuery } from '../../common/utils/pagination.util';
+import {
+  PermissionAction,
+  buildPermissionCode,
+} from '../../common/constants/permissions';
+
+import { ModuleCode } from '../../common/constants/modules';
+import type { EntityManager } from 'typeorm';
 /** 회사·문서 범위의 작업의뢰를 관리하고 작성자 초안 변경과 결재 상태 연계를 처리한다. */
 import {
   BadRequestException,
@@ -9,11 +18,8 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { UserContext } from '../../auth/types/user-context.type';
-import { Code } from '../../common/constants/code';
-import { CodeItem } from '../../codes/code-items/entities/code-item.entity';
 import { DocumentStatus } from '../../common/constants/document-status';
 import { assertDraft } from '../../common/utils/document-status.util';
-import { applyDocumentScope } from '../../common/utils/document-scope.util';
 import { Equipment } from '../equipment/entities/equipment.entity';
 import { WorkOrder } from '../work-order/entities/work-order.entity';
 import { WorkRequest } from './entities/work-request.entity';
@@ -23,6 +29,13 @@ import { SearchWorkRequestDto } from './dto/search-work-request.dto';
 
 @Injectable()
 export class WorkRequestService {
+  withManager(manager: EntityManager): WorkRequestService {
+    return new WorkRequestService(
+      manager.getRepository(WorkRequest),
+      manager.getRepository(Equipment),
+    );
+  }
+
   constructor(
     @InjectRepository(WorkRequest)
     private readonly repository: Repository<WorkRequest>,
@@ -30,46 +43,78 @@ export class WorkRequestService {
     private readonly equipmentRepository: Repository<Equipment>,
   ) {}
   private scoped(user: UserContext) {
-    return applyDocumentScope(
-      this.repository.createQueryBuilder('wr'),
-      user,
-      'wr',
+    // 이 모듈의 조회 정책이다. 기본 조건 뒤에는 andWhere로 업무 조건을 추가한다.
+    const query = this.repository.createQueryBuilder('wr');
+    query
+      .where('wr.companyId = :companyId', { companyId: user.companyId })
+      .andWhere('wr.deleteYn = :deleteYn', { deleteYn: 'N' });
+    if (user.accessScope === 'COMPANY_ALL') return query;
+    if (user.accessScope === 'OWN_SITE' && user.siteId)
+      return query.andWhere('wr.siteId = :scopeSiteId', {
+        scopeSiteId: user.siteId,
+      });
+    if (user.accessScope === 'OWN_DEPARTMENT' && user.deptId)
+      return query.andWhere(
+        `wr.deptId IN (
+        WITH RECURSIVE scope_departments AS (
+          SELECT "deptId" FROM "department" WHERE "companyId" = :companyId AND "deptId" = :scopeDeptId AND "deleteYn" = 'N'
+          UNION
+          SELECT d."deptId" FROM "department" d JOIN scope_departments p ON d."parentDeptId" = p."deptId"
+          WHERE d."companyId" = :companyId AND d."deleteYn" = 'N'
+        ) SELECT "deptId" FROM scope_departments
+      )`,
+        { scopeDeptId: user.deptId },
+      );
+    throw new ForbiddenException(
+      'Document access scope or affiliation is missing',
     );
   }
-  async findAll(user: UserContext, search: SearchWorkRequestDto = {}) {
-    const query = this.scoped(user);
-    if (search.status)
-      query.andWhere('wr.status = :status', { status: search.status });
-    if (search.priorityCode)
-      query.andWhere('wr.priorityCode = :priority', {
-        priority: search.priorityCode,
-      });
-    if (search.searchVal?.trim()) {
-      if (
-        !['title', 'documentNo', 'equipmentId'].includes(
-          search.searchType ?? '',
-        )
-      )
-        throw new BadRequestException('Invalid searchType');
-      query.andWhere(`wr.${search.searchType} ILIKE :searchVal`, {
-        searchVal: `%${search.searchVal.trim().replace(/[\\%_]/g, '\\$&')}%`,
-      });
-    }
-    if (search.occurredDateFrom)
-      query.andWhere('wr.occurredDate >= :dateFrom', {
-        dateFrom: this.date(search.occurredDateFrom),
-      });
-    if (search.occurredDateTo)
-      query.andWhere('wr.occurredDate <= :dateTo', {
-        dateTo: this.date(search.occurredDateTo),
-      });
-    if (
-      search.occurredDateFrom &&
-      search.occurredDateTo &&
-      search.occurredDateFrom > search.occurredDateTo
-    )
-      throw new BadRequestException('Invalid date range');
-    return query.orderBy('wr.createdAt', 'DESC').getMany();
+  async findAll(user: UserContext, filter: SearchWorkRequestDto = {}) {
+    const { page, limit, offset } = normalizePaginationQuery(filter);
+    const query = this.scoped(user).select([
+      'wr.workRequestId',
+      'wr.documentNo',
+      'wr.title',
+      'wr.equipmentId',
+      'wr.occurredDate',
+      'wr.priorityCode',
+      'wr.status',
+    ]);
+    if (filter.search?.trim())
+      query.andWhere(
+        '(wr.workRequestId ILIKE :search OR wr.documentNo ILIKE :search OR wr.title ILIKE :search OR wr.equipmentId ILIKE :search)',
+        { search: `%${filter.search.trim().replace(/[\\%_]/g, '\\$&')}%` },
+      );
+    const [rows, total] = await query
+      .orderBy('wr.createdAt', 'DESC')
+      .addOrderBy('wr.workRequestId', 'DESC')
+      .skip(offset)
+      .take(limit)
+      .getManyAndCount();
+    return {
+      items: rows.map(
+        ({
+          workRequestId,
+          documentNo,
+          title,
+          equipmentId,
+          occurredDate,
+          priorityCode,
+          status,
+        }) => ({
+          workRequestId,
+          documentNo,
+          title,
+          equipmentId,
+          occurredDate,
+          priorityCode,
+          status,
+        }),
+      ),
+      total,
+      page,
+      limit,
+    };
   }
   async findOne(user: UserContext, id: string) {
     const row = await this.scoped(user)
@@ -79,15 +124,24 @@ export class WorkRequestService {
     return row;
   }
   async listForPlan(user: UserContext) {
-    if (!user.permissions?.includes('work_request:read')) return [];
+    if (
+      !user.permissions?.includes(
+        buildPermissionCode(ModuleCode.WRKREQ, PermissionAction.READ),
+      )
+    )
+      return [];
     return this.scoped(user)
-      .andWhere('wr.status = :status', { status: 'C' })
+      .andWhere('wr.status = :status', { status: DocumentStatus.CONFIRMED })
       .select(['wr.workRequestId', 'wr.documentNo', 'wr.title', 'wr.status'])
       .orderBy('wr.createdAt', 'DESC')
       .getMany();
   }
   async findForPlan(user: UserContext, id: string) {
-    if (!user.permissions?.includes('work_request:read'))
+    if (
+      !user.permissions?.includes(
+        buildPermissionCode(ModuleCode.WRKREQ, PermissionAction.READ),
+      )
+    )
       throw new ForbiddenException('Work request read permission is required');
     const request = await this.findOne(user, id);
     if (request.status !== DocumentStatus.CONFIRMED)
@@ -98,44 +152,65 @@ export class WorkRequestService {
   }
   async getOptions(user: UserContext) {
     this.scoped(user);
-    const [equipment, priorities] = await Promise.all([
-      this.equipmentRepository.find({
-        where: { companyId: user.companyId, deleteYn: 'N' },
-        order: { equipmentId: 'ASC' },
-      }),
-      this.repository.manager.getRepository(CodeItem).find({
-        where: {
-          companyId: user.companyId,
-          codeId: Code.WORK_REQUEST_PRIORITY,
-        },
-        order: { sortOrder: 'ASC', codeItemId: 'ASC' },
-      }),
-    ]);
+    // frontend/src/modules/maintenance/work-request/priority.ts의 상·중·하는 참고값이다.
+    // 우선순위 목록은 프런트에서 관리하고 백엔드에서 공통코드 검증하지 않는다.
+    const equipment = await this.equipmentRepository.find({
+      where: { companyId: user.companyId, deleteYn: 'N' },
+      order: { equipmentId: 'ASC' },
+    });
     return {
       equipment: equipment.map(({ equipmentId, name }) => ({
         value: equipmentId,
-        label: name,
-      })),
-      priorities: priorities.map(({ codeItemId, name }) => ({
-        value: codeItemId,
         label: name,
       })),
       siteId: user.siteId ?? null,
       deptId: user.deptId || null,
     };
   }
+  private relatedPlanQuery(user: UserContext) {
+    // 이 모듈의 조회 정책이다. 기본 조건 뒤에는 andWhere로 업무 조건을 추가한다.
+    const query = this.repository.manager
+      .getRepository(WorkOrder)
+      .createQueryBuilder('wo');
+    query
+      .where('wo.companyId = :companyId', { companyId: user.companyId })
+      .andWhere('wo.deleteYn = :deleteYn', { deleteYn: 'N' });
+    if (user.accessScope === 'COMPANY_ALL') return query;
+    if (user.accessScope === 'OWN_SITE' && user.siteId)
+      return query.andWhere('wo.siteId = :scopeSiteId', {
+        scopeSiteId: user.siteId,
+      });
+    if (user.accessScope === 'OWN_DEPARTMENT' && user.deptId)
+      return query.andWhere(
+        `wo.deptId IN (
+        WITH RECURSIVE scope_departments AS (
+          SELECT "deptId" FROM "department" WHERE "companyId" = :companyId AND "deptId" = :scopeDeptId AND "deleteYn" = 'N'
+          UNION
+          SELECT d."deptId" FROM "department" d JOIN scope_departments p ON d."parentDeptId" = p."deptId"
+          WHERE d."companyId" = :companyId AND d."deleteYn" = 'N'
+        ) SELECT "deptId" FROM scope_departments
+      )`,
+        { scopeDeptId: user.deptId },
+      );
+    throw new ForbiddenException(
+      'Document access scope or affiliation is missing',
+    );
+  }
+
+  /** 작업요청 접근과 작업오더 조회 권한·범위를 각각 확인한 뒤 연결 계획을 반환한다. */
   async relatedPlans(user: UserContext, id: string) {
     await this.findOne(user, id);
-    if (!user.permissions?.includes('work_order:read')) return [];
-    const query = applyDocumentScope(
-      this.repository.manager.getRepository(WorkOrder).createQueryBuilder('wo'),
-      user,
-      'wo',
-    );
+    if (
+      !user.permissions?.includes(
+        buildPermissionCode(ModuleCode.WRKORD, PermissionAction.READ),
+      )
+    )
+      return [];
+    const query = this.relatedPlanQuery(user);
     return query
       .andWhere('wo.orderKind = :kind', { kind: 'PLAN' })
       .andWhere('wo.refModule = :module AND wo.refId = :id', {
-        module: 'work_request',
+        module: ModuleCode.WRKREQ,
         id,
       })
       .select([
@@ -149,7 +224,6 @@ export class WorkRequestService {
       .getMany();
   }
   async create(user: UserContext, dto: CreateWorkRequestDto) {
-    this.scoped(user);
     if (
       await this.repository.findOneBy({
         companyId: user.companyId,
@@ -173,7 +247,7 @@ export class WorkRequestService {
         requesterId: user.userId,
         siteId: user.siteId ?? null,
         deptId: user.deptId || null,
-        status: 'D',
+        status: DocumentStatus.DRAFT,
         deleteYn: 'N',
         createdBy: user.userId,
       }),
@@ -250,18 +324,11 @@ export class WorkRequestService {
     )
       throw new NotFoundException('Equipment not found');
   }
-  private date(value: string) {
-    const raw = this.required(value, 'occurredDate');
-    if (!/^\d{8}$/.test(raw))
-      throw new BadRequestException('occurredDate must be YYYYMMDD');
-    const date = new Date(
-      `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}T00:00:00Z`,
-    );
-    if (
-      !Number.isFinite(date.getTime()) ||
-      date.toISOString().slice(0, 10).replaceAll('-', '') !== raw
-    )
-      throw new BadRequestException('occurredDate must be a valid date');
-    return raw;
+  private date(value: string): string {
+    return businessDate(
+      this.required(value, 'occurredDate'),
+      false,
+      'occurredDate',
+    )!;
   }
 }

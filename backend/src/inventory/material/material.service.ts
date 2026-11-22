@@ -10,7 +10,7 @@ import { QueryFailedError, Repository } from 'typeorm';
 import { UserContext } from '../../auth/types/user-context.type';
 import { CodeItem } from '../../codes/code-items/entities/code-item.entity';
 import { CodeValidationService } from '../../codes/code-validation.service';
-import { Code } from '../../common/constants/code';
+import { CodeGroup } from '../../common/constants/code';
 import { PaginatedResponseDto } from '../../common/dto/paginated-response.dto';
 import { normalizePaginationQuery } from '../../common/utils/pagination.util';
 import { Material } from './entities/material.entity';
@@ -28,10 +28,19 @@ export class MaterialService {
   ) {}
   async getOptions(user: UserContext) {
     const types = await this.repository.manager.getRepository(CodeItem).find({
-      where: { companyId: user.companyId, codeId: Code.MATERIAL_TYPE },
+      where: { companyId: user.companyId, codeId: CodeGroup.MATL_TYPE },
+      order: { sortOrder: 'ASC', codeItemId: 'ASC' },
+    });
+    const units = await this.repository.manager.getRepository(CodeItem).find({
+      where: { companyId: user.companyId, codeId: CodeGroup.UNIT },
       order: { sortOrder: 'ASC', codeItemId: 'ASC' },
     });
     return {
+      // frontend/src/modules/inventory/material/material.api.ts의 units와 함께 수정한다.
+      units: units.map(({ codeItemId, name }) => ({
+        value: codeItemId,
+        label: name,
+      })),
       types: types.map(({ codeItemId, name }) => ({
         value: codeItemId,
         label: name,
@@ -172,7 +181,7 @@ export class MaterialService {
   private assertType(companyId: string, typeCode: string) {
     return this.codes.assertValidItem({
       companyId,
-      codeId: Code.MATERIAL_TYPE,
+      codeId: CodeGroup.MATL_TYPE,
       codeItemId: typeCode,
     });
   }

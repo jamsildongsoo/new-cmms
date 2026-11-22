@@ -1,3 +1,4 @@
+// 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
 /** 문서 저장 전 첨부는 null 참조 UUID 그룹에 즉시 업로드하고 처리 중 부모 저장을 차단한다. */
 import { Download, Paperclip, Trash2, Upload } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -67,7 +68,7 @@ export function AttachmentManager({
       try {
         setItems(await getAttachmentItems(targetAttachmentId))
       } catch {
-        onError('Failed to load attachments')
+        onError('첨부파일을 불러오지 못했습니다.')
       }
     },
     [attachmentId, onError],
@@ -81,7 +82,7 @@ export function AttachmentManager({
     }
     getAttachmentItems(attachmentId)
       .then((data) => active && setItems(data))
-      .catch(() => active && onError('Failed to load attachments'))
+      .catch(() => active && onError('첨부파일을 불러오지 못했습니다.'))
     return () => {
       active = false
     }
@@ -108,7 +109,7 @@ export function AttachmentManager({
       await uploadAttachmentItems(nextAttachmentId, files)
       await loadItems(nextAttachmentId)
     } catch {
-      onError('Failed to upload attachment')
+      onError('첨부파일을 업로드하지 못했습니다.')
     } finally {
       changeBusy(false)
       if (inputRef.current) {
@@ -133,7 +134,7 @@ export function AttachmentManager({
       link.click()
       URL.revokeObjectURL(url)
     } catch {
-      onError('Failed to download attachment')
+      onError('첨부파일을 다운로드하지 못했습니다.')
     } finally {
       changeBusy(false)
     }
@@ -149,7 +150,7 @@ export function AttachmentManager({
       await deleteAttachmentItem(attachmentId, itemNo)
       await loadItems()
     } catch {
-      onError('Failed to delete attachment')
+      onError('첨부파일을 삭제하지 못했습니다.')
     } finally {
       changeBusy(false)
     }
@@ -165,8 +166,8 @@ export function AttachmentManager({
         className="hidden"
         onChange={(event) => void uploadFiles(event.target.files)}
       />
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-xs font-semibold text-slate-900">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-base font-semibold text-slate-900">
           <Paperclip className="h-4 w-4" />
           첨부파일
         </div>
@@ -178,13 +179,13 @@ export function AttachmentManager({
           onClick={() => inputRef.current?.click()}
         >
           <Upload className="h-4 w-4" />
-          파일추가
+          파일 추가
         </Button>
       </div>
       <div className="grid gap-1">
         {items.length === 0 ? (
           <div className="border border-dashed border-slate-200 px-2 py-3 text-center text-xs text-slate-500">
-            첨부파일이 없습니다
+            첨부파일이 없습니다.
           </div>
         ) : (
           items.map((item) => (

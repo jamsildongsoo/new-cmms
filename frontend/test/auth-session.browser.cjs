@@ -1,3 +1,4 @@
+const metadata = require('./support/metadata.cjs')
 /** 빌드된 SPA를 Chromium에서 실행하여 Context 복원과 세션 응답 경합을 검증한다. API는 이 테스트의 fixture 응답이다. */
 const assert = require('node:assert/strict')
 const fs = require('node:fs/promises')
@@ -8,65 +9,7 @@ const { spawn } = require('node:child_process')
 const { once } = require('node:events')
 const dist = path.resolve(__dirname, '../dist')
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
-async function until(fn, description, timeout = 12000) {
-  const end = Date.now() + timeout
-  while (Date.now() < end) {
-    if (await fn()) return
-    await wait(50)
-  }
-  throw Error(`Timeout: ${description}`)
-}
-class CDP {
-  constructor(socket) {
-    this.socket = socket
-    this.next = 0
-    this.pending = new Map()
-    this.handlers = []
-    socket.addEventListener('message', ({ data }) => {
-      const event = JSON.parse(data)
-      if (event.id) {
-        const pending = this.pending.get(event.id)
-        if (pending) {
-          this.pending.delete(event.id)
-          clearTimeout(pending.timer)
-          event.error
-            ? pending.reject(Error(event.error.message))
-            : pending.resolve(event.result)
-        }
-      } else for (const fn of this.handlers) fn(event)
-    })
-  }
-  send(method, params = {}, sessionId) {
-    const id = ++this.next
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id)
-        reject(Error(`CDP timeout: ${method}`))
-      }, 15000)
-      this.pending.set(id, { resolve, reject, timer })
-      this.socket.send(
-        JSON.stringify({
-          id,
-          method,
-          params,
-          ...(sessionId ? { sessionId } : {}),
-        }),
-      )
-    })
-  }
-  async eval(session, expression) {
-    const result = await this.send(
-      'Runtime.evaluate',
-      { expression, returnByValue: true, awaitPromise: true },
-      session,
-    )
-    if (result.exceptionDetails)
-      throw Error(
-        result.exceptionDetails.text + ': ' + result.result?.description,
-      )
-    return result.result?.value
-  }
-}
+const { CDP, until } = require('./support/browser.cjs')
 async function main() {
   await fs.access(path.join(dist, 'index.html'))
   const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'cmms-browser-'))
@@ -132,7 +75,14 @@ async function main() {
     const socket = new WebSocket(`ws://127.0.0.1:${endpoint[0]}${endpoint[1]}`)
     await once(socket, 'open')
     cdp = new CDP(socket)
-    const fixture = { status: 200, delay: false, held: [], meCount: 0 }
+    const fixture = {
+      status: 200,
+      delay: false,
+      held: [],
+      meCount: 0,
+      metadataCount: 0,
+      metadataStatus: 200,
+    }
     const user = (companyId) => ({
       companyId,
       userId: 'owner',
@@ -153,7 +103,7 @@ async function main() {
             { name: 'Access-Control-Allow-Origin', value: origin },
             {
               name: 'Access-Control-Allow-Headers',
-              value: 'authorization,content-type,idempotency-key',
+              value: 'authorization,content-type',
             },
             {
               name: 'Access-Control-Allow-Methods',
@@ -181,6 +131,17 @@ async function main() {
         if (data.request.method === 'OPTIONS')
           return reply(session, data, 204, {})
         const route = new URL(data.request.url).pathname
+        if (route.endsWith('/system/metadata')) {
+          fixture.metadataCount++
+          return reply(
+            session,
+            data,
+            fixture.metadataStatus,
+            fixture.metadataStatus === 200
+              ? metadata
+              : { message: 'metadata unavailable' },
+          )
+        }
         if (route.endsWith('/auth/login')) {
           const payload = JSON.parse(data.request.postData)
           return reply(session, data, 201, {
@@ -277,6 +238,7 @@ async function main() {
       first,
       `(() => {const input=document.querySelector('input[required]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'미저장 제목');input.dispatchEvent(new Event('input',{bubbles:true}))})()`,
     )
+    const metadataCount = fixture.metadataCount
     const oldCount = fixture.meCount
     await cdp.eval(first, `window.dispatchEvent(new Event('focus'))`)
     await until(() => fixture.meCount > oldCount, 'focus reload')
@@ -285,7 +247,10 @@ async function main() {
       await cdp.eval(first, `document.querySelector('input[required]').value`),
       '미저장 제목',
     )
-    console.log('PASS same-user context reload preserves local form input')
+    assert.equal(fixture.metadataCount, metadataCount)
+    console.log(
+      'PASS same-user context reload preserves local form input and reuses metadata',
+    )
     fixture.status = 403
     await cdp.eval(first, `window.dispatchEvent(new Event('focus'))`)
     await wait(200)
@@ -324,6 +289,30 @@ async function main() {
     )
     console.log(
       'PASS reload waits for /me, preserves tokens on 500, and retries without restoring unsaved input',
+    )
+    fixture.metadataStatus = 500
+    await cdp.send('Page.reload', {}, first)
+    await until(
+      () =>
+        cdp.eval(
+          first,
+          "document.body.textContent.includes('공통 코드 목록을 불러오지 못했습니다.') && !document.body.textContent.includes('게시글 작성')",
+        ),
+      'metadata failure blocks business screen',
+    )
+    assert.equal(
+      await cdp.eval(first, "localStorage.getItem('cmms.accessToken')"),
+      'token-A',
+    )
+    fixture.metadataStatus = 200
+    await click(first, '다시 시도')
+    await until(
+      () =>
+        cdp.eval(first, "document.body.textContent.includes('게시글 작성')"),
+      'metadata retry restores screen',
+    )
+    console.log(
+      'PASS metadata failure retains authentication and supports retry',
     )
     fixture.delay = true
     await cdp.eval(first, `window.dispatchEvent(new Event('focus'))`)
@@ -406,7 +395,6 @@ async function main() {
     })
   }
 }
-module.exports = { CDP, until }
 if (require.main === module) {
   main().catch((error) => {
     console.error(error)

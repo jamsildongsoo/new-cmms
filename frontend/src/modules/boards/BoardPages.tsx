@@ -1,3 +1,6 @@
+import { Pagination } from '@/shared/ui/Pagination'
+import { formatDateTime } from '@/shared/lib/format'
+// 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '@/modules/auth'
@@ -16,7 +19,6 @@ import {
   type BoardPage,
 } from './boards.api'
 
-const time = (value: string) => new Date(value).toLocaleString('ko-KR')
 const textareaClass =
   'min-h-24 w-full border border-slate-300 p-2 text-sm disabled:bg-slate-50'
 export function BoardListPage() {
@@ -43,7 +45,11 @@ export function BoardListPage() {
           setError('')
         }
       })
-      .catch((e) => active && setError(toMessage(e)))
+      .catch((e) => {
+        if (!active) return
+        setResult({ items: [], total: 0, page, limit: 20 })
+        setError(toMessage(e))
+      })
       .finally(() => active && setLoading(false))
     return () => {
       active = false
@@ -57,18 +63,24 @@ export function BoardListPage() {
         r.boardId,
         r.title,
         r.createdBy,
-        time(r.createdAt),
+        formatDateTime(r.createdAt),
       ]),
     })
   return (
     <section className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h1 className="text-base font-semibold">게시판</h1>
-        <div className="flex gap-2">
-          <Button variant="secondary" disabled={loading} onClick={print}>
+      <div className="flex flex-wrap items-center justify-between">
+        <h1 className="text-lg font-semibold">게시판</h1>
+        <div className="page-actions">
+          <Button
+            variant="secondary"
+            disabled={loading || Boolean(error)}
+            onClick={print}
+          >
             인쇄
           </Button>
-          <Button onClick={() => navigate('/boards/new')}>신규</Button>
+          <Button onClick={() => navigate('/boards/new')}>
+            신규 작성
+          </Button>
         </div>
       </div>
       <form
@@ -100,11 +112,21 @@ export function BoardListPage() {
       <div className="overflow-x-auto">
         <div className="min-w-[750px]">
           <DataTable
-            rows={result.items}
+            rows={loading || error ? [] : result.items}
             gridTemplateColumns="190px minmax(200px,1fr) 120px 180px"
-            emptyText={loading ? '조회 중...' : '등록된 게시글이 없습니다.'}
+            emptyText={
+              loading
+                ? '불러오는 중…'
+                : error
+                  ? '조회에 실패했습니다.'
+                  : '등록된 게시글이 없습니다.'
+            }
             columns={[
-              { key: 'boardId', label: '문서번호', render: (r) => r.boardId },
+              {
+                key: 'boardId',
+                label: '문서번호',
+                render: (r) => r.boardId,
+              },
               {
                 key: 'title',
                 label: '제목',
@@ -117,42 +139,31 @@ export function BoardListPage() {
                   </Link>
                 ),
               },
-              { key: 'createdBy', label: '작성자', render: (r) => r.createdBy },
+              {
+                key: 'createdBy',
+                label: '작성자',
+                render: (r) => r.createdBy,
+              },
               {
                 key: 'createdAt',
                 label: '작성일',
-                render: (r) => time(r.createdAt),
+                render: (r) => formatDateTime(r.createdAt),
               },
             ]}
           />
         </div>
       </div>
-      <div className="flex items-center justify-end gap-2 text-xs">
-        <span>
-          총 {result.total}건 · {page} /{' '}
-          {Math.max(1, Math.ceil(result.total / result.limit))} 페이지
-        </span>
-        <Button
-          variant="secondary"
-          disabled={page === 1 || loading}
-          onClick={() => {
-            setLoading(true)
-            setPage((p) => p - 1)
-          }}
-        >
-          이전
-        </Button>
-        <Button
-          variant="secondary"
-          disabled={page * result.limit >= result.total || loading}
-          onClick={() => {
-            setLoading(true)
-            setPage((p) => p + 1)
-          }}
-        >
-          다음
-        </Button>
-      </div>
+      <Pagination
+        page={page}
+        limit={result.limit}
+        total={result.total}
+        loading={loading}
+        error={Boolean(error)}
+        onChange={(page) => {
+          setLoading(true)
+          setPage(page)
+        }}
+      />
     </section>
   )
 }
@@ -161,11 +172,15 @@ export function BoardFormPage() {
   const { boardId } = useParams()
   return <BoardEditor key={boardId ?? 'new'} id={boardId} />
 }
-const empty = { title: '', content: '', attachmentId: null as string | null }
+const empty = {
+  title: '',
+  content: '',
+  attachmentId: null as string | null,
+}
 function BoardEditor({ id }: { id?: string }) {
   const navigate = useNavigate(),
     { user } = useAuth()
-  const [requestKey] = useState(() => crypto.randomUUID())
+
   const [record, setRecord] = useState<BoardDetail | null>(null),
     [form, setForm] = useState(empty)
   const [baseline, setBaseline] = useState(JSON.stringify(empty)),
@@ -206,7 +221,7 @@ function BoardEditor({ id }: { id?: string }) {
     try {
       const saved = record
         ? await boardApi.update(record.boardId, form)
-        : await boardApi.create(form, requestKey)
+        : await boardApi.create(form)
       const loaded = {
         title: saved.title,
         content: saved.content,
@@ -245,17 +260,27 @@ function BoardEditor({ id }: { id?: string }) {
     <section className="space-y-3">
       <form
         ref={formRef}
-        className="space-y-3 border bg-white p-3"
+        className="space-y-3 rounded-lg border border-slate-200 bg-white p-4 md:p-5"
         onSubmit={(event) => {
           event.preventDefault()
           void save()
         }}
       >
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h1 className="text-base font-semibold">
+          <h1 className="text-lg font-semibold">
             게시글 {record ? '조회' : '작성'}
           </h1>
-          <div className="flex gap-2">
+          <div className="page-actions">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={saving || attachmentBusy}
+              onClick={() => {
+                if (confirmLeave()) navigate('/boards')
+              }}
+            >
+              목록
+            </Button>
             <Button
               type="button"
               variant="secondary"
@@ -267,7 +292,7 @@ function BoardEditor({ id }: { id?: string }) {
                   fields: [
                     ['문서번호', record.boardId],
                     ['작성자', record.createdBy],
-                    ['작성일', time(record.createdAt)],
+                    ['작성일', formatDateTime(record.createdAt)],
                   ],
                   text: form.content,
                 })
@@ -275,23 +300,9 @@ function BoardEditor({ id }: { id?: string }) {
             >
               인쇄
             </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={saving || attachmentBusy}
-              onClick={() => {
-                if (confirmLeave()) navigate('/boards')
-              }}
-            >
-              목록
-            </Button>
-            {owner && (
-              <Button type="submit" disabled={blocked}>
-                저장
-              </Button>
-            )}
             {owner && record && (
               <Button
+                className="sm:ml-2"
                 type="button"
                 variant="danger"
                 disabled={blocked || record.comments.length > 0}
@@ -305,6 +316,11 @@ function BoardEditor({ id }: { id?: string }) {
                 삭제
               </Button>
             )}
+            {owner && (
+              <Button type="submit" disabled={blocked}>
+                저장
+              </Button>
+            )}
           </div>
         </div>
         {error && (
@@ -315,11 +331,13 @@ function BoardEditor({ id }: { id?: string }) {
         <DocumentIdField value={record?.boardId} />
         {record && (
           <p className="text-xs text-slate-500">
-            작성자: {record.createdBy} · 작성일: {time(record.createdAt)}
-            {record.updatedAt && ` · 수정일: ${time(record.updatedAt)}`}
+            작성자: {record.createdBy} · 작성일:{' '}
+            {formatDateTime(record.createdAt)}
+            {record.updatedAt &&
+              ` · 수정일: ${formatDateTime(record.updatedAt)}`}
           </p>
         )}
-        <label className="block space-y-1 text-xs">
+        <label className="block space-y-1.5 text-sm font-medium text-slate-700">
           제목
           <Input
             value={form.title}
@@ -332,7 +350,7 @@ function BoardEditor({ id }: { id?: string }) {
             }
           />
         </label>
-        <label className="block space-y-1 text-xs">
+        <label className="block space-y-1.5 text-sm font-medium text-slate-700">
           본문
           <textarea
             value={form.content}
@@ -349,7 +367,7 @@ function BoardEditor({ id }: { id?: string }) {
         </label>
         <AttachmentManager
           attachmentId={form.attachmentId}
-          refModule="board"
+          refModule="BORD"
           refId={record?.boardId ?? null}
           disabled={!owner || blocked}
           onBusyChange={setAttachmentBusy}
@@ -360,7 +378,8 @@ function BoardEditor({ id }: { id?: string }) {
         />
         {owner && Boolean(record?.comments.length) && (
           <p className="text-xs text-slate-500">
-            댓글이 있는 게시글은 삭제할 수 없습니다. 본문은 수정할 수 있습니다.
+            댓글이 있는 게시글은 삭제할 수 없습니다. 본문은 수정할 수
+            있습니다.
           </p>
         )}
       </form>
@@ -388,7 +407,10 @@ function Comments({
     [error, setError] = useState('')
   const [editing, setEditing] = useState<string | null>(null),
     [editContent, setEditContent] = useState('')
-  async function change(action: () => Promise<unknown>, after: () => void) {
+  async function change(
+    action: () => Promise<unknown>,
+    after: () => void,
+  ) {
     if (busy) return
     setBusy(true)
     setError('')
@@ -410,8 +432,10 @@ function Comments({
       )
   }
   return (
-    <section className="space-y-3 border bg-white p-3">
-      <h2 className="text-sm font-semibold">댓글 ({board.comments.length})</h2>
+    <section className="space-y-3 rounded-lg border border-slate-200 bg-white p-4 md:p-5">
+      <h2 className="text-base font-semibold">
+        댓글 ({board.comments.length})
+      </h2>
       {error && (
         <p role="alert" className="text-sm text-red-700">
           {error}
@@ -425,9 +449,9 @@ function Comments({
           key={comment.commentId}
           className="space-y-2 border-b pb-3 text-sm"
         >
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs text-slate-500">
-              {comment.createdBy} · {time(comment.createdAt)}
+              {comment.createdBy} · {formatDateTime(comment.createdAt)}
               {comment.updatedAt && ' (수정됨)'}
             </p>
             {comment.createdBy === user?.userId &&
@@ -481,14 +505,7 @@ function Comments({
                 disabled={busy}
                 onChange={(event) => setEditContent(event.target.value)}
               />
-              <div className="flex gap-2">
-                <Button
-                  type="submit"
-                  size="sm"
-                  disabled={busy || !editContent.trim()}
-                >
-                  저장
-                </Button>
+              <div className="page-actions">
                 <Button
                   type="button"
                   size="sm"
@@ -498,10 +515,19 @@ function Comments({
                 >
                   취소
                 </Button>
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={busy || !editContent.trim()}
+                >
+                  저장
+                </Button>
               </div>
             </form>
           ) : (
-            <p className="whitespace-pre-wrap break-words">{comment.content}</p>
+            <p className="whitespace-pre-wrap break-words">
+              {comment.content}
+            </p>
           )}
         </article>
       ))}

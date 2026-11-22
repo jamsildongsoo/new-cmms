@@ -5,6 +5,8 @@
 **/*.tsbuildinfo
 **/.env
 **/.env.*
+# frontend에는 공개 빌드 설정만 둔다. 루트와 backend 환경파일은 제외한다.
+!frontend/.env
 **/*.swp
 **/*.swo
 **/.aws
@@ -16,3 +18,7 @@ backups
 deploy/tls
 deploy/db-certs
 docs
+
+**/test
+**/*.spec.ts
+**/*.test.*

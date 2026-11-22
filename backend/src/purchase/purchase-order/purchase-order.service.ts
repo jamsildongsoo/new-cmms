@@ -1,6 +1,10 @@
+import { inputQuantity, inputPrice } from '../../common/utils/decimal.util';
+import { normalizePaginationQuery } from '../../common/utils/pagination.util';
+import { ModuleCode } from '../../common/constants/modules';
+import { CodeGroup } from '../../common/constants/code';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { PurchaseRequestService } from '../purchase-request/purchase-request.service';
-/** 구매발주의 벤더·금액·요청 병합 및 Allocation을 관리한다. */
+/** 구매발주의 거래처·금액과 선택적 구매요청 참조를 관리한다. */
 import {
   BadRequestException,
   ConflictException,
@@ -11,14 +15,8 @@ import {
 import { randomUUID } from 'node:crypto';
 import { DataSource, EntityManager } from 'typeorm';
 import { UserContext } from '../../auth/types/user-context.type';
-import { applyDocumentScope } from '../../common/utils/document-scope.util';
-import { businessDate } from '../../common/utils/posting-date';
-import {
-  decimal,
-  lineAmount,
-  price,
-  qty,
-} from '../../common/utils/stock-decimal';
+import { businessDate } from '../../common/utils/date.util';
+import { decimal, price, qty, rounded } from '../../common/utils/decimal.util';
 import { DocumentStatus } from '../../common/constants/document-status';
 import { CodeItem } from '../../codes/code-items/entities/code-item.entity';
 import { Material } from '../../inventory/material/entities/material.entity';
@@ -26,9 +24,7 @@ import { Site } from '../../organization/sites/entities/site.entity';
 import { Department } from '../../organization/departments/entities/department.entity';
 import { User } from '../../identity/users/entities/user.entity';
 import { PurchaseOrder } from '../purchase-order/entities/purchase-order.entity';
-import { PurchaseRequestItem } from '../purchase-request/entities/purchase-request-item.entity';
 import { PurchaseOrderItem } from '../purchase-order/entities/purchase-order-item.entity';
-import { PurchaseOrderAllocation } from '../purchase-order/entities/purchase-order-allocation.entity';
 import { Vendor } from '../vendor/entities/vendor.entity';
 import { PurchaseOrderSaveDto } from './dto/purchase-order.dto';
 import { PurchaseSearchDto } from '../common/purchase-search.dto';
@@ -38,6 +34,16 @@ type Header = PurchaseOrder & {
 type Item = PurchaseOrderItem;
 @Injectable()
 export class PurchaseOrderService {
+  private transactionManager?: EntityManager;
+  withManager(manager: EntityManager): PurchaseOrderService {
+    const scoped = new PurchaseOrderService(
+      this.db,
+      this.requests.withManager(manager),
+    );
+    scoped.transactionManager = manager;
+    return scoped;
+  }
+
   constructor(
     private readonly db: DataSource,
     private readonly requests: PurchaseRequestService,
@@ -48,57 +54,100 @@ export class PurchaseOrderService {
   update(user: UserContext, id: string, dto: PurchaseOrderSaveDto) {
     return this.save(user, id, dto, false);
   }
-  private headers(manager = this.db.manager) {
+  private headers(manager = this.transactionManager ?? this.db.manager) {
     return manager.getRepository<Header>(PurchaseOrder);
   }
-  private items(manager = this.db.manager) {
+  private items(manager = this.transactionManager ?? this.db.manager) {
     return manager.getRepository(PurchaseOrderItem);
   }
-  private scoped(user: UserContext, manager = this.db.manager) {
+  private scoped(
+    user: UserContext,
+    manager = this.transactionManager ?? this.db.manager,
+  ) {
+    // 이 모듈의 조회 정책이다. 기본 조건 뒤에는 andWhere로 업무 조건을 추가한다.
     const query = this.headers(manager).createQueryBuilder('p');
+    query
+      .where('p.companyId = :companyId', { companyId: user.companyId })
+      .andWhere('p.deleteYn = :deleteYn', { deleteYn: 'N' });
+    if (user.accessScope === 'COMPANY_ALL') return query;
+    if (user.accessScope === 'OWN_SITE' && user.siteId)
+      return query.andWhere('p.siteId = :scopeSiteId', {
+        scopeSiteId: user.siteId,
+      });
+    if (user.accessScope === 'OWN_DEPARTMENT' && user.deptId)
+      return query.andWhere(
+        `p.deptId IN (
+        WITH RECURSIVE scope_departments AS (
+          SELECT "deptId" FROM "department" WHERE "companyId" = :companyId AND "deptId" = :scopeDeptId AND "deleteYn" = 'N'
+          UNION
+          SELECT d."deptId" FROM "department" d JOIN scope_departments p ON d."parentDeptId" = p."deptId"
+          WHERE d."companyId" = :companyId AND d."deleteYn" = 'N'
+        ) SELECT "deptId" FROM scope_departments
+      )`,
+        { scopeDeptId: user.deptId },
+      );
+    throw new ForbiddenException(
+      'Document access scope or affiliation is missing',
+    );
+  }
+  async findAll(user: UserContext, filter: PurchaseSearchDto = {}) {
+    const { page, limit, offset } = normalizePaginationQuery(filter);
+    const q = this.scoped(user)
+      .select([
+        'p.orderId',
+        'p.documentNo',
+        'p.title',
+        'p.orderDate',
+        'p.status',
+        'p.totalAmount',
+      ])
+      .orderBy('p.createdAt', 'DESC')
+      .addOrderBy('p.orderId', 'DESC');
+    if (filter.search?.trim())
+      q.andWhere(
+        '(p.title ILIKE :search OR p.documentNo ILIKE :search OR p.orderId ILIKE :search)',
+        { search: `%${filter.search.trim().replace(/[\\%_]/g, '\\$&')}%` },
+      );
+    const [items, total] = await q.skip(offset).take(limit).getManyAndCount();
+    return {
+      items: items.map(
+        ({ orderId, documentNo, title, orderDate, status, totalAmount }) => ({
+          orderId,
+          documentNo,
+          title,
+          orderDate,
+          status,
+          totalAmount,
+        }),
+      ),
+      total,
+      page,
+      limit,
+    };
+  }
+  async findOne(
+    user: UserContext,
+    id: string,
+    manager = this.transactionManager ?? this.db.manager,
+  ) {
+    const query = this.scoped(user, manager);
     query.leftJoinAndMapOne(
       'p.vendor',
       Vendor,
       'vendor',
-      'vendor.companyId = p.companyId AND vendor.vendorId = p.vendorId',
+      "vendor.companyId = p.companyId AND vendor.vendorId = p.vendorId AND vendor.deleteYn = 'N'",
     );
-    return applyDocumentScope(query, user, 'p');
-  }
-  async findAll(user: UserContext, filter: PurchaseSearchDto = {}) {
-    const q = this.scoped(user).orderBy('p.createdAt', 'DESC');
-    if (filter.status)
-      q.andWhere('p.status = :status', { status: filter.status });
-    if (filter.search?.trim())
-      q.andWhere(
-        `(p.title ILIKE :search OR p.documentNo ILIKE :search OR p.orderId ILIKE :search)`,
-        {
-          search: `%${filter.search.trim()}%`,
-        },
-      );
-    const date = 'orderDate';
-    if (filter.from)
-      q.andWhere(`p.${date} >= :from`, { from: businessDate(filter.from) });
-    if (filter.to)
-      q.andWhere(`p.${date} <= :to`, { to: businessDate(filter.to) });
-    return q.getMany();
-  }
-  async findOne(user: UserContext, id: string, manager = this.db.manager) {
-    const row = await this.scoped(user, manager)
-      .andWhere(`p.orderId = :id`, { id })
-      .getOne();
+    const row = await query.andWhere('p.orderId = :id', { id }).getOne();
     if (!row)
       throw new NotFoundException('구매 문서가 없거나 조회 범위 밖입니다.');
     const items = await this.items(manager).find({
       where: { companyId: user.companyId, orderId: id },
       order: { sortOrder: 'ASC' },
     });
-    const allocations = await manager
-      .getRepository(PurchaseOrderAllocation)
-      .find({ where: { companyId: user.companyId, orderId: id } });
-    return Object.assign({}, row, { items, allocations });
+    return Object.assign({}, row, { items });
   }
   private editable(user: UserContext, row: Header) {
-    if (row.status !== 'D' || row.createdBy !== user.userId)
+    if (row.status !== DocumentStatus.DRAFT || row.createdBy !== user.userId)
       throw new ForbiddenException('작성자만 초안을 처리할 수 있습니다.');
   }
   private text(value: unknown, label: string) {
@@ -106,99 +155,76 @@ export class PurchaseOrderService {
       throw new BadRequestException(`${label}을 입력하십시오.`);
     return value.trim();
   }
-  private mergeKey(item: {
-    materialId: string;
-    spec: string | null;
-    baseUnit: string;
-  }) {
-    return JSON.stringify([item.materialId, item.spec, item.baseUnit]);
-  }
-  private async sourceItems(
+  /** 원문 조회 범위와 완결 상태를 재확인한다. 프론트가 보낸 참조 ID만으로 원문을 신뢰하지 않는다. */
+  private async requestSource(
     user: UserContext,
-    ids: string[],
-    manager: EntityManager,
+    id: string,
+    manager = this.transactionManager ?? this.db.manager,
   ) {
-    const groups = new Map<
-      string,
-      {
-        item: PurchaseRequestItem;
-        links: {
-          requestId: string;
-          requestItemId: string;
-          quantity: string;
-        }[];
-      }
-    >();
-    if (new Set(ids).size !== ids.length)
-      throw new BadRequestException('요청을 중복 선택했습니다.');
-    for (const id of ids) {
-      const source = await this.requests.findOne(user, id, manager);
-      if (source.status !== 'C' || !source.items.length)
-        throw new BadRequestException('완결(C) 구매요청만 선택하십시오.');
-      for (const item of source.items) {
-        const key = this.mergeKey(item),
-          existing = groups.get(key),
-          link = {
-            requestId: id,
-            requestItemId: item.itemId,
-            quantity: item.quantity,
-          };
-        if (existing) {
-          existing.item.quantity = decimal(
-            qty(existing.item.quantity) + qty(item.quantity),
-          );
-          existing.links.push(link);
-        } else
-          groups.set(key, {
-            item: Object.assign({}, item, {
-              itemId: randomUUID(),
-              quantity: decimal(qty(item.quantity)),
-            }),
-            links: [link],
-          });
-      }
-    }
-    return [...groups.values()];
+    const source = await this.requests.findOne(user, id, manager);
+    if (source.status !== DocumentStatus.CONFIRMED)
+      throw new BadRequestException('완결(C) 구매요청만 선택하십시오.');
+    return source;
   }
-  async preview(user: UserContext, ids: string[]) {
-    const groups = await this.sourceItems(user, ids, this.db.manager);
-    const linked = ids.length
-      ? await this.db
-          .getRepository(PurchaseOrderAllocation)
-          .createQueryBuilder('a')
-          .innerJoin(
-            PurchaseOrder,
-            'o',
-            'o.companyId=a.companyId AND o.orderId=a.orderId',
-          )
-          .where('a.companyId=:companyId', { companyId: user.companyId })
-          .andWhere('a.requestId IN (:...ids)', { ids })
-          .andWhere("o.deleteYn='N'")
-          .getExists()
-      : false;
+  async linkedOrders(user: UserContext, requestId: string) {
+    await this.requests.findOne(user, requestId);
+    return this.scoped(user)
+      .select([
+        'p.orderId',
+        'p.documentNo',
+        'p.title',
+        'p.status',
+        'p.createdAt',
+      ])
+      .andWhere('p.refModule = :module AND p.refId = :requestId', {
+        module: ModuleCode.PURREQ,
+        requestId,
+      })
+      .orderBy('p.createdAt', 'DESC')
+      .addOrderBy('p.orderId', 'DESC')
+      .getMany();
+  }
+  async preview(user: UserContext, requestId: string) {
+    const source = await this.requestSource(user, requestId);
+    // 최초 복사용 데이터이다. 이후 저장·상신 시 원 요청의 품목·수량과 비교하지 않는다.
+    // 프런트 purchase-order.api.ts / PurchaseOrderForm.tsx와 함께 수정한다.
     return {
-      items: groups.map((g) =>
-        Object.assign({}, g.item, { unitPrice: null, amount: null }),
-      ),
-      hasLinkedOrders: linked,
-      message: linked ? '기존 연결된 발주건이 있습니다.' : null,
+      title: source.title,
+      content: source.content,
+      note: source.note,
+      expectedDeliveryDate: source.requiredDate,
+      items: source.items.map((i) => ({
+        itemId: randomUUID(),
+        materialId: i.materialId,
+        materialName: i.materialName,
+        spec: i.spec,
+        baseUnit: i.baseUnit,
+        quantity: i.quantity,
+        note: i.note,
+        unitPrice: null,
+        amount: null,
+      })),
     };
   }
   async options(user: UserContext) {
     this.scoped(user);
     const companyId = user.companyId;
     const [materials, sites, departments, users, types] = await Promise.all([
-      this.db.getRepository(Material).find({
+      (this.transactionManager ?? this.db).getRepository(Material).find({
         where: { companyId, deleteYn: 'N' },
         order: { materialId: 'ASC' },
       }),
-      this.db.getRepository(Site).find({ where: { companyId, deleteYn: 'N' } }),
-      this.db
+      (this.transactionManager ?? this.db)
+        .getRepository(Site)
+        .find({ where: { companyId, deleteYn: 'N' } }),
+      (this.transactionManager ?? this.db)
         .getRepository(Department)
         .find({ where: { companyId, deleteYn: 'N' } }),
-      this.db.getRepository(User).find({ where: { companyId, deleteYn: 'N' } }),
-      this.db.getRepository(CodeItem).find({
-        where: { companyId, codeId: 'PURCHASE_ORDER_TYPE' },
+      (this.transactionManager ?? this.db)
+        .getRepository(User)
+        .find({ where: { companyId, deleteYn: 'N' } }),
+      (this.transactionManager ?? this.db).getRepository(CodeItem).find({
+        where: { companyId, codeId: CodeGroup.PURORD_TYPE },
         order: { sortOrder: 'ASC' },
       }),
     ]);
@@ -215,8 +241,8 @@ export class PurchaseOrderService {
       types: types.map((r) => ({ value: r.codeItemId, label: r.name })),
     };
     const [requests, vendors] = await Promise.all([
-      this.requests.findAll(user, { status: 'C' }),
-      this.db.getRepository(Vendor).find({
+      this.requests.listForReference(user),
+      (this.transactionManager ?? this.db).getRepository(Vendor).find({
         where: { companyId, deleteYn: 'N' },
         order: { vendorId: 'ASC' },
       }),
@@ -247,13 +273,14 @@ export class PurchaseOrderService {
       ),
     };
   }
+  /** 발주는 요청의 최초 복사 이후 독립 편집한다. 원문 접근·품목 검증·금액 계산 후 헤더와 품목을 함께 저장한다. */
   async save(
     user: UserContext,
     id: string,
     dto: PurchaseOrderSaveDto,
     create: boolean,
   ) {
-    await this.db.transaction(async (manager) => {
+    await (this.transactionManager ?? this.db).transaction(async (manager) => {
       let old: Awaited<ReturnType<PurchaseOrderService['findOne']>> | null =
         null;
       if (!create) {
@@ -268,43 +295,35 @@ export class PurchaseOrderService {
         throw new ConflictException('이미 존재하는 문서입니다.');
       const siteId = dto.siteId ?? old?.siteId ?? user.siteId,
         deptId = dto.deptId ?? old?.deptId ?? user.deptId;
-      // 새 소속이 OWN_SITE/부서 scope 밖인지 문서와 동일한 조건으로 검사한다.
-      if (user.accessScope === 'OWN_SITE' && siteId !== user.siteId)
-        throw new ForbiddenException('사업장 범위 밖입니다.');
-      if (user.accessScope === 'OWN_DEPARTMENT') {
-        const allowed = await manager
-          .getRepository(Department)
-          .createQueryBuilder('d')
-          .where('d.companyId=:companyId', { companyId: user.companyId })
-          .andWhere(
-            `d.deptId IN (WITH RECURSIVE ds AS (SELECT "deptId" FROM department WHERE "companyId"=:companyId AND "deptId"=:deptId AND "deleteYn"='N' UNION SELECT d."deptId" FROM department d JOIN ds ON d."parentDeptId"=ds."deptId" WHERE d."companyId"=:companyId AND d."deleteYn"='N') SELECT "deptId" FROM ds)`,
-            { deptId: user.deptId },
-          )
-          .getMany();
-        if (!allowed.some((d) => d.deptId === deptId))
-          throw new ForbiddenException('부서 범위 밖입니다.');
-      }
-      this.scoped(user, manager);
       if (
         dto.typeCode &&
         (!old || dto.typeCode !== old.typeCode) &&
         !(await manager.getRepository(CodeItem).findOneBy({
           companyId: user.companyId,
-          codeId: 'PURCHASE_ORDER_TYPE',
+          codeId: CodeGroup.PURORD_TYPE,
           codeItemId: dto.typeCode,
         }))
       )
         throw new BadRequestException('유형 코드가 없습니다.');
-      const ids = dto.requestIds ?? old?.sourceRequestIds ?? [];
-      const groups = ids.length
-        ? await this.sourceItems(user, ids, manager)
-        : [];
-      if (ids.length && groups.length !== dto.items.length)
-        throw new BadRequestException('요청 전체 품목·수량을 유지하십시오.');
+      const refModule =
+        dto.refModule === undefined
+          ? (old?.refModule ?? null)
+          : dto.refModule?.trim() || null;
+      const refId =
+        dto.refId === undefined
+          ? (old?.refId ?? null)
+          : dto.refId?.trim() || null;
+      if (
+        Boolean(refModule) !== Boolean(refId) ||
+        (refModule && refModule !== ModuleCode.PURREQ)
+      )
+        throw new BadRequestException(
+          '구매요청 참조 유형과 문서번호를 함께 지정하십시오.',
+        );
+      if (refId && (!old || refModule !== old.refModule || refId !== old.refId))
+        await this.requestSource(user, refId, manager);
       const seen = new Set<string>(),
-        usedGroups = new Set<string>(),
-        items: Item[] = [],
-        allocations: PurchaseOrderAllocation[] = [];
+        items: Item[] = [];
       for (const [index, input] of dto.items.entries()) {
         const itemId = input.itemId ?? randomUUID();
         if (seen.has(itemId))
@@ -316,6 +335,7 @@ export class PurchaseOrderService {
         const oldItem = old?.items.find(
           (i) => i.itemId === itemId && i.materialId === input.materialId,
         );
+        inputQuantity(input.quantity, false, oldItem?.quantity);
         const material = await manager.getRepository(Material).findOneBy({
           companyId: user.companyId,
           materialId: input.materialId,
@@ -323,54 +343,38 @@ export class PurchaseOrderService {
         });
         if (!material)
           throw new BadRequestException('같은 회사의 자재를 선택하십시오.');
-        const matches = groups.filter(
-          (g) =>
-            g.item.materialId === input.materialId &&
-            qty(g.item.quantity) === qty(quantity) &&
-            !usedGroups.has(this.mergeKey(g.item)),
-        );
-        const group = ids.length
-          ? (matches.find(
-              (g) =>
-                oldItem && this.mergeKey(g.item) === this.mergeKey(oldItem),
-            ) ?? matches[0])
-          : null;
-        if (ids.length && !group)
-          throw new BadRequestException('요청 품목·수량은 변경할 수 없습니다.');
-        if (group) usedGroups.add(this.mergeKey(group.item));
-        const snapshot = group?.item ?? oldItem;
 
         const unitPrice =
           input.unitPrice === null ||
           input.unitPrice === undefined ||
           input.unitPrice === ''
             ? null
-            : decimal(price(input.unitPrice), 8);
+            : decimal(inputPrice(input.unitPrice), 8);
+        // 품목금액은 수량×단가를 원 단위 반올림한다. 정밀 변환만 공통 헬퍼를 사용한다.
         const item: Item = {
           companyId: user.companyId,
           orderId: id,
           itemId,
           sortOrder: index,
           materialId: input.materialId,
-          materialName: snapshot?.materialName ?? material.name,
-          spec: snapshot?.spec ?? material.spec,
-          baseUnit: snapshot?.baseUnit ?? material.baseUnit,
+          materialName: oldItem?.materialName ?? material.name,
+          spec:
+            input.spec === undefined
+              ? (oldItem?.spec ?? material.spec)
+              : input.spec?.trim() || null,
+          baseUnit: oldItem?.baseUnit ?? material.baseUnit,
           quantity,
           unitPrice,
-          amount: unitPrice === null ? null : lineAmount(quantity, unitPrice),
+          amount:
+            unitPrice === null
+              ? null
+              : rounded(
+                  qty(quantity) * price(unitPrice),
+                  100000000000000n,
+                ).toString(),
           note: input.note?.trim() || null,
         };
         items.push(item);
-        for (const link of group?.links ?? [])
-          allocations.push(
-            Object.assign(new PurchaseOrderAllocation(), {
-              companyId: user.companyId,
-              allocationId: randomUUID(),
-              orderId: id,
-              orderItemId: itemId,
-              ...link,
-            }),
-          );
       }
       const data: Partial<Header> = {
         companyId: user.companyId,
@@ -379,43 +383,44 @@ export class PurchaseOrderService {
         title: this.text(dto.title, '제목'),
         siteId,
         deptId,
+        toSiteId: this.text(dto.toSiteId, '입고 예정 사업장'),
         requesterId: dto.requesterId ?? old?.requesterId ?? user.userId,
         typeCode: dto.typeCode?.trim() || null,
         content: dto.content?.trim() || null,
         note: dto.note?.trim() || null,
         attachmentId: dto.attachmentId?.trim() || null,
-        status: old?.status ?? 'D',
+        status: old?.status ?? DocumentStatus.DRAFT,
         createdBy: old?.createdBy ?? user.userId,
         deleteYn: 'N',
       };
-      {
-        Object.assign(data, {
-          orderDate: businessDate(dto.orderDate, true),
-          expectedDeliveryDate: businessDate(dto.expectedDeliveryDate, true),
-          currency: 'KRW',
-          sourceRequestIds: ids,
-          totalAmount: items
-            .reduce((a, i) => a + BigInt(i.amount ?? '0'), 0n)
-            .toString(),
-        });
-        data.deliveryLocation = dto.deliveryLocation?.trim() || null;
-        const vendorId =
-          dto.vendorId === undefined
-            ? (old?.vendorId ?? null)
-            : dto.vendorId?.trim() || null;
-        if (!vendorId)
-          throw new BadRequestException('등록된 벤더를 선택하십시오.');
-        const vendor = await manager.getRepository(Vendor).findOneBy({
-          companyId: user.companyId,
-          vendorId,
-          ...(vendorId === old?.vendorId ? {} : { deleteYn: 'N' }),
-        });
-        if (!vendor)
-          throw new BadRequestException(
-            '같은 회사의 유효한 벤더를 선택하십시오.',
-          );
-        data.vendorId = vendorId;
-      }
+      Object.assign(data, {
+        orderDate: businessDate(dto.orderDate, true),
+        expectedDeliveryDate: businessDate(dto.expectedDeliveryDate, true),
+        currency: 'KRW',
+        refModule,
+        refId,
+        totalAmount: items
+          .reduce((a, i) => a + BigInt(i.amount ?? '0'), 0n)
+          .toString(),
+      });
+      data.deliveryLocation = dto.deliveryLocation?.trim() || null;
+      const vendorId =
+        dto.vendorId === undefined
+          ? (old?.vendorId ?? null)
+          : dto.vendorId?.trim() || null;
+      if (!vendorId)
+        throw new BadRequestException('등록된 거래처를 선택하십시오.');
+      const vendor = await manager.getRepository(Vendor).findOneBy({
+        companyId: user.companyId,
+        vendorId,
+        ...(vendorId === old?.vendorId ? {} : { deleteYn: 'N' }),
+      });
+      if (!vendor)
+        throw new BadRequestException(
+          '같은 회사의 유효한 거래처를 선택하십시오.',
+        );
+      data.vendorId = vendorId;
+
       if (old) {
         data.updatedBy = user.userId;
         data.updatedAt = new Date();
@@ -428,17 +433,26 @@ export class PurchaseOrderService {
         orderId: id,
       });
       if (items.length) await this.items(manager).save(items);
-      {
-        await manager
-          .getRepository(PurchaseOrderAllocation)
-          .delete({ companyId: user.companyId, orderId: id });
-        if (allocations.length)
-          await manager
-            .getRepository(PurchaseOrderAllocation)
-            .save(allocations);
-      }
     });
-    return this.findOne(user, id);
+    // 대상 접근 검사는 수정 전에 수행한다. 저장 응답은 입력 소속으로 재검사하지 않는다.
+    const saved = await this.headers().findOneByOrFail({
+      companyId: user.companyId,
+      orderId: id,
+    });
+    const savedItems = await this.items().find({
+      where: { companyId: user.companyId, orderId: id },
+      order: { sortOrder: 'ASC' },
+    });
+    const vendor = saved.vendorId
+      ? await (this.transactionManager ?? this.db)
+          .getRepository(Vendor)
+          .findOneBy({
+            companyId: user.companyId,
+            vendorId: saved.vendorId,
+            deleteYn: 'N',
+          })
+      : null;
+    return Object.assign({}, saved, { items: savedItems, vendor });
   }
   async assertCanSubmit(user: UserContext, id: string) {
     const row = await this.findOne(user, id);
@@ -446,43 +460,31 @@ export class PurchaseOrderService {
     if (!row.items.length)
       throw new BadRequestException('품목을 입력하십시오.');
     businessDate(row.orderDate);
-    {
-      if (
-        !row.vendorId ||
-        !(await this.db.getRepository(Vendor).findOneBy({
+    this.text(row.toSiteId, '입고 예정 사업장');
+    if (
+      !row.vendorId ||
+      !(await (this.transactionManager ?? this.db)
+        .getRepository(Vendor)
+        .findOneBy({
           companyId: user.companyId,
           vendorId: row.vendorId,
         }))
-      )
-        throw new BadRequestException(
-          '같은 회사의 유효한 벤더를 선택하십시오.',
-        );
-    }
+    )
+      throw new BadRequestException(
+        '같은 회사의 유효한 거래처를 선택하십시오.',
+      );
     if (row.items.some((i) => i.unitPrice === null))
       throw new BadRequestException('발주 단가를 입력하십시오.');
     for (const item of row.items) {
-      const material = await this.db.getRepository(Material).findOneBy({
-        companyId: user.companyId,
-        materialId: item.materialId,
-        deleteYn: 'N',
-      });
+      const material = await (this.transactionManager ?? this.db)
+        .getRepository(Material)
+        .findOneBy({
+          companyId: user.companyId,
+          materialId: item.materialId,
+          deleteYn: 'N',
+        });
       if (!material || material.baseUnit !== item.baseUnit)
         throw new BadRequestException('삭제되었거나 단위가 변경된 자재입니다.');
-    }
-    if (row.sourceRequestIds?.length) {
-      const expected = await this.sourceItems(
-        user,
-        row.sourceRequestIds,
-        this.db.manager,
-      );
-      if (expected.length !== row.items.length)
-        throw new BadRequestException('요청 품목이 일치하지 않습니다.');
-      const actual = new Map(row.items.map((i) => [this.mergeKey(i), i]));
-      for (const group of expected) {
-        const item = actual.get(this.mergeKey(group.item));
-        if (!item || qty(item.quantity) !== qty(group.item.quantity))
-          throw new BadRequestException('요청 수량을 유지하십시오.');
-      }
     }
   }
   async remove(user: UserContext, id: string) {
@@ -492,7 +494,7 @@ export class PurchaseOrderService {
       { companyId: user.companyId, orderId: id },
       { deleteYn: 'Y', updatedBy: user.userId, updatedAt: new Date() },
     );
-    return row;
+    return { success: true };
   }
   async syncApprovalStatus(
     companyId: string,
@@ -508,8 +510,8 @@ export class PurchaseOrderService {
     if (!row) throw new NotFoundException('구매 문서가 없습니다.');
     if (row.status === status) return;
     if (
-      (status === 'P' && row.status !== 'D') ||
-      (status !== 'P' && row.status !== 'P')
+      (status === 'P' && row.status !== DocumentStatus.DRAFT) ||
+      (status !== 'P' && row.status !== DocumentStatus.PROGRESS)
     )
       throw new ConflictException('구매 문서 상태가 변경되었습니다.');
     await this.headers().update(

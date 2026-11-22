@@ -1,3 +1,4 @@
+import { ModuleCode } from '../../../common/constants/modules';
 import { Type } from 'class-transformer';
 import {
   IsArray,
@@ -32,7 +33,7 @@ export class CreateWorkOrderDto {
   @IsIn(['PLAN', 'ACTUAL'])
   orderKind: OrderKind;
   @IsOptional()
-  @IsIn(['work_request', 'work_order'])
+  @IsIn([ModuleCode.WRKREQ, ModuleCode.WRKORD])
   refModule?: string | null;
 
   @IsOptional()

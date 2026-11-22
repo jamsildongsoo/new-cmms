@@ -8,7 +8,7 @@ import { InventoryController } from './inventory.controller';
 import { StockStatusController } from '../stock/stock-status.controller';
 import { StockLedgerController } from '../stock/stock-ledger.controller';
 import { MonthlyClosingController } from '../monthly-closing/monthly-closing.controller';
-import { SaveInventoryDto } from './dto/inventory.dto';
+import { CreateInventoryDto } from './dto/inventory.dto';
 import { PurchaseOrderSaveDto } from '../../purchase/purchase-order/dto/purchase-order.dto';
 import { CreatePurchaseRequestDto } from '../../purchase/purchase-request/dto/create-purchase-request.dto';
 import { VendorController } from '../../purchase/vendor/vendor.controller';
@@ -39,7 +39,7 @@ it.each([
       Object.getOwnPropertyDescriptor(VendorController.prototype, method)!
         .value,
     ),
-  ).toEqual([`vendor:${action}`]);
+  ).toEqual([`VENDOR:${action}`]);
 });
 it('rejects vendor company, audit and soft-delete overrides', async () => {
   const errors = await validate(
@@ -58,30 +58,31 @@ it('rejects vendor company, audit and soft-delete overrides', async () => {
     'deleteYn',
   ]);
 });
-it('requires inventory update permission for direct confirmation, without a new confirm action', () => {
+it('requires inventory update permission for confirmation cancellation, without a new confirm action', () => {
   expect(
     Reflect.getMetadata(
       REQUIRED_PERMISSIONS_KEY,
-      Object.getOwnPropertyDescriptor(InventoryController.prototype, 'confirm')!
+      Object.getOwnPropertyDescriptor(InventoryController.prototype, 'cancel')!
         .value,
     ),
-  ).toEqual(['inventory_document:update']);
+  ).toEqual(['INVDOC:read', 'INVDOC:update']);
 });
 it.each(['open', 'unlock', 'close'] as const)(
-  'requires monthly_closing:update for %s',
+  'requires MCLOSE:update for %s',
   (method) => {
     expect(
       Reflect.getMetadata(
         REQUIRED_PERMISSIONS_KEY,
         MonthlyClosingController.prototype[method],
       ),
-    ).toEqual(['monthly_closing:update']);
+    ).toEqual(['MCLOSE:update']);
   },
 );
 it('rejects incoming inventory company/status/processing-kind/audit overrides', async () => {
-  const dto = plainToInstance(SaveInventoryDto, {
+  const dto = plainToInstance(CreateInventoryDto, {
     title: '입고',
-    typeCode: 'GENERAL_IN',
+    type: 'IN',
+    kind: 'GENERAL',
     postingDate: '20260301',
     siteId: 'S1',
     warehouseId: 'W1',
@@ -109,6 +110,7 @@ it('allows optional purchase order documentNo', async () => {
     await validate(
       plainToInstance(PurchaseOrderSaveDto, {
         title: '구매발주',
+        toSiteId: 'S1',
         items: [{ materialId: 'M1', quantity: '1', unitPrice: null }],
       }),
       { whitelist: true, forbidNonWhitelisted: true },
@@ -151,6 +153,7 @@ it('rejects removed supplier fields on purchase order payloads', async () => {
   ];
   const errors = await validate(
     plainToInstance(PurchaseOrderSaveDto, {
+      toSiteId: 'S1',
       title: '발주',
       vendorId: 'V1',
       items: [],
@@ -164,12 +167,14 @@ it('rejects removed supplier fields on purchase order payloads', async () => {
 it('keeps request-only and order-only header fields at separate API boundaries', async () => {
   const settings = { whitelist: true, forbidNonWhitelisted: true };
   const orderFields = {
+    toSiteId: 'S1',
     vendorId: 'V1',
     orderDate: '20261110',
     expectedDeliveryDate: '20261111',
     deliveryLocation: '창고',
     currency: 'KRW',
-    requestIds: [],
+    refModule: 'PURREQ',
+    refId: 'PURREQ-1',
   };
   const requestErrors = await validate(
     plainToInstance(CreatePurchaseRequestDto, {
@@ -185,6 +190,7 @@ it('keeps request-only and order-only header fields at separate API boundaries',
   const orderErrors = await validate(
     plainToInstance(PurchaseOrderSaveDto, {
       title: '발주',
+      toSiteId: 'S1',
       items: [],
       requestDate: '20261110',
       requiredDate: '20261111',

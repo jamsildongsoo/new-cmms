@@ -1,3 +1,4 @@
+import { dateInput, dateValue, todayDateInput } from '@/shared/lib/format'
 import type { Equipment, EquipmentPayload } from './equipment.api'
 
 export const equipmentFields = [
@@ -43,12 +44,6 @@ export const inspectionUnits = [
   { value: 'YEAR', label: '년' },
 ]
 
-export function dateInput(value: string | null) {
-  return value
-    ? `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`
-    : ''
-}
-
 export function equipmentToForm(row: Equipment): EquipmentForm {
   const form = { ...emptyEquipmentForm, attachmentId: row.attachmentId }
   for (const [key] of equipmentFields) {
@@ -66,14 +61,14 @@ export function equipmentPayload(form: EquipmentForm): EquipmentPayload {
   return {
     ...rest,
     parentEquipmentId: form.parentEquipmentId || null,
-    legalInspectionDate: form.legalInspectionDate.replaceAll('-', '') || null,
+    legalInspectionDate: dateValue(form.legalInspectionDate) || null,
     legalNextInspectionDate:
-      form.legalNextInspectionDate.replaceAll('-', '') || null,
-    installDate: form.installDate.replaceAll('-', '') || null,
-    inspectionDate: form.inspectionDate.replaceAll('-', '') || null,
+      dateValue(form.legalNextInspectionDate) || null,
+    installDate: dateValue(form.installDate) || null,
+    inspectionDate: dateValue(form.inspectionDate) || null,
     nextInspectionDate:
       Number(form.inspectionPeriod) > 0 && form.inspectionUnit
-        ? form.nextInspectionDate.replaceAll('-', '') || null
+        ? dateValue(form.nextInspectionDate) || null
         : null,
     inspectionPeriod:
       form.inspectionPeriod === '' ? null : Number(form.inspectionPeriod),
@@ -87,15 +82,11 @@ export function equipmentPayload(form: EquipmentForm): EquipmentPayload {
 }
 
 // 날짜 전용 값은 서울의 오늘과 비교한다. 당일과 미입력은 지연으로 표시하지 않는다.
-export function isInspectionOverdue(value: string | null, now = new Date()) {
-  const parts = new Intl.DateTimeFormat('en', {
-    timeZone: 'Asia/Seoul',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(now)
-  const part = (type: string) => parts.find((p) => p.type === type)?.value ?? ''
-  const today = `${part('year')}${part('month')}${part('day')}`
+export function isInspectionOverdue(
+  value: string | null,
+  now = new Date(),
+) {
+  const today = dateValue(todayDateInput(now))
   return Boolean(value && value < today)
 }
 

@@ -1,3 +1,4 @@
+import { businessDate } from '../../common/utils/date.util';
 /** 회사별 설비와 같은 사업장의 부모 계층을 관리하며 순환과 활성 하위 설비 삭제를 방지한다. */
 import {
   BadRequestException,
@@ -10,7 +11,7 @@ import { Repository } from 'typeorm';
 import { UserContext } from '../../auth/types/user-context.type';
 import { CodeItem } from '../../codes/code-items/entities/code-item.entity';
 import { CodeValidationService } from '../../codes/code-validation.service';
-import { Code } from '../../common/constants/code';
+import { CodeGroup } from '../../common/constants/code';
 import { PaginatedResponseDto } from '../../common/dto/paginated-response.dto';
 import { normalizePaginationQuery } from '../../common/utils/pagination.util';
 import { Department } from '../../organization/departments/entities/department.entity';
@@ -51,7 +52,7 @@ export class EquipmentService {
         order: { deptId: 'ASC' },
       }),
       this.equipmentRepository.manager.getRepository(CodeItem).find({
-        where: { companyId, codeId: Code.EQUIPMENT_TYPE },
+        where: { companyId, codeId: CodeGroup.EQUIP_TYPE },
         order: { sortOrder: 'ASC', codeItemId: 'ASC' },
       }),
     ]);
@@ -158,7 +159,7 @@ export class EquipmentService {
         queryBuilder.andWhere(
           `equipment.${search.searchType} ILIKE :searchVal`,
           {
-            searchVal: `%${search.searchVal}%`,
+            searchVal: `%${search.searchVal.replace(/[\\%_]/g, '\\$&')}%`,
           },
         );
       }
@@ -437,7 +438,7 @@ export class EquipmentService {
   ): Promise<void> {
     return this.codeValidationService.assertValidItem({
       companyId,
-      codeId: Code.EQUIPMENT_TYPE,
+      codeId: CodeGroup.EQUIP_TYPE,
       codeItemId: typeCode,
     });
   }
@@ -512,23 +513,7 @@ export class EquipmentService {
     if (normalizedValue === null) {
       return null;
     }
-    if (!/^\d{8}$/.test(normalizedValue)) {
-      throw new BadRequestException(`${fieldName} must be YYYYMMDD`);
-    }
-    const year = Number(normalizedValue.slice(0, 4));
-    const month = Number(normalizedValue.slice(4, 6));
-    const day = Number(normalizedValue.slice(6, 8));
-    const date = new Date(
-      `${normalizedValue.slice(0, 4)}-${normalizedValue.slice(4, 6)}-${normalizedValue.slice(6, 8)}T00:00:00Z`,
-    );
-    if (
-      date.getUTCFullYear() !== year ||
-      date.getUTCMonth() + 1 !== month ||
-      date.getUTCDate() !== day
-    ) {
-      throw new BadRequestException(`${fieldName} must be a valid date`);
-    }
-    return normalizedValue;
+    return businessDate(normalizedValue, false, fieldName);
   }
 
   private toResponse(equipment: Equipment): EquipmentResponseDto {

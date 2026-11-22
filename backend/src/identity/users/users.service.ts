@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { hash } from 'bcrypt';
+import { compare, hash } from 'bcrypt';
 import { Repository } from 'typeorm';
 import { Site } from '../../organization/sites/entities/site.entity';
 import { Department } from '../../organization/departments/entities/department.entity';
@@ -16,6 +16,9 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserResponseDto } from './dto/user-response.dto';
 import { AccessScope, User } from './entities/user.entity';
+import { Company } from '../../organization/companies/entities/company.entity';
+import { UpdateProfileDto } from './dto/update-profile.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 
 const PASSWORD_HASH_ROUNDS = 12;
 
@@ -32,6 +35,114 @@ export class UsersService {
       userId,
       deleteYn: 'N',
     });
+  }
+
+  async profile(context: UserContext) {
+    const user = await this.findActiveByIdOrThrow(
+      context.companyId,
+      context.userId,
+    );
+    const manager = this.userRepository.manager;
+    const [company, site, department, role] = await Promise.all([
+      manager.findOneBy(Company, { companyId: user.companyId, deleteYn: 'N' }),
+      user.siteId
+        ? manager.findOneBy(Site, {
+            companyId: user.companyId,
+            siteId: user.siteId,
+            deleteYn: 'N',
+          })
+        : null,
+      manager.findOneBy(Department, {
+        companyId: user.companyId,
+        deptId: user.deptId,
+        deleteYn: 'N',
+      }),
+      manager.findOneBy(Role, {
+        companyId: user.companyId,
+        roleId: user.roleId,
+        deleteYn: 'N',
+      }),
+    ]);
+    return {
+      companyId: user.companyId,
+      companyName: company?.name ?? null,
+      userId: user.userId,
+      name: user.name,
+      email: user.email,
+      phoneNumber: user.phoneNumber,
+      title: user.title,
+      position: user.position,
+      siteId: user.siteId,
+      siteName: site?.name ?? null,
+      deptId: user.deptId,
+      deptName: department?.name ?? null,
+      roleId: user.roleId,
+      roleName: role?.name ?? null,
+      accessScope: user.accessScope,
+    };
+  }
+
+  async updateProfile(context: UserContext, dto: UpdateProfileDto) {
+    await this.findActiveByIdOrThrow(context.companyId, context.userId);
+    const patch = {
+      ...(dto.email !== undefined && { email: dto.email?.trim() || null }),
+      ...(dto.phoneNumber !== undefined && {
+        phoneNumber: dto.phoneNumber?.trim() || null,
+      }),
+    };
+    if (Object.keys(patch).length) {
+      await this.userRepository.update(
+        { companyId: context.companyId, userId: context.userId, deleteYn: 'N' },
+        {
+          ...patch,
+          updatedBy: context.userId,
+          updatedAt: new Date(),
+        },
+      );
+    }
+    return this.profile(context);
+  }
+
+  async changePassword(context: UserContext, dto: ChangePasswordDto) {
+    const user = await this.findActiveByIdOrThrow(
+      context.companyId,
+      context.userId,
+    );
+    if (!(await compare(dto.currentPassword, user.passwordHash)))
+      throw new BadRequestException('현재 비밀번호가 일치하지 않습니다.');
+    if (
+      dto.newPassword.length < 10 ||
+      Buffer.byteLength(dto.newPassword, 'utf8') > 72 ||
+      !/[A-Za-z]/.test(dto.newPassword) ||
+      !/\d/.test(dto.newPassword)
+    )
+      throw new BadRequestException(
+        '새 비밀번호는 영문과 숫자를 포함한 10자 이상, 72바이트 이내로 입력해 주세요.',
+      );
+    if (await compare(dto.newPassword, user.passwordHash))
+      throw new BadRequestException(
+        '현재 비밀번호와 다른 새 비밀번호를 입력해 주세요.',
+      );
+    const result = await this.userRepository.update(
+      {
+        companyId: user.companyId,
+        userId: user.userId,
+        deleteYn: 'N',
+        tokenVersion: user.tokenVersion,
+        passwordHash: user.passwordHash,
+      },
+      {
+        passwordHash: await hash(dto.newPassword, PASSWORD_HASH_ROUNDS),
+        tokenVersion: () => '"tokenVersion" + 1',
+        updatedBy: context.userId,
+        updatedAt: new Date(),
+      },
+    );
+    if (result.affected !== 1)
+      throw new ConflictException(
+        '비밀번호가 이미 변경되었습니다. 다시 로그인해 주세요.',
+      );
+    return { message: '비밀번호를 변경했습니다. 다시 로그인해 주세요.' };
   }
 
   // 선택 목록만 활성 값으로 제한한다. 저장 시 기준정보를 다시 조회하지 않는다.
@@ -125,50 +236,32 @@ export class UsersService {
     userId: string,
     updateUserDto: UpdateUserDto,
   ): Promise<UserResponseDto> {
-    const user = await this.findActiveByIdOrThrow(
-      userContext.companyId,
-      userId,
-    );
+    await this.findActiveByIdOrThrow(userContext.companyId, userId);
     const validatedDto = this.validateUpdateDto(updateUserDto);
 
-    if (validatedDto.password !== undefined) {
-      user.passwordHash = await hash(
-        validatedDto.password,
-        PASSWORD_HASH_ROUNDS,
-      );
-    }
-    if (validatedDto.name !== undefined) {
-      user.name = validatedDto.name;
-    }
-    if (validatedDto.email !== undefined) {
-      user.email = validatedDto.email;
-    }
-    if (validatedDto.phoneNumber !== undefined) {
-      user.phoneNumber = validatedDto.phoneNumber;
-    }
-    if (validatedDto.title !== undefined) {
-      user.title = validatedDto.title;
-    }
-    if (validatedDto.position !== undefined) {
-      user.position = validatedDto.position;
-    }
-    if (validatedDto.roleId !== undefined) {
-      user.roleId = validatedDto.roleId;
-    }
-    if (validatedDto.siteId !== undefined) {
-      user.siteId = validatedDto.siteId;
-    }
-    if (validatedDto.deptId !== undefined) {
-      user.deptId = validatedDto.deptId;
-    }
-    if (validatedDto.accessScope !== undefined) {
-      user.accessScope = validatedDto.accessScope;
-    }
-
-    user.updatedBy = userContext.userId;
-    user.updatedAt = new Date();
-
-    return this.toResponse(await this.userRepository.save(user));
+    await this.userRepository.update(
+      { companyId: userContext.companyId, userId },
+      {
+        name: validatedDto.name,
+        email: validatedDto.email,
+        phoneNumber: validatedDto.phoneNumber,
+        title: validatedDto.title,
+        position: validatedDto.position,
+        roleId: validatedDto.roleId,
+        siteId: validatedDto.siteId,
+        deptId: validatedDto.deptId,
+        accessScope: validatedDto.accessScope,
+        ...(validatedDto.password !== undefined && {
+          passwordHash: await hash(validatedDto.password, PASSWORD_HASH_ROUNDS),
+          tokenVersion: () => '"tokenVersion" + 1',
+        }),
+        updatedBy: userContext.userId,
+        updatedAt: new Date(),
+      },
+    );
+    return this.toResponse(
+      await this.findActiveByIdOrThrow(userContext.companyId, userId),
+    );
   }
 
   async remove(
@@ -180,11 +273,20 @@ export class UsersService {
       userId,
     );
 
-    user.deleteYn = 'Y';
-    user.updatedBy = userContext.userId;
-    user.updatedAt = new Date();
-
-    return this.toResponse(await this.userRepository.save(user));
+    await this.userRepository.update(
+      { companyId: user.companyId, userId: user.userId },
+      {
+        deleteYn: 'Y',
+        tokenVersion: () => '"tokenVersion" + 1',
+        updatedBy: userContext.userId,
+        updatedAt: new Date(),
+      },
+    );
+    const removed = await this.userRepository.findOneByOrFail({
+      companyId: user.companyId,
+      userId: user.userId,
+    });
+    return this.toResponse(removed);
   }
 
   private async findActiveByIdOrThrow(
@@ -300,17 +402,19 @@ export class UsersService {
   }
 
   private async toResponse(user: User): Promise<UserResponseDto> {
-    // 기존 연결값은 소급 변경하지 않고 삭제된 기준정보의 이름도 조회한다.
+    // 기존 ID를 유지하며 이름 조회는 활성 기준정보만 대상으로 한다.
     const [site, department] = await Promise.all([
       user.siteId
         ? this.userRepository.manager.findOneBy(Site, {
             companyId: user.companyId,
             siteId: user.siteId,
+            deleteYn: 'N',
           })
         : null,
       this.userRepository.manager.findOneBy(Department, {
         companyId: user.companyId,
         deptId: user.deptId,
+        deleteYn: 'N',
       }),
     ]);
     return {
@@ -324,9 +428,7 @@ export class UsersService {
       roleId: user.roleId,
       siteId: user.siteId,
       siteName: site?.name ?? null,
-      siteDeleted: site?.deleteYn === 'Y',
       deptName: department?.name ?? null,
-      deptDeleted: department?.deleteYn === 'Y',
       deptId: user.deptId,
       accessScope: user.accessScope,
       deleteYn: user.deleteYn,

@@ -1,3 +1,8 @@
+// 결재 코드 원본: backend/src/approvals/approval.constant.ts.
+// 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
+import { moduleDocumentPath } from '@/shared/constants/modules'
+
+import { formatDateTime } from '@/shared/lib/format'
 import type {
   Approval,
   ApprovalPayload,
@@ -103,35 +108,55 @@ export function toPayload(form: ApprovalFormState): ApprovalPayload {
   }
 }
 
+/** 유형을 바꾸면 대상 구역의 마지막으로 이동하고 나머지 행의 순서는 유지한다. */
+export function changeStepType(
+  form: Pick<ApprovalFormState, 'line' | 'references'>,
+  userId: string,
+  type: ApprovalFormStep['type'],
+): Pick<ApprovalFormState, 'line' | 'references'> {
+  const step = [...form.line, ...form.references].find(
+    (item) => item.userId === userId,
+  )
+  if (!step || step.type === type) return form
+  if (step.type !== 'REFERENCE' && type !== 'REFERENCE') {
+    return {
+      ...form,
+      line: form.line.map((item) =>
+        item.userId === userId ? { ...item, type } : item,
+      ),
+    }
+  }
+  const line = form.line.filter((item) => item.userId !== userId)
+  const references = form.references.filter((item) => item.userId !== userId)
+  if (type === 'REFERENCE') references.push({ ...step, type })
+  else line.push({ ...step, type })
+  return { line, references }
+}
+
 export function formatDate(value: string | null) {
-  return value ? new Date(value).toLocaleString() : '-'
+  return formatDateTime(value)
 }
 
 export function stepStatus(step: ApprovalStep) {
   // 참조자의 Y는 승인 행위가 아니므로 처리 결과와 관계없이 참조로 표시한다.
   if (step.type === 'REFERENCE') {
-    return 'Reference'
+    return '참조'
   }
   if (step.type === 'SUBMITTER' && step.status === 'Y') {
-    return 'Submitted'
+    return '상신 완료'
   }
   if (step.status === 'Y') {
-    return step.type === 'AGREE' ? 'Agreed' : 'Approved'
+    return step.type === 'AGREE' ? '동의' : '승인'
   }
   if (step.status === 'N') {
-    return step.type === 'AGREE' ? 'Disagreed' : 'Rejected'
+    return step.type === 'AGREE' ? '부동의' : '반려'
   }
-  return 'Waiting'
+  return '대기'
 }
 
-// Convention: a source module serves its document at /<refModule with dashes>/<refId>.
+// 모듈 코드와 URL은 별개다. modules.ts의 명시적인 경로표를 사용한다.
 export function sourcePathOf(approval: Approval) {
-  const { refModule, refId } = approval
-  if (!refModule || !refId) {
-    return null
-  }
-  if (!/^[a-z0-9_]+$/.test(refModule) || !/^[\w-]+$/.test(refId)) {
-    return null
-  }
-  return `/${refModule.replace(/_/g, '-')}/${refId}`
+  return approval.refModule && approval.refId
+    ? moduleDocumentPath(approval.refModule, approval.refId)
+    : null
 }

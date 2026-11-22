@@ -1,14 +1,7 @@
-import { MaxLength } from 'class-validator';
-import { IsString } from 'class-validator';
+import { MaxLength, IsString } from 'class-validator';
 import { NumberingService } from '../../numbering/numbering.service';
-import { Headers } from '@nestjs/common';
-import { IsArray, ArrayUnique } from 'class-validator';
-class PreviewRequestsDto {
-  @IsArray()
-  @ArrayUnique()
-  @IsString({ each: true })
-  @MaxLength(50, { each: true })
-  requestIds: string[];
+class PreviewRequestDto {
+  @IsString() @MaxLength(50) requestId: string;
 }
 import { PurchaseSearchDto } from '../common/purchase-search.dto';
 import {
@@ -27,12 +20,13 @@ import { RequirePermission } from '../../auth/decorators/require-permissions.dec
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import type { UserContext } from '../../auth/types/user-context.type';
-import { AppModuleKey } from '../../common/constants/modules';
+import { ModuleCode } from '../../common/constants/modules';
 import { PermissionAction } from '../../common/constants/permissions';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
 import { PurchaseOrderService } from './purchase-order.service';
 
+/** 구매오더 API. 요청 미리보기는 복사용 조회이며 발주 저장·수정과 분리한다. */
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('purchase-order')
 export class PurchaseOrderController {
@@ -41,51 +35,57 @@ export class PurchaseOrderController {
     private readonly service: PurchaseOrderService,
   ) {}
 
-  @RequirePermission(AppModuleKey.PURCHASE_ORDER, PermissionAction.READ)
+  @RequirePermission(ModuleCode.PURORD, PermissionAction.READ)
   @Get()
   findAll(@CurrentUser() user: UserContext, @Query() query: PurchaseSearchDto) {
     return this.service.findAll(user, query);
   }
 
-  @RequirePermission(AppModuleKey.PURCHASE_ORDER, PermissionAction.READ)
+  @RequirePermission(ModuleCode.PURORD, PermissionAction.READ)
+  // POST지만 문서를 저장하지 않는다. 원문 접근·완결 여부를 검사하고 최초 복사할 값만 반환한다.
   @Post('request-preview')
-  preview(@CurrentUser() user: UserContext, @Body() dto: PreviewRequestsDto) {
-    return this.service.preview(user, dto.requestIds);
+  preview(@CurrentUser() user: UserContext, @Body() dto: PreviewRequestDto) {
+    return this.service.preview(user, dto.requestId);
   }
-  @RequirePermission(AppModuleKey.PURCHASE_ORDER, PermissionAction.READ)
+  @RequirePermission(ModuleCode.PURORD, PermissionAction.READ)
+  @Get('request/:requestId/orders')
+  linkedOrders(
+    @CurrentUser() user: UserContext,
+    @Param('requestId') requestId: string,
+  ) {
+    return this.service.linkedOrders(user, requestId);
+  }
+  @RequirePermission(ModuleCode.PURORD, PermissionAction.READ)
   @Get('options')
   options(@CurrentUser() user: UserContext) {
     return this.service.options(user);
   }
 
-  @RequirePermission(AppModuleKey.PURCHASE_ORDER, PermissionAction.READ)
+  @RequirePermission(ModuleCode.PURORD, PermissionAction.READ)
   @Get(':orderId')
   findOne(@CurrentUser() user: UserContext, @Param('orderId') orderId: string) {
     return this.service.findOne(user, orderId);
   }
 
-  @RequirePermission(AppModuleKey.PURCHASE_ORDER, PermissionAction.CREATE)
+  @RequirePermission(ModuleCode.PURORD, PermissionAction.CREATE)
   @Post()
   create(
     @CurrentUser() user: UserContext,
     @Body() dto: CreatePurchaseOrderDto,
-    @Headers('idempotency-key') requestKey: string,
   ) {
     return this.numbering.createDocument(
       user,
-      AppModuleKey.PURCHASE_ORDER,
-      requestKey,
+      ModuleCode.PURORD,
       (documentId) =>
         this.service.create(
           user,
           Object.assign({}, dto, { orderId: documentId }),
         ),
-      (documentId) => this.service.findOne(user, documentId),
       dto.attachmentId,
     );
   }
 
-  @RequirePermission(AppModuleKey.PURCHASE_ORDER, PermissionAction.UPDATE)
+  @RequirePermission(ModuleCode.PURORD, PermissionAction.UPDATE)
   @Patch(':orderId')
   update(
     @CurrentUser() user: UserContext,
@@ -94,14 +94,14 @@ export class PurchaseOrderController {
   ) {
     return this.numbering.saveDocument(
       user,
-      AppModuleKey.PURCHASE_ORDER,
+      ModuleCode.PURORD,
       orderId,
       dto.attachmentId,
       () => this.service.update(user, orderId, dto),
     );
   }
 
-  @RequirePermission(AppModuleKey.PURCHASE_ORDER, PermissionAction.DELETE)
+  @RequirePermission(ModuleCode.PURORD, PermissionAction.DELETE)
   @Delete(':orderId')
   remove(@CurrentUser() user: UserContext, @Param('orderId') orderId: string) {
     return this.service.remove(user, orderId);

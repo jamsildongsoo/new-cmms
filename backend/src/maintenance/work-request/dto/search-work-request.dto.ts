@@ -1,11 +1,7 @@
-import { IsIn, IsOptional, IsString, Matches } from 'class-validator';
-import type { DocumentStatus } from '../../../common/constants/document-status';
-export class SearchWorkRequestDto {
-  @IsOptional() @IsIn(['D', 'P', 'C', 'R', 'X']) status?: DocumentStatus;
-  @IsOptional() @IsString() priorityCode?: string;
-  @IsOptional() @IsIn(['title', 'documentNo', 'equipmentId']) searchType?:
-    'title' | 'documentNo' | 'equipmentId';
-  @IsOptional() @IsString() searchVal?: string;
-  @IsOptional() @Matches(/^\d{8}$/) occurredDateFrom?: string;
-  @IsOptional() @Matches(/^\d{8}$/) occurredDateTo?: string;
+import { IsOptional, IsString, MaxLength } from 'class-validator';
+import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
+
+// API 계약: frontend/src/modules/maintenance/work-request의 목록 검색 타입과 함께 수정한다.
+export class SearchWorkRequestDto extends PaginationQueryDto {
+  @IsOptional() @IsString() @MaxLength(200) search?: string;
 }

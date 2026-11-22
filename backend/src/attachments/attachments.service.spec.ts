@@ -54,7 +54,7 @@ it('rejects unregistered module names before creating a group or writing a path'
 });
 it('checks the authenticated company before list/upload/download/delete and never calls storage for foreign files', async () => {
   const group = await service.create(actor('B'), {
-    refModule: 'board',
+    refModule: "BORD",
     refId: null,
   });
   await expect(service.findItems(actor(), group.attachmentId)).rejects.toThrow(
@@ -82,7 +82,7 @@ it('checks the authenticated company before list/upload/download/delete and neve
 });
 it('stores files below the company/module/group path and keeps an empty group after the final file is removed', async () => {
   const group = await service.create(actor(), {
-    refModule: 'board',
+    refModule: "BORD",
     refId: null,
   });
   const items = await service.uploadItems(actor(), group.attachmentId, [
@@ -94,7 +94,7 @@ it('stores files below the company/module/group path and keeps an empty group af
     },
   ]);
   expect(storage.save.mock.calls[0][1]).toMatch(
-    new RegExp(`^A/board/${group.attachmentId}/[0-9a-f-]+\\.txt$`),
+    new RegExp(`^A/BORD/${group.attachmentId}/[0-9a-f-]+\\.txt$`),
   );
   expect(items[0].originalName).toBe('원본.txt');
   await service.removeItem(actor(), group.attachmentId, items[0].itemNo);

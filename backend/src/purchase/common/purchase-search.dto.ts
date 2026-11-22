@@ -1,7 +1,6 @@
-import { IsOptional, IsIn, IsString, Matches } from 'class-validator';
-export class PurchaseSearchDto {
-  @IsOptional() @IsIn(['D', 'P', 'C', 'R', 'X']) status?: string;
+import { IsOptional, IsString } from 'class-validator';
+import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
+// API 계약: frontend/src/modules/purchase/common/purchase.types.ts와 함께 수정한다.
+export class PurchaseSearchDto extends PaginationQueryDto {
   @IsOptional() @IsString() search?: string;
-  @IsOptional() @Matches(/^\d{8}$/) from?: string;
-  @IsOptional() @Matches(/^\d{8}$/) to?: string;
 }

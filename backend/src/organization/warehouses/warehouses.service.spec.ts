@@ -230,7 +230,7 @@ describe('Warehouse API routing and permissions', () => {
           REQUIRED_PERMISSIONS_KEY,
           WarehousesController.prototype[method],
         ),
-      ).toEqual([`warehouse:${action}`]);
+      ).toEqual([`WHSE:${action}`]);
     },
   );
 });

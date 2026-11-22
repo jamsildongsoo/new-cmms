@@ -4,7 +4,6 @@ import { resolve } from 'node:path';
 import { getMetadataArgsStorage } from 'typeorm';
 import { GUARDS_METADATA, METHOD_METADATA } from '@nestjs/common/constants';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { Permission } from '../identity/permissions/entities/permission.entity';
 
 // 새 Entity/Controller가 회사 키 또는 인증 경계를 빠뜨리면 공통 계약 검사에서 드러나도록 한다.
 const exportsOf = (pattern: string) =>
@@ -18,10 +17,11 @@ const controllers = exportsOf('src/**/*.controller.ts') as {
   prototype: object;
 }[];
 
-it('includes the company in every stored entity key except the explicit system permission catalog', () => {
+it('includes the company in every stored entity key ', () => {
   const metadata = getMetadataArgsStorage();
-  const tables = metadata.tables.filter((table) =>
-    entities.includes(table.target),
+  const tables = metadata.tables.filter(
+    (table) =>
+      typeof table.target === 'function' && entities.includes(table.target),
   );
   expect(tables.length).toBeGreaterThan(30);
   for (const table of tables) {
@@ -29,12 +29,10 @@ it('includes the company in every stored entity key except the explicit system p
       (column) =>
         column.target === table.target && column.propertyName === 'companyId',
     );
-    if (table.target === Permission) expect(company).toBeUndefined();
-    else
-      expect({
-        entity: table.name,
-        primaryCompany: company?.options.primary,
-      }).toEqual({ entity: table.name, primaryCompany: true });
+    expect({
+      entity: table.name,
+      primaryCompany: company?.options.primary,
+    }).toEqual({ entity: table.name, primaryCompany: true });
   }
 });
 it('requires JWT on every API operation other than login and the deployment health check', () => {

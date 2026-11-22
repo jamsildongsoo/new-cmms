@@ -1,3 +1,5 @@
+// 결재 코드 원본: backend/src/approvals/approval.constant.ts.
+// 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
 // Approval body built from a source document at request time (a snapshot,
 // not a live view). Each source module builds its own snapshot.
 export interface ApprovalDraft {
@@ -41,7 +43,7 @@ export function buildSnapshot(options: {
 }): unknown {
   const nodes: Node[] = [buildFieldTable(options.fields)]
   if (options.content) {
-    nodes.push(paragraph('Content'))
+    nodes.push(paragraph('본문'))
     nodes.push(...options.content.split('\n').map(paragraph))
   }
   return { type: 'doc', content: nodes }

@@ -16,6 +16,8 @@ export interface Material extends MaterialPayload, AuditFields {
   deleteYn: string
 }
 export interface MaterialOptions {
+  // 백엔드 해당 업무 options API의 units(공통코드 UNIT)와 함께 수정한다.
+  units: { value: string; label: string }[]
   types: { value: string; label: string }[]
 }
 export interface MaterialSearch {

@@ -1,4 +1,4 @@
-/** 역할·권한 배정은 회사별로 관리하고 Permission 정의는 DB 공용 카탈로그에서 읽는다. */
+/** 역할·권한 배정은 회사별로 관리하고 지원 권한은 시스템 상수에서 읽는다. */
 import {
   BadRequestException,
   ConflictException,
@@ -14,7 +14,10 @@ import { UpdateRolePermissionsDto } from './dto/update-role-permissions.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
 import { RolePermission } from './entities/role-permission.entity';
 import { Role } from './entities/role.entity';
-import { Permission } from '../permissions/entities/permission.entity';
+import {
+  PERMISSION_OPTIONS,
+  isPermissionCode,
+} from '../../common/constants/permissions';
 
 @Injectable()
 export class RolesService {
@@ -26,11 +29,7 @@ export class RolesService {
   ) {}
 
   async findPermissionOptions() {
-    return this.roleRepository.manager.find(Permission, {
-      where: { deleteYn: 'N' },
-      order: { module: 'ASC', action: 'ASC' },
-      select: { permissionId: true, name: true, module: true, action: true },
-    });
+    return PERMISSION_OPTIONS;
   }
 
   async findAssignedPermissionIds(
@@ -47,7 +46,9 @@ export class RolesService {
       },
     });
 
-    return rolePermissions.map((rolePermission) => rolePermission.permissionId);
+    return rolePermissions
+      .map((rolePermission) => rolePermission.permissionId)
+      .filter(isPermissionCode);
   }
 
   async findAll(userContext: UserContext): Promise<RoleResponseDto[]> {
@@ -150,40 +151,31 @@ export class RolesService {
     roleId: string,
     updateRolePermissionsDto: UpdateRolePermissionsDto,
   ): Promise<string[]> {
-    await this.findActiveByIdOrThrow(userContext.companyId, roleId);
     const permissionIds = this.normalizePermissionIds(
       updateRolePermissionsDto.permissionIds,
     );
-    const existingRolePermissions = await this.rolePermissionRepository.find({
-      where: {
-        companyId: userContext.companyId,
-        roleId,
-      },
+    if (permissionIds.some((id) => !isPermissionCode(id)))
+      throw new BadRequestException('시스템에 정의되지 않은 권한입니다.');
+    return this.roleRepository.manager.transaction(async (manager) => {
+      const role = await manager.getRepository(Role).findOne({
+        where: { companyId: userContext.companyId, roleId, deleteYn: 'N' },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!role) throw new NotFoundException('Role not found');
+      const repo = manager.getRepository(RolePermission);
+      await repo.delete({ companyId: userContext.companyId, roleId });
+      if (permissionIds.length)
+        await repo.save(
+          permissionIds.map((permissionId) =>
+            repo.create({
+              companyId: userContext.companyId,
+              roleId,
+              permissionId,
+            }),
+          ),
+        );
+      return permissionIds;
     });
-    const requestedPermissionIds = new Set(permissionIds);
-    const removedRolePermissions = existingRolePermissions.filter(
-      (rolePermission) =>
-        !requestedPermissionIds.has(rolePermission.permissionId),
-    );
-    const existingPermissionIds = new Set(
-      existingRolePermissions.map(
-        (rolePermission) => rolePermission.permissionId,
-      ),
-    );
-    const newRolePermissions = permissionIds
-      .filter((permissionId) => !existingPermissionIds.has(permissionId))
-      .map((permissionId) =>
-        this.rolePermissionRepository.create({
-          companyId: userContext.companyId,
-          roleId,
-          permissionId,
-        }),
-      );
-
-    await this.rolePermissionRepository.remove(removedRolePermissions);
-    await this.rolePermissionRepository.save(newRolePermissions);
-
-    return this.findAssignedPermissionIds(userContext.companyId, roleId);
   }
 
   private async findActiveByIdOrThrow(

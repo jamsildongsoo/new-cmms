@@ -1,3 +1,7 @@
+import { dateInput, dateValue } from '@/shared/lib/format'
+// 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
+import { PRIORITIES } from './priority'
+import { DocumentAudit } from '@/shared/ui/DocumentAudit'
 import { DocumentIdField } from '@/shared/ui/DocumentIdField'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
@@ -37,8 +41,6 @@ const empty: WorkRequestPayload = {
   attachmentId: null,
   note: null,
 }
-const dateInput = (value: string) =>
-  value ? `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}` : ''
 function toForm(row: WorkRequest): WorkRequestPayload {
   return {
     documentNo: row.documentNo,
@@ -59,13 +61,12 @@ export function WorkRequestFormPage({ mode }: { mode: FormMode }) {
 function Editor({ mode, id }: { mode: FormMode; id?: string }) {
   const navigate = useNavigate()
   const { user, hasPermission } = useAuth()
-  const [requestKey] = useState(() => crypto.randomUUID())
+
   const [record, setRecord] = useState<WorkRequest | null>(null)
   const [form, setForm] = useState(empty)
   const [baseline, setBaseline] = useState(JSON.stringify(empty))
   const [options, setOptions] = useState<WorkRequestOptions>({
     equipment: [],
-    priorities: [],
     siteId: null,
     deptId: null,
   })
@@ -96,29 +97,36 @@ function Editor({ mode, id }: { mode: FormMode; id?: string }) {
       })
       .catch((e) => active && setError(toMessage(e)))
       .finally(() => active && setLoading(false))
-    if (mode !== 'create' && id && hasPermission('work_order:read'))
-      getRelatedPlans(id)
-        .then((rows) => active && setPlans(rows))
-        .catch((e) => active && setPlansError(toMessage(e)))
     return () => {
       active = false
     }
-  }, [id, mode, hasPermission])
+  }, [id, mode])
+  const canReadPlans = hasPermission('WRKORD:read')
+  useEffect(() => {
+    if (mode === 'create' || !id || !canReadPlans) return
+    let active = true
+    getRelatedPlans(id)
+      .then((rows) => active && setPlans(rows))
+      .catch((e) => active && setPlansError(toMessage(e)))
+    return () => {
+      active = false
+    }
+  }, [id, mode, canReadPlans])
   if (
     !hasPermission(
       mode === 'create'
-        ? 'work_request:create'
+        ? 'WRKREQ:create'
         : mode === 'edit'
-          ? 'work_request:update'
-          : 'work_request:read',
+          ? 'WRKREQ:update'
+          : 'WRKREQ:read',
     )
   )
     return <Navigate to="/work-request" replace />
   const isNew = mode === 'create' && !record
   const owner = record?.createdBy === user?.userId
   const readOnly = isNew
-    ? !hasPermission('work_request:create')
-    : !(owner && record?.status === 'D' && hasPermission('work_request:update'))
+    ? !hasPermission('WRKREQ:create')
+    : !(owner && record?.status === 'D' && hasPermission('WRKREQ:update'))
   const blocked = loading || saving || attachmentBusy || !ready
   const disabled = readOnly || blocked
   const update = (key: keyof WorkRequestPayload, value: string) =>
@@ -130,10 +138,10 @@ function Editor({ mode, id }: { mode: FormMode; id?: string }) {
     try {
       const payload = {
         ...form,
-        occurredDate: form.occurredDate.replaceAll('-', ''),
+        occurredDate: dateValue(form.occurredDate),
       }
       const saved = isNew
-        ? await createWorkRequest(requestKey, payload)
+        ? await createWorkRequest(payload)
         : await updateWorkRequest(record!.workRequestId, payload)
       setRecord(saved)
       setForm(toForm(saved))
@@ -143,9 +151,12 @@ function Editor({ mode, id }: { mode: FormMode; id?: string }) {
           state: { prefill: toWorkRequestDraft(saved) },
         })
       else if (isNew)
-        navigate(`/work-request/${encodeURIComponent(saved.workRequestId)}`, {
-          replace: true,
-        })
+        navigate(
+          `/work-request/${encodeURIComponent(saved.workRequestId)}`,
+          {
+            replace: true,
+          },
+        )
     } catch (e) {
       setError(toMessage(e))
     } finally {
@@ -157,7 +168,7 @@ function Editor({ mode, id }: { mode: FormMode; id?: string }) {
       !record ||
       !owner ||
       record.status !== 'D' ||
-      !hasPermission('work_request:delete') ||
+      !hasPermission('WRKREQ:delete') ||
       blocked ||
       !window.confirm('이 초안 의뢰서를 삭제하시겠습니까?')
     )
@@ -175,35 +186,18 @@ function Editor({ mode, id }: { mode: FormMode; id?: string }) {
   return (
     <form
       ref={formRef}
+      data-readonly={readOnly}
       onSubmit={(e: FormEvent) => {
         e.preventDefault()
         void save(false)
       }}
-      className="space-y-4 border border-slate-200 bg-white p-3"
+      className="space-y-4 rounded-lg border border-slate-200 bg-white p-4 md:p-5"
     >
-      <DocumentIdField value={record?.workRequestId} />
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="flex items-center gap-2 text-base font-semibold">
+        <h1 className="flex items-center gap-2 text-lg font-semibold">
           작업의뢰서 {record && <StatusBadge status={record.status} />}
         </h1>
-        <div className="flex flex-wrap justify-end gap-2">
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={!record || blocked}
-            onClick={() =>
-              printDocument({
-                title: '작업의뢰서',
-                contentJson: toWorkRequestDraft({
-                  ...record!,
-                  ...form,
-                  occurredDate: form.occurredDate.replaceAll('-', ''),
-                }).contentJson,
-              })
-            }
-          >
-            인쇄
-          </Button>
+        <div className="page-actions">
           <Button
             type="button"
             variant="secondary"
@@ -214,15 +208,28 @@ function Editor({ mode, id }: { mode: FormMode; id?: string }) {
           >
             목록
           </Button>
-          {!readOnly && (
-            <Button type="submit" disabled={blocked}>
-              저장
-            </Button>
-          )}
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={!record || blocked}
+            onClick={() =>
+              printDocument({
+                title: '작업의뢰서',
+                contentJson: toWorkRequestDraft({
+                  ...record!,
+                  ...form,
+                  occurredDate: dateValue(form.occurredDate),
+                }).contentJson,
+              })
+            }
+          >
+            인쇄
+          </Button>
           {record?.status === 'D' &&
             owner &&
-            hasPermission('work_request:delete') && (
+            hasPermission('WRKREQ:delete') && (
               <Button
+                className="sm:ml-2"
                 type="button"
                 variant="danger"
                 disabled={blocked}
@@ -231,6 +238,11 @@ function Editor({ mode, id }: { mode: FormMode; id?: string }) {
                 삭제
               </Button>
             )}
+          {!readOnly && (
+            <Button variant="secondary" type="submit" disabled={blocked}>
+              임시저장
+            </Button>
+          )}
           {!readOnly && (
             <Button
               type="button"
@@ -242,21 +254,20 @@ function Editor({ mode, id }: { mode: FormMode; id?: string }) {
           )}
         </div>
       </div>
-      {loading && <p className="text-xs text-slate-500">조회 중...</p>}
+      <DocumentIdField
+        value={record?.workRequestId}
+        documentNo={form.documentNo}
+        onDocumentNoChange={(value) => update('documentNo', value)}
+        disabled={disabled}
+        readOnly={readOnly}
+      />
+      {loading && <p className="text-xs text-slate-500">불러오는 중…</p>}
       {error && (
         <div role="alert" className="text-xs text-red-700">
           {error}
         </div>
       )}
       <div className="grid gap-3 md:grid-cols-2">
-        <Field label="관리번호">
-          <Input
-            maxLength={50}
-            value={form.documentNo}
-            disabled={disabled}
-            onChange={(e) => update('documentNo', e.target.value)}
-          />
-        </Field>
         <Field label="의뢰명" required>
           <Input
             required
@@ -274,12 +285,7 @@ function Editor({ mode, id }: { mode: FormMode; id?: string }) {
             onChange={(e) => update('equipmentId', e.target.value)}
           >
             <option value="">선택</option>
-            {form.equipmentId &&
-              !options.equipment.some((e) => e.value === form.equipmentId) && (
-                <option value={form.equipmentId}>
-                  {form.equipmentId} (기존 값)
-                </option>
-              )}
+
             {options.equipment.map((e) => (
               <option key={e.value} value={e.value}>
                 {e.label} ({e.value})
@@ -303,15 +309,8 @@ function Editor({ mode, id }: { mode: FormMode; id?: string }) {
             onChange={(e) => update('priorityCode', e.target.value)}
           >
             <option value="">선택</option>
-            {form.priorityCode &&
-              !options.priorities.some(
-                (p) => p.value === form.priorityCode,
-              ) && (
-                <option value={form.priorityCode}>
-                  {form.priorityCode} (기존 값)
-                </option>
-              )}
-            {options.priorities.map((p) => (
+
+            {PRIORITIES.map((p) => (
               <option key={p.value} value={p.value}>
                 {p.label}
               </option>
@@ -319,7 +318,10 @@ function Editor({ mode, id }: { mode: FormMode; id?: string }) {
           </Select>
         </Field>
         <Field label="의뢰자">
-          <Input disabled value={record?.requesterId ?? user?.userId ?? ''} />
+          <Input
+            disabled
+            value={record?.requesterId ?? user?.userId ?? ''}
+          />
         </Field>
         <Field label="사업장">
           <Input
@@ -353,7 +355,7 @@ function Editor({ mode, id }: { mode: FormMode; id?: string }) {
       </Field>
       <AttachmentManager
         attachmentId={form.attachmentId}
-        refModule="work_request"
+        refModule="WRKREQ"
         refId={record?.workRequestId ?? null}
         disabled={disabled}
         onBusyChange={setAttachmentBusy}
@@ -364,19 +366,19 @@ function Editor({ mode, id }: { mode: FormMode; id?: string }) {
       />
       {record && (
         <section className="space-y-2">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold">
+          <div className="flex flex-wrap items-center justify-between">
+            <h2 className="text-base font-semibold">
               연결 작업계획{' '}
-              {hasPermission('work_order:read') && `(${plans.length}건)`}
+              {hasPermission('WRKORD:read') && `(${plans.length}건)`}
             </h2>
-            {record.status === 'C' && hasPermission('work_order:create') && (
+            {record.status === 'C' && hasPermission('WRKORD:create') && (
               <Button
                 type="button"
                 variant="secondary"
                 disabled={blocked}
                 onClick={() =>
                   navigate(
-                    `/work-order/new?refModule=work_request&refId=${encodeURIComponent(record.workRequestId)}`,
+                    `/work-order/new?refModule=WRKREQ&refId=${encodeURIComponent(record.workRequestId)}`,
                   )
                 }
               >
@@ -384,8 +386,10 @@ function Editor({ mode, id }: { mode: FormMode; id?: string }) {
               </Button>
             )}
           </div>
-          {plansError && <p className="text-xs text-red-700">{plansError}</p>}
-          {hasPermission('work_order:read') ? (
+          {plansError && (
+            <p className="text-xs text-red-700">{plansError}</p>
+          )}
+          {hasPermission('WRKORD:read') ? (
             <DataTable<RelatedPlan>
               rows={plans}
               gridTemplateColumns="120px 1fr 110px 80px"
@@ -430,12 +434,7 @@ function Editor({ mode, id }: { mode: FormMode; id?: string }) {
           )}
         </section>
       )}
-      {record && (
-        <p className="text-xs text-slate-500">
-          등록자: {record.createdBy} / 등록일시: {record.createdAt} / 수정자:{' '}
-          {record.updatedBy || '-'} / 수정일시: {record.updatedAt || '-'}
-        </p>
-      )}
+      {record && <DocumentAudit record={record} />}
     </form>
   )
 }

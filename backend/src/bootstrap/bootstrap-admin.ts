@@ -1,16 +1,12 @@
-/** 지정 회사의 초기 관리자와 실제 Controller 권한을 준비한다. 운영 DB 적용은 명시적 명령으로만 수행한다. */
-import { InventoryService } from '../inventory/transactions/inventory.service';
-import { UserContext } from '../auth/types/user-context.type';
+/** ./bootstrap.sh admin 또는 npm run bootstrap:admin으로 명시 실행한다. DB_SYNCHRONIZE=false로 스키마 변경 없이 회사·관리자·권한을 준비한다. */
 import { config as loadEnv } from 'dotenv';
 import { ENV_FILE_PATH } from '../config/env-file';
-import { ModulesContainer, NestFactory } from '@nestjs/core';
-import { Type } from '@nestjs/common';
+import { NestFactory } from '@nestjs/core';
 import { hash } from 'bcrypt';
 import { DataSource, Repository } from 'typeorm';
+import { readBootstrapInput, type BootstrapConfig } from './bootstrap-input';
 import { AppModule } from '../app.module';
-import { findModule } from '../common/constants/modules';
-import { collectControllerPermissions } from './controller-permissions';
-import { Permission } from '../identity/permissions/entities/permission.entity';
+import { PERMISSION_OPTIONS } from '../common/constants/permissions';
 import { RolePermission } from '../identity/roles/entities/role-permission.entity';
 import { Role } from '../identity/roles/entities/role.entity';
 import { AccessScope, User } from '../identity/users/entities/user.entity';
@@ -24,116 +20,61 @@ const ADMIN_DEPT_ID = 'ADMIN';
 
 loadEnv({ path: ENV_FILE_PATH, quiet: true });
 
-interface BootstrapConfig {
-  companyId: string;
-  companyName: string;
-  adminUserId: string;
-  adminPassword: string;
-  adminName: string;
-  forcePassword: boolean;
-}
-
 async function bootstrapAdmin() {
-  const config = readBootstrapConfig();
+  const config = await readBootstrapInput();
   const app = await NestFactory.createApplicationContext(AppModule, {
     logger: ['error', 'warn', 'log'],
   });
 
   try {
     const dataSource = app.get(DataSource);
-    const companyRepository = dataSource.getRepository(Company);
-    const departmentRepository = dataSource.getRepository(Department);
-    const roleRepository = dataSource.getRepository(Role);
-    const permissionRepository = dataSource.getRepository(Permission);
-    const rolePermissionRepository = dataSource.getRepository(RolePermission);
-    const userRepository = dataSource.getRepository(User);
-
-    await upsertCompany(companyRepository, config);
-    const siteRepository = dataSource.getRepository(Site);
-    const adminSite = await siteRepository.findOneBy({
-      companyId: config.companyId,
-      siteId: 'ADMIN',
-    });
-    if (!adminSite) {
-      await siteRepository.save(
-        siteRepository.create({
-          companyId: config.companyId,
-          siteId: 'ADMIN',
-          name: 'Administration',
-          deleteYn: 'N',
-          createdBy: config.adminUserId,
-        }),
+    await dataSource.transaction(async (manager) => {
+      await manager.query(
+        'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+        [`bootstrap:${config.companyId}`],
       );
-    }
-    await upsertAdminDepartment(departmentRepository, config);
-    await upsertAdminRole(roleRepository, config);
-    const controllers: Type<unknown>[] = [];
-    for (const module of app.get(ModulesContainer).values())
-      for (const wrapper of module.controllers.values())
-        if (wrapper.metatype)
-          controllers.push(wrapper.metatype as Type<unknown>);
-    const permissionIds = await upsertPermissions(
-      permissionRepository,
-      config,
-      collectControllerPermissions(controllers),
-    );
-    await upsertAdminRolePermissions(
-      rolePermissionRepository,
-      config,
-      permissionIds,
-    );
-    await upsertAdminUser(userRepository, config);
-    await app.get(InventoryService).initializeTypes({
-      companyId: config.companyId,
-      userId: config.adminUserId,
-      roleId: ADMIN_ROLE_ID,
-      siteId: 'ADMIN',
-      deptId: ADMIN_DEPT_ID,
-      accessScope: 'COMPANY_ALL',
-      permissions: [],
-    } as UserContext);
+      const companyRepository = manager.getRepository(Company);
+      const departmentRepository = manager.getRepository(Department);
+      const roleRepository = manager.getRepository(Role);
+      const rolePermissionRepository = manager.getRepository(RolePermission);
+      const userRepository = manager.getRepository(User);
+
+      await upsertCompany(companyRepository, config);
+      const siteRepository = manager.getRepository(Site);
+      const adminSite = await siteRepository.findOneBy({
+        companyId: config.companyId,
+        siteId: 'ADMIN',
+      });
+      if (!adminSite) {
+        await siteRepository.save(
+          siteRepository.create({
+            companyId: config.companyId,
+            siteId: 'ADMIN',
+            name: 'Administration',
+            deleteYn: 'N',
+            createdBy: config.adminUserId,
+          }),
+        );
+      }
+      await upsertAdminDepartment(departmentRepository, config);
+      await upsertAdminRole(roleRepository, config);
+      const permissionIds = PERMISSION_OPTIONS.map((p) => p.permissionId);
+      await upsertAdminRolePermissions(
+        rolePermissionRepository,
+        config,
+        permissionIds,
+      );
+      await upsertAdminUser(userRepository, config);
+    });
 
     console.log('Bootstrap admin completed.');
     console.log(`Company: ${config.companyId}`);
     console.log(`Admin user: ${config.adminUserId}`);
     console.log(`Admin role: ${ADMIN_ROLE_ID}`);
-    console.log(`Permissions: ${permissionIds.length}`);
+    console.log(`Permissions: ${PERMISSION_OPTIONS.length}`);
   } finally {
     await app.close();
   }
-}
-
-function readBootstrapConfig(): BootstrapConfig {
-  return {
-    companyId: readEnv('BOOTSTRAP_COMPANY_ID', 'CR'),
-    companyName: readEnv('BOOTSTRAP_COMPANY_NAME', 'Core Company'),
-    adminUserId: readEnv('BOOTSTRAP_ADMIN_USER_ID', 'admin'),
-    adminPassword: readEnv('BOOTSTRAP_ADMIN_PASSWORD'),
-    adminName: readEnv('BOOTSTRAP_ADMIN_NAME', 'System Admin'),
-    forcePassword: readBooleanEnv('BOOTSTRAP_ADMIN_FORCE_PASSWORD', false),
-  };
-}
-
-function readEnv(key: string, fallback?: string): string {
-  const value = process.env[key] ?? fallback;
-  if (value === undefined || value.trim() === '') {
-    throw new Error(`${key} is required`);
-  }
-  return value.trim();
-}
-
-function readBooleanEnv(key: string, fallback: boolean): boolean {
-  const value = process.env[key];
-  if (value === undefined || value.trim() === '') {
-    return fallback;
-  }
-  if (value === 'true') {
-    return true;
-  }
-  if (value === 'false') {
-    return false;
-  }
-  throw new Error(`${key} must be true or false`);
 }
 
 async function upsertCompany(
@@ -219,59 +160,6 @@ async function upsertAdminRole(
   await repository.save(role);
 }
 
-async function upsertPermissions(
-  repository: Repository<Permission>,
-  config: BootstrapConfig,
-  permissionIds: string[],
-): Promise<string[]> {
-  const existingPermissions = await repository.findBy(
-    permissionIds.map((permissionId) => ({ permissionId })),
-  );
-  const existingPermissionMap = new Map(
-    existingPermissions.map((permission) => [
-      permission.permissionId,
-      permission,
-    ]),
-  );
-
-  const permissions = permissionIds.map((permissionId) => {
-    const [module, action] = permissionId.split(':');
-    const existingPermission = existingPermissionMap.get(permissionId);
-
-    if (existingPermission) {
-      existingPermission.module = module;
-      existingPermission.action = action;
-      existingPermission.name = formatPermissionName(module, action);
-      existingPermission.deleteYn = 'N';
-      existingPermission.updatedBy = config.adminUserId;
-      existingPermission.updatedAt = new Date();
-      return existingPermission;
-    }
-
-    return repository.create({
-      permissionId,
-      module,
-      action,
-      name: formatPermissionName(module, action),
-      deleteYn: 'N',
-      createdBy: config.adminUserId,
-    });
-  });
-
-  await repository.save(permissions);
-  return permissionIds;
-}
-
-function formatPermissionName(module: string, action: string): string {
-  const labels: Record<string, string> = {
-    create: '등록',
-    read: '조회',
-    update: '수정',
-    delete: '삭제',
-  };
-  return `${findModule(module)?.name ?? module} ${labels[action] ?? action}`;
-}
-
 async function upsertAdminRolePermissions(
   repository: Repository<RolePermission>,
   config: BootstrapConfig,
@@ -335,6 +223,7 @@ async function upsertAdminUser(
 
   if (config.forcePassword) {
     user.passwordHash = await hash(config.adminPassword, PASSWORD_HASH_ROUNDS);
+    user.tokenVersion = (user.tokenVersion ?? 0) + 1;
   }
 
   user.name = config.adminName;

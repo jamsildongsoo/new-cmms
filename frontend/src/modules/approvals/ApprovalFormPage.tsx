@@ -1,5 +1,8 @@
+// 결재 코드 원본: backend/src/approvals/approval.constant.ts.
+// 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
+import { useMetadata } from '@/shared/metadata/metadata'
+import { useStatusLabels } from '@/shared/metadata/metadata'
 import { DocumentIdField } from '@/shared/ui/DocumentIdField'
-import { ArrowDown, ArrowUp, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
@@ -8,12 +11,12 @@ import { useAuth } from '@/modules/auth'
 import { toMessage } from '@/shared/api/errors'
 import type { FormMode } from '@/shared/types/form'
 import { printDocument } from '@/shared/lib/print'
+
 import { useUnsavedChanges } from '@/shared/hooks/useUnsavedChanges'
 import { Button } from '@/shared/ui/Button'
 import { Field } from '@/shared/ui/Field'
 import { Input } from '@/shared/ui/Input'
 import { RichTextEditor } from '@/shared/ui/RichTextEditor'
-import { Select } from '@/shared/ui/Select'
 import { StatusBadge } from '@/shared/ui/StatusBadge'
 import { Textarea } from '@/shared/ui/Textarea'
 import {
@@ -26,7 +29,6 @@ import {
   submitApproval,
   updateApproval,
   type Approval,
-  type ApprovalUserInfo,
 } from './approvals.api'
 import {
   formatDate,
@@ -35,11 +37,9 @@ import {
   stepStatus,
   toForm,
   toPayload,
-  stepFromUser,
   type ApprovalFormState,
-  type ApprovalFormStep,
 } from './approvalForm'
-import { UserSearchBox } from './UserSearchBox'
+import { ApprovalLineEditor } from './ApprovalLineEditor'
 import type { ApprovalDraft } from './snapshot'
 
 const titles: Record<FormMode, string> = {
@@ -48,21 +48,12 @@ const titles: Record<FormMode, string> = {
   view: '결재 조회',
 }
 
-function UserLabel({ step }: { step: ApprovalFormStep }) {
-  return (
-    <div className="min-w-0 truncate">
-      <span className="font-medium text-slate-900">{step.userName}</span>{' '}
-      <span className="text-slate-500">({step.userId})</span>
-      <span className="ml-2 text-slate-500">
-        {[step.deptName, step.title, step.position].filter(Boolean).join(' / ')}
-      </span>
-    </div>
-  )
-}
-
 function ErrorBox({ message }: { message: string | null }) {
   return message ? (
-    <div className="border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+    <div
+      role="alert"
+      className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700"
+    >
       {message}
     </div>
   ) : null
@@ -71,7 +62,11 @@ function ErrorBox({ message }: { message: string | null }) {
 export function ApprovalFormPage({ mode }: { mode: FormMode }) {
   const { user } = useAuth()
   const id = useParams().approvalId
-  const prefill = (useLocation().state as { prefill?: ApprovalDraft } | null)
+  const location = useLocation()
+  const sourceSyncWarning = (
+    location.state as { sourceSyncWarning?: string } | null
+  )?.sourceSyncWarning
+  const prefill = (location.state as { prefill?: ApprovalDraft } | null)
     ?.prefill
   const [approval, setApproval] = useState<Approval | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -122,7 +117,7 @@ export function ApprovalFormPage({ mode }: { mode: FormMode }) {
     return <ErrorBox message={loadError} />
   }
   if (!approval || approval.approvalId !== id) {
-    return <div className="p-4 text-xs text-slate-500">Loading...</div>
+    return <div className="p-4 text-xs text-slate-500">불러오는 중…</div>
   }
   if (
     mode === 'edit' ||
@@ -140,7 +135,14 @@ export function ApprovalFormPage({ mode }: { mode: FormMode }) {
       />
     )
   }
-  return <ApprovalView approval={approval} onChange={setApproval} />
+  return (
+    <ApprovalView
+      key={approval.approvalId}
+      approval={approval}
+      onChange={setApproval}
+      initialWarning={sourceSyncWarning}
+    />
+  )
 }
 
 function ApprovalEditor({
@@ -153,7 +155,7 @@ function ApprovalEditor({
   onSaved?: (approval: Approval) => void
 }) {
   const navigate = useNavigate()
-  const [requestKey] = useState(() => crypto.randomUUID())
+
   const [form, setForm] = useState(initial)
   const [baseline, setBaseline] = useState(JSON.stringify(initial))
   const confirmLeave = useUnsavedChanges(JSON.stringify(form) !== baseline)
@@ -161,35 +163,12 @@ function ApprovalEditor({
   const [isSaving, setIsSaving] = useState(false)
   const [isAttachmentBusy, setIsAttachmentBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const isPermitApproval = form.refModule === 'work_permit'
+  const isPermitApproval = form.refModule === 'PERMIT'
   const isLinkedApproval = Boolean(form.refModule?.trim() && form.refId?.trim())
 
   const patch = (changes: Partial<ApprovalFormState>) =>
     setForm((current) => ({ ...current, ...changes }))
   const { user } = useAuth()
-  const taken = [
-    user?.userId ?? '',
-    ...form.line.map((step) => step.userId),
-    ...form.references.map((step) => step.userId),
-  ]
-  const addToLine = (info: ApprovalUserInfo) =>
-    patch({ line: [...form.line, stepFromUser(info, 'APPROVER')] })
-  const addReference = (info: ApprovalUserInfo) =>
-    patch({ references: [...form.references, stepFromUser(info, 'REFERENCE')] })
-  const changeLineType = (index: number, type: ApprovalFormStep['type']) =>
-    patch({
-      line: form.line.map((step, i) =>
-        i === index ? { ...step, type } : step,
-      ),
-    })
-  const moveLine = (index: number, delta: number) => {
-    const target = index + delta
-    if (target < 0 || target >= form.line.length) return
-    const next = [...form.line]
-    ;[next[index], next[target]] = [next[target], next[index]]
-    patch({ line: next })
-  }
-
   const save = async (submit: boolean) => {
     // 연계 결재는 버튼이나 Enter 제출로 임시저장하지 않고 상신 시에만 저장한다.
     if (!submit && isLinkedApproval) return
@@ -197,11 +176,11 @@ function ApprovalEditor({
       return
     }
     if (!form.title.trim()) {
-      setError('Title is required')
+      setError('제목을 입력해 주세요.')
       return
     }
     if (form.line.length === 0) {
-      setError('Add at least one approver to the approval line')
+      setError('결재자 또는 합의자를 한 명 이상 추가해 주세요.')
       return
     }
     setIsSaving(true)
@@ -215,20 +194,20 @@ function ApprovalEditor({
           saved = await submitApproval(form.approvalId)
         }
       } else {
-        saved = await createApproval(
-          {
-            ...payload,
-            submit,
-          },
-          requestKey,
-        )
+        saved = await createApproval({
+          ...payload,
+          submit,
+        })
       }
       const next = toForm(saved)
       setForm(next)
       setBaseline(JSON.stringify(next))
       setIsSaving(false)
       onSaved?.(saved)
-      navigate(`/approvals/${saved.approvalId}`, { replace: mode === 'create' })
+      navigate(`/approvals/${saved.approvalId}`, {
+        replace: mode === 'create',
+        state: { sourceSyncWarning: saved.sourceSyncWarning },
+      })
     } catch (saveError) {
       setError(toMessage(saveError))
       setIsSaving(false)
@@ -256,10 +235,18 @@ function ApprovalEditor({
   return (
     <section className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-base font-semibold text-slate-900">
-          {titles[mode]}
-        </h1>
-        <div className="flex flex-wrap justify-end gap-2">
+        <h1 className="text-lg font-semibold text-slate-900">{titles[mode]}</h1>
+        <div className="page-actions">
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={isSaving || isAttachmentBusy}
+            onClick={() => {
+              if (confirmLeave()) navigate('/approvals')
+            }}
+          >
+            목록
+          </Button>
           <Button
             type="button"
             variant="secondary"
@@ -277,17 +264,19 @@ function ApprovalEditor({
           >
             인쇄
           </Button>
+          {mode === 'edit' && (
+            <Button
+              className="sm:ml-2"
+              type="button"
+              variant="danger"
+              disabled={isSaving || isAttachmentBusy}
+              onClick={() => void removeDraft()}
+            >
+              삭제
+            </Button>
+          )}
           <Button
-            type="button"
             variant="secondary"
-            disabled={isSaving || isAttachmentBusy}
-            onClick={() => {
-              if (confirmLeave()) navigate('/approvals')
-            }}
-          >
-            목록
-          </Button>
-          <Button
             type="submit"
             form="approval-form"
             disabled={isLinkedApproval || isSaving || isAttachmentBusy}
@@ -297,18 +286,8 @@ function ApprovalEditor({
                 : undefined
             }
           >
-            저장
+            임시저장
           </Button>
-          {mode === 'edit' && (
-            <Button
-              type="button"
-              variant="danger"
-              disabled={isSaving || isAttachmentBusy}
-              onClick={() => void removeDraft()}
-            >
-              삭제
-            </Button>
-          )}
           <Button
             type="button"
             disabled={isSaving || isAttachmentBusy}
@@ -322,22 +301,20 @@ function ApprovalEditor({
       <form
         id="approval-form"
         ref={formRef}
-        className="border border-slate-200 bg-white p-3"
+        className="space-y-5 rounded-lg border border-slate-200 bg-white p-4 md:p-5"
         onSubmit={(event: FormEvent<HTMLFormElement>) => {
           event.preventDefault()
           void save(false)
         }}
       >
-        <DocumentIdField value={form.approvalId} />
-        <div className="grid gap-3 md:grid-cols-2">
-          <Field label="관리번호" className="md:col-span-2">
-            <Input
-              value={form.documentNo}
-              maxLength={50}
-              onChange={(event) => patch({ documentNo: event.target.value })}
-            />
-          </Field>
-          <Field label="Title" required className="md:col-span-2">
+        <DocumentIdField
+          value={form.approvalId}
+          documentNo={form.documentNo}
+          onDocumentNoChange={(documentNo) => patch({ documentNo })}
+          disabled={isSaving || isAttachmentBusy}
+        />
+        <div className="grid gap-5 md:grid-cols-2">
+          <Field label="제목" required className="md:col-span-2">
             <Input
               value={form.title}
               disabled={isPermitApproval}
@@ -346,131 +323,30 @@ function ApprovalEditor({
               autoFocus
             />
           </Field>
-          <Field label="Content" required className="md:col-span-2">
+          <ApprovalLineEditor
+            line={form.line}
+            references={form.references}
+            submitterId={user?.userId ?? ''}
+            disabled={isSaving || isAttachmentBusy}
+            onChange={patch}
+            onError={setError}
+          />
+          <div className="space-y-2 md:col-span-2">
+            <h2 className="text-base font-semibold">
+              본문 <span className="text-red-600">*</span>
+            </h2>
             <RichTextEditor
               value={form.contentJson}
               readOnly={isPermitApproval}
               onChange={(contentJson) => patch({ contentJson })}
             />
-          </Field>
-          <fieldset
-            disabled={isPermitApproval}
-            className="space-y-2 md:col-span-2"
-          >
-            <div className="text-xs font-medium text-slate-700">
-              Approval line
-              <span className="ml-2 font-normal text-slate-500">
-                Processed in order. Approver approves or rejects; Agree reviews
-                and agrees or disagrees.
-              </span>
-            </div>
-            <UserSearchBox
-              placeholder="Search by user ID or name to add to the line"
-              excludeUserIds={taken}
-              onSelect={addToLine}
-              onError={setError}
-            />
-            <div className="grid gap-1">
-              {form.line.length === 0 && (
-                <div className="border border-dashed border-slate-300 px-3 py-2 text-xs text-slate-500">
-                  No approvers yet.
-                </div>
-              )}
-              {form.line.map((step, index) => (
-                <div
-                  key={step.userId}
-                  className="grid grid-cols-[28px_minmax(0,1fr)_110px_auto] items-center gap-2 border border-slate-200 px-2 py-1 text-xs"
-                >
-                  <span className="text-center font-semibold text-slate-600">
-                    {index + 1}
-                  </span>
-                  <UserLabel step={step} />
-                  <Select
-                    value={step.type}
-                    onChange={(event) =>
-                      changeLineType(
-                        index,
-                        event.target.value as ApprovalFormStep['type'],
-                      )
-                    }
-                  >
-                    <option value="APPROVER">결재</option>
-                    <option value="AGREE">합의</option>
-                  </Select>
-                  <div className="flex">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      disabled={index === 0}
-                      onClick={() => moveLine(index, -1)}
-                    >
-                      <ArrowUp className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      disabled={index === form.line.length - 1}
-                      onClick={() => moveLine(index, 1)}
-                    >
-                      <ArrowDown className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      onClick={() =>
-                        patch({ line: form.line.filter((_, i) => i !== index) })
-                      }
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </fieldset>
-          <div className="space-y-2 md:col-span-2">
-            <div className="text-xs font-medium text-slate-700">
-              References
-              <span className="ml-2 font-normal text-slate-500">
-                Can view approved documents only; no approval action required.
-              </span>
-            </div>
-            <UserSearchBox
-              placeholder="Search by user ID or name to add a reference"
-              excludeUserIds={taken}
-              onSelect={addReference}
-              onError={setError}
-            />
-            <div className="grid gap-1">
-              {form.references.map((step, index) => (
-                <div
-                  key={step.userId}
-                  className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border border-slate-200 px-2 py-1 text-xs"
-                >
-                  <UserLabel step={step} />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={() =>
-                      patch({
-                        references: form.references.filter(
-                          (_, i) => i !== index,
-                        ),
-                      })
-                    }
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
-              ))}
-            </div>
           </div>
           <div className="md:col-span-2">
             {(form.sourceAttachmentIds ?? []).map((id) => (
               <AttachmentManager
                 key={id}
                 attachmentId={id}
-                refModule="work_permit_request"
+                refModule="PERREQ"
                 refId={form.refId!}
                 disabled
                 onAttachmentIdChange={() => undefined}
@@ -479,7 +355,7 @@ function ApprovalEditor({
             ))}
             <AttachmentManager
               attachmentId={form.attachmentId}
-              refModule="approval"
+              refModule="APPROV"
               refId={form.approvalId || null}
               disabled={isLinkedApproval || isSaving}
               onBusyChange={setIsAttachmentBusy}
@@ -498,16 +374,25 @@ type ApprovalAction = 'submit' | 'approve' | 'reject' | 'cancel' | 'delete'
 function ApprovalView({
   approval,
   onChange,
+  initialWarning,
 }: {
   approval: Approval
   onChange: (approval: Approval) => void
+  initialWarning?: string
 }) {
+  const { approvalStepTypes } = useMetadata()
+  const stepLabels = Object.fromEntries(
+    approvalStepTypes.map(({ value, label }) => [value, label]),
+  )
+  const documentStatusLabels = useStatusLabels()
   const navigate = useNavigate()
   const { user } = useAuth()
   const [comment, setComment] = useState('')
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(
+    initialWarning ?? approval.sourceSyncWarning ?? null,
+  )
 
   const currentStep = useMemo(
     () =>
@@ -548,21 +433,26 @@ function ApprovalView({
         navigate('/approvals')
         return
       }
-      if (action === 'submit') await submitApproval(id)
-      if (action === 'approve') await approveApproval(id, { comment })
-      if (action === 'reject') await rejectApproval(id, { comment })
-      if (action === 'cancel') await cancelApproval(id)
+      const saved =
+        action === 'submit'
+          ? await submitApproval(id)
+          : action === 'approve'
+            ? await approveApproval(id, { comment })
+            : action === 'reject'
+              ? await rejectApproval(id, { comment })
+              : await cancelApproval(id)
       setComment('')
       setNotice(
-        {
-          submit: '상신했습니다.',
-          approve: '승인했습니다.',
-          reject: isAgree ? '부동의 처리했습니다.' : '반려했습니다.',
-          cancel: '상신을 취소했습니다.',
-          delete: '삭제했습니다.',
-        }[action],
+        saved.sourceSyncWarning ??
+          {
+            submit: '상신했습니다.',
+            approve: isAgree ? '동의했습니다.' : '승인했습니다.',
+            reject: isAgree ? '부동의 처리했습니다.' : '반려했습니다.',
+            cancel: '상신을 취소했습니다.',
+            delete: '삭제했습니다.',
+          }[action],
       )
-      onChange(await getApproval(id))
+      onChange(saved)
     } catch (actionError) {
       setError(toMessage(actionError))
     } finally {
@@ -570,15 +460,31 @@ function ApprovalView({
     }
   }
 
+  const displaySteps = [...approval.steps].sort(
+    (a, b) =>
+      Number(a.type === 'REFERENCE') - Number(b.type === 'REFERENCE') ||
+      a.stepNo - b.stepNo,
+  )
+  const processingSteps = displaySteps.filter(
+    (step) => step.type === 'APPROVER' || step.type === 'AGREE',
+  )
+
   return (
-    <section className="space-y-3">
-      <DocumentIdField value={approval.approvalId} />
-      <div className="flex items-center justify-between gap-3">
-        <h1 className="flex items-center gap-2 text-base font-semibold text-slate-900">
-          {approval.title}
+    <section className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="flex min-w-0 flex-wrap items-center gap-2 text-lg font-semibold text-slate-900">
+          <span className="break-words">{approval.title}</span>
           <StatusBadge status={approval.status} />
         </h1>
-        <div className="flex flex-wrap justify-end gap-2">
+        <div className="page-actions">
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={isSaving}
+            onClick={() => navigate('/approvals')}
+          >
+            목록
+          </Button>
           <Button
             type="button"
             variant="secondary"
@@ -590,7 +496,10 @@ function ApprovalView({
                   ['문서번호', approval.approvalId],
                   ['관리번호', approval.documentNo],
                   ['상신자', approval.submitterId],
-                  ['상태', approval.status],
+                  [
+                    '상태',
+                    documentStatusLabels[approval.status] ?? approval.status,
+                  ],
                 ],
                 contentJson: approval.contentJson,
               })
@@ -598,21 +507,35 @@ function ApprovalView({
           >
             인쇄
           </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={isSaving}
-            onClick={() => navigate('/approvals')}
-          >
-            목록
-          </Button>
           {sourcePath && (
             <Button
               type="button"
               variant="secondary"
               onClick={() => navigate(sourcePath)}
             >
-              원문
+              원문 보기
+            </Button>
+          )}
+          {canCancel && (
+            <Button
+              type="button"
+              variant="danger"
+              className="sm:ml-2"
+              disabled={isSaving}
+              onClick={() => void run('cancel')}
+            >
+              상신 취소
+            </Button>
+          )}
+          {canDelete && (
+            <Button
+              type="button"
+              variant="danger"
+              className="sm:ml-2"
+              disabled={isSaving}
+              onClick={() => void run('delete')}
+            >
+              삭제
             </Button>
           )}
           {canEdit && (
@@ -624,97 +547,106 @@ function ApprovalView({
               상신
             </Button>
           )}
-          {canProcess && (
-            <>
-              <Button
-                type="button"
-                disabled={isSaving}
-                onClick={() => void run('approve')}
-              >
-                승인
-              </Button>
-              <Button
-                type="button"
-                variant="danger"
-                disabled={isSaving}
-                onClick={() => void run('reject')}
-              >
-                {isAgree ? '부동의' : '반려'}
-              </Button>
-            </>
-          )}
-          {canCancel && (
-            <Button
-              type="button"
-              variant="danger"
-              disabled={isSaving}
-              onClick={() => void run('cancel')}
-            >
-              상신취소
-            </Button>
-          )}
-          {canDelete && (
-            <Button
-              type="button"
-              variant="danger"
-              disabled={isSaving}
-              onClick={() => void run('delete')}
-            >
-              삭제
-            </Button>
-          )}
         </div>
       </div>
-
+      <DocumentIdField
+        value={approval.approvalId}
+        documentNo={approval.documentNo}
+        readOnly
+      />
       <ErrorBox message={error} />
       {notice && !error && (
-        <div className="border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+        <div
+          role="status"
+          className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700"
+        >
           {notice}
         </div>
       )}
-
-      <div className="space-y-3 border border-slate-200 bg-white p-3 text-xs text-slate-700">
-        <RichTextEditor value={approval.contentJson} readOnly />
-        <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-          <Info label="관리번호" value={approval.documentNo || '-'} />
-          <Info label="Submitter" value={approval.submitterId} />
-          <Info label="Created" value={formatDate(approval.createdAt)} />
-          <Info label="Submitted" value={formatDate(approval.submittedAt)} />
-          <Info label="Completed" value={formatDate(approval.completedAt)} />
-        </div>
-
-        <div>
-          <div className="mb-1 font-semibold text-slate-900">Steps</div>
-          <div className="grid gap-1">
-            {approval.steps.map((step) => (
-              <div
-                key={`${step.approvalId}-${step.stepNo}`}
-                className="grid grid-cols-[48px_1fr_88px] gap-2 border border-slate-100 px-2 py-1"
-              >
-                <span>{step.stepNo}</span>
-                <span>
-                  {step.type === 'AGREE'
-                    ? 'Agree'
-                    : step.type === 'APPROVER'
-                      ? 'Approve'
-                      : step.type === 'REFERENCE'
-                        ? 'Reference'
-                        : 'Submitter'}{' '}
-                  / {step.userId}
-                  {step.userName &&
-                    ` · ${[step.userName, step.deptName, step.title, step.position].filter(Boolean).join(' / ')}`}
-                </span>
-                <span>{stepStatus(step)}</span>
-              </div>
-            ))}
+      <div className="space-y-6 rounded-lg border border-slate-200 bg-white p-4 text-xs text-slate-700 md:p-5">
+        <section className="space-y-3">
+          <h2 className="text-base font-semibold text-slate-900">결재선</h2>
+          <p className="text-xs text-slate-500">
+            참조자는 승인 완료 후 열람하며 결재 차례에 포함되지 않습니다.
+          </p>
+          <div className="overflow-x-auto rounded-lg border border-slate-200">
+            <table className="w-full min-w-[680px] text-xs">
+              <thead className="bg-slate-50 text-sm text-slate-700">
+                <tr>
+                  <th className="w-14 px-3 py-2 text-center font-medium">
+                    순서
+                  </th>
+                  <th className="px-3 py-2 text-left font-medium">
+                    사용자 / 부서
+                  </th>
+                  <th className="px-3 py-2 text-left font-medium">유형</th>
+                  <th className="px-3 py-2 text-center font-medium">
+                    처리 상태
+                  </th>
+                  <th className="px-3 py-2 text-left font-medium">
+                    처리일시 / 의견
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {displaySteps.map((step) => {
+                  const current =
+                    approval.status === 'P' &&
+                    step.stepNo === currentStep?.stepNo
+                  return (
+                    <tr
+                      key={step.stepNo}
+                      className={`border-t border-slate-100 ${current ? 'bg-blue-50' : ''}`}
+                    >
+                      <td className="px-3 py-2 text-center">
+                        {step.type === 'REFERENCE' || step.type === 'SUBMITTER'
+                          ? '—'
+                          : processingSteps.indexOf(step) + 1}
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="font-medium text-slate-900">
+                          {step.userName || step.userId}
+                        </div>
+                        <div className="text-slate-500">
+                          {[step.deptName, step.title, step.position]
+                            .filter(Boolean)
+                            .join(' / ')}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2">
+                        {stepLabels[step.type] ?? step.type}
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        {current ? '현재 차례' : stepStatus(step)}
+                      </td>
+                      <td className="px-3 py-2">
+                        <div>
+                          {step.type === 'REFERENCE'
+                            ? '—'
+                            : formatDate(step.actedAt)}
+                        </div>
+                        {step.comment && (
+                          <div className="mt-1 whitespace-pre-wrap break-words text-slate-500">
+                            {step.comment}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
           </div>
-        </div>
-
+        </section>
+        <section className="space-y-2">
+          <h2 className="text-base font-semibold text-slate-900">본문</h2>
+          <RichTextEditor value={approval.contentJson} readOnly />
+        </section>
         {(approval.sourceAttachmentIds ?? []).map((id) => (
           <AttachmentManager
             key={id}
             attachmentId={id}
-            refModule="work_permit_request"
+            refModule="PERREQ"
             refId={approval.refId!}
             disabled
             onAttachmentIdChange={() => undefined}
@@ -723,21 +655,52 @@ function ApprovalView({
         ))}
         <AttachmentManager
           attachmentId={approval.attachmentId}
-          refModule="approval"
+          refModule="APPROV"
           refId={approval.approvalId}
           disabled
           onAttachmentIdChange={() => undefined}
           onError={setError}
         />
-
         {canProcess && (
-          <Field label="Action Comment">
-            <Textarea
-              value={comment}
-              onChange={(event) => setComment(event.target.value)}
-            />
-          </Field>
+          <section className="space-y-3 rounded-lg border border-blue-200 bg-blue-50/40 p-4">
+            <Field label="결재 의견">
+              <Textarea
+                value={comment}
+                disabled={isSaving}
+                onChange={(event) => setComment(event.target.value)}
+                placeholder="검토 의견을 입력해 주세요."
+              />
+            </Field>
+            <div className="page-actions">
+              <Button
+                type="button"
+                variant="danger"
+                disabled={isSaving}
+                onClick={() => void run('reject')}
+              >
+                {isAgree ? '부동의' : '반려'}
+              </Button>
+              <Button
+                type="button"
+                disabled={isSaving}
+                onClick={() => void run('approve')}
+              >
+                {isAgree ? '동의' : '승인'}
+              </Button>
+            </div>
+          </section>
         )}
+        <details className="border-t border-slate-100 pt-3">
+          <summary className="cursor-pointer text-sm font-medium text-slate-600">
+            작성·처리 정보
+          </summary>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Info label="상신자" value={approval.submitterId} />
+            <Info label="작성일시" value={formatDate(approval.createdAt)} />
+            <Info label="상신일시" value={formatDate(approval.submittedAt)} />
+            <Info label="종결일시" value={formatDate(approval.completedAt)} />
+          </div>
+        </details>
       </div>
     </section>
   )
@@ -746,7 +709,7 @@ function ApprovalView({
 function Info({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div>
-      <div className="text-[11px] font-medium text-slate-500">{label}</div>
+      <div className="text-sm font-medium text-slate-500">{label}</div>
       <div className="break-words text-xs text-slate-800">
         {value === '' || value == null ? '-' : value}
       </div>

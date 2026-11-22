@@ -1,9 +1,14 @@
+// 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
+import { inspectionUnits } from '../equipment/equipmentForm'
+import { todayDateInput, dateInput, dateValue } from '@/shared/lib/format'
+import { CodeSelect } from '@/shared/ui/CodeSelect'
+import { DocumentAudit } from '@/shared/ui/DocumentAudit'
 import { DocumentIdField } from '@/shared/ui/DocumentIdField'
 import { AttachmentManager } from '@/modules/attachments'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Navigate, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '@/modules/auth'
-import { dateInput } from '@/modules/maintenance/equipment'
+
 import { toMessage } from '@/shared/api/errors'
 import {
   createPreventiveMaintenance,
@@ -34,7 +39,7 @@ interface FormState {
   title: string
   equipmentId: string
   result: '' | 'OK' | 'NOK'
-  inspectionDeptId: string
+  deptId: string
   inspectorId: string
   inspectionDate: string
   nextInspectionDate: string
@@ -49,7 +54,7 @@ const emptyForm: FormState = {
   title: '',
   equipmentId: '',
   result: '',
-  inspectionDeptId: '',
+  deptId: '',
   inspectorId: '',
   inspectionDate: '',
   nextInspectionDate: '',
@@ -65,7 +70,7 @@ function toForm(document: PreventiveMaintenance): FormState {
     title: document.title,
     equipmentId: document.equipmentId,
     result: document.result ?? '',
-    inspectionDeptId: document.inspectionDeptId ?? '',
+    deptId: document.deptId ?? '',
     inspectorId: document.inspectorId ?? '',
     inspectionDate: dateInput(document.inspectionDate),
     nextInspectionDate: dateInput(document.nextInspectionDate),
@@ -79,17 +84,21 @@ function toPayload(form: FormState): PreventiveMaintenancePayload {
   return {
     ...form,
     result: form.result || null,
-    inspectionDeptId: form.inspectionDeptId || null,
+    deptId: form.deptId || null,
     inspectorId: form.inspectorId || null,
-    inspectionDate: form.inspectionDate.replaceAll('-', '') || null,
-    nextInspectionDate: form.nextInspectionDate.replaceAll('-', '') || null,
+    inspectionDate: dateValue(form.inspectionDate),
+    nextInspectionDate: dateValue(form.nextInspectionDate) || null,
     typeCode: form.typeCode || null,
     content: form.content || null,
     note: form.note || null,
   }
 }
 
-export function PreventiveMaintenanceFormPage({ mode }: { mode: FormMode }) {
+export function PreventiveMaintenanceFormPage({
+  mode,
+}: {
+  mode: FormMode
+}) {
   const id = useParams().pmId
   return <PMEditor key={`${mode}:${id ?? ''}`} mode={mode} id={id} />
 }
@@ -97,8 +106,10 @@ export function PreventiveMaintenanceFormPage({ mode }: { mode: FormMode }) {
 function PMEditor({ mode, id }: { mode: FormMode; id?: string }) {
   const navigate = useNavigate()
   const { user, hasPermission } = useAuth()
-  const [requestKey] = useState(() => crypto.randomUUID())
-  const [document, setDocument] = useState<PreventiveMaintenance | null>(null)
+
+  const [document, setDocument] = useState<PreventiveMaintenance | null>(
+    null,
+  )
   const pmId = document?.pmId ?? id
   const [form, setForm] = useState<FormState>(emptyForm)
   const [options, setOptions] = useState<PMOptions>({
@@ -106,6 +117,7 @@ function PMEditor({ mode, id }: { mode: FormMode; id?: string }) {
     users: [],
     equipment: [],
     types: [],
+    units: [],
   })
   const [isLoading, setIsLoading] = useState(true)
   const [ready, setReady] = useState(false)
@@ -134,7 +146,8 @@ function PMEditor({ mode, id }: { mode: FormMode; id?: string }) {
         } else {
           const initial = {
             ...emptyForm,
-            inspectionDeptId: user?.deptId ?? '',
+            inspectionDate: todayDateInput(),
+            deptId: user?.deptId ?? '',
             inspectorId: user?.userId ?? '',
           }
           setForm(initial)
@@ -152,11 +165,11 @@ function PMEditor({ mode, id }: { mode: FormMode; id?: string }) {
   const isNew = mode === 'create' && !document
   const isOwner = document?.createdBy === user?.userId
   const readOnly = isNew
-    ? !hasPermission('preventive_maintenance:create')
+    ? !hasPermission('PMAINT:create')
     : !(
         document?.status === 'D' &&
         isOwner &&
-        hasPermission('preventive_maintenance:update')
+        hasPermission('PMAINT:update')
       )
   const blocked = isSaving || isLoading || attachmentBusy || !ready
   const equipment = options.equipment.find(
@@ -166,7 +179,10 @@ function PMEditor({ mode, id }: { mode: FormMode; id?: string }) {
     equipment?.inspectionPeriod && equipment.inspectionUnit,
   )
 
-  const setField = (key: Exclude<keyof FormState, 'items'>, value: string) =>
+  const setField = (
+    key: Exclude<keyof FormState, 'items'>,
+    value: string,
+  ) =>
     setForm((current) => {
       const next = { ...current, [key]: value }
       // 점검일·설비를 바꾼 경우에만 다시 제안한다. 저장된 사용자 보정값은 조회 시 유지한다.
@@ -182,7 +198,11 @@ function PMEditor({ mode, id }: { mode: FormMode; id?: string }) {
       }
       return next
     })
-  const setItem = (index: number, key: keyof InspectionItem, value: string) =>
+  const setItem = (
+    index: number,
+    key: keyof InspectionItem,
+    value: string,
+  ) =>
     setForm((current) => ({
       ...current,
       items: current.items.map((item, i) =>
@@ -192,10 +212,7 @@ function PMEditor({ mode, id }: { mode: FormMode; id?: string }) {
 
   const save = async (submit: boolean) => {
     if (readOnly || blocked || !formRef.current?.reportValidity()) return
-    if (
-      submit &&
-      (!form.result || !form.inspectionDeptId || !form.inspectorId)
-    ) {
+    if (submit && (!form.result || !form.deptId || !form.inspectorId)) {
       setError('판정·점검부서·점검자를 입력한 뒤 상신하십시오.')
       return
     }
@@ -203,7 +220,7 @@ function PMEditor({ mode, id }: { mode: FormMode; id?: string }) {
     setError(null)
     try {
       const saved = isNew
-        ? await createPreventiveMaintenance(requestKey, toPayload(form))
+        ? await createPreventiveMaintenance(toPayload(form))
         : await updatePreventiveMaintenance(pmId!, toPayload(form))
       setDocument(saved)
       setForm(toForm(saved))
@@ -213,7 +230,9 @@ function PMEditor({ mode, id }: { mode: FormMode; id?: string }) {
           state: { prefill: toPreventiveMaintenanceDraft(saved) },
         })
       else if (isNew)
-        navigate(`/preventive-maintenance/${saved.pmId}`, { replace: true })
+        navigate(`/preventive-maintenance/${saved.pmId}`, {
+          replace: true,
+        })
     } catch (e) {
       setError(toMessage(e))
     } finally {
@@ -225,7 +244,7 @@ function PMEditor({ mode, id }: { mode: FormMode; id?: string }) {
       !document ||
       !isOwner ||
       document.status !== 'D' ||
-      !hasPermission('preventive_maintenance:delete') ||
+      !hasPermission('PMAINT:delete') ||
       blocked ||
       !window.confirm('초안 문서를 삭제하시겠습니까?')
     )
@@ -241,31 +260,43 @@ function PMEditor({ mode, id }: { mode: FormMode; id?: string }) {
   }
   const requiredPermission =
     mode === 'create'
-      ? 'preventive_maintenance:create'
+      ? 'PMAINT:create'
       : mode === 'edit'
-        ? 'preventive_maintenance:update'
-        : 'preventive_maintenance:read'
+        ? 'PMAINT:update'
+        : 'PMAINT:read'
   if (!hasPermission(requiredPermission))
     return <Navigate to="/preventive-maintenance" replace />
   if (mode === 'edit' && document && readOnly)
-    return <Navigate to={`/preventive-maintenance/${document.pmId}`} replace />
+    return (
+      <Navigate to={`/preventive-maintenance/${document.pmId}`} replace />
+    )
   const disabled = readOnly || blocked
 
   return (
     <form
       ref={formRef}
+      data-readonly={readOnly}
       onSubmit={(e: FormEvent<HTMLFormElement>) => {
         e.preventDefault()
         void save(false)
       }}
-      className="space-y-3 border border-slate-200 bg-white p-3"
+      className="space-y-3 rounded-lg border border-slate-200 bg-white p-4 md:p-5"
     >
-      <DocumentIdField value={document?.pmId} />
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+        <h1 className="flex items-center gap-2 text-lg font-semibold text-slate-900">
           예방점검 {document && <StatusBadge status={document.status} />}
-        </div>
-        <div className="flex flex-wrap justify-end gap-2">
+        </h1>
+        <div className="page-actions">
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={isSaving || attachmentBusy}
+            onClick={() => {
+              if (confirmLeave()) navigate('/preventive-maintenance')
+            }}
+          >
+            목록
+          </Button>
           <Button
             type="button"
             variant="secondary"
@@ -284,10 +315,10 @@ function PMEditor({ mode, id }: { mode: FormMode; id?: string }) {
                   [
                     '점검부서',
                     options.departments.find(
-                      (r) => r.value === form.inspectionDeptId,
+                      (r) => r.value === form.deptId,
                     )?.label ??
-                      document?.inspectionDeptName ??
-                      form.inspectionDeptId,
+                      document?.deptName ??
+                      form.deptId,
                   ],
                   [
                     '점검자',
@@ -311,25 +342,11 @@ function PMEditor({ mode, id }: { mode: FormMode; id?: string }) {
           >
             인쇄
           </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={isSaving || attachmentBusy}
-            onClick={() => {
-              if (confirmLeave()) navigate('/preventive-maintenance')
-            }}
-          >
-            목록
-          </Button>
-          {!readOnly && (
-            <Button type="submit" disabled={blocked}>
-              저장
-            </Button>
-          )}
           {document?.status === 'D' &&
             isOwner &&
-            hasPermission('preventive_maintenance:delete') && (
+            hasPermission('PMAINT:delete') && (
               <Button
+                className="sm:ml-2"
                 type="button"
                 variant="danger"
                 disabled={blocked}
@@ -338,6 +355,11 @@ function PMEditor({ mode, id }: { mode: FormMode; id?: string }) {
                 삭제
               </Button>
             )}
+          {!readOnly && (
+            <Button variant="secondary" type="submit" disabled={blocked}>
+              임시저장
+            </Button>
+          )}
           {!readOnly && (
             <Button
               type="button"
@@ -349,7 +371,16 @@ function PMEditor({ mode, id }: { mode: FormMode; id?: string }) {
           )}
         </div>
       </div>
-      {isLoading && <div className="text-xs text-slate-500">조회 중...</div>}
+      <DocumentIdField
+        value={document?.pmId}
+        documentNo={form.documentNo}
+        onDocumentNoChange={(value) => setField('documentNo', value)}
+        disabled={disabled}
+        readOnly={readOnly}
+      />
+      {isLoading && (
+        <div className="text-xs text-slate-500">불러오는 중…</div>
+      )}
       {error && (
         <div
           role="alert"
@@ -359,12 +390,12 @@ function PMEditor({ mode, id }: { mode: FormMode; id?: string }) {
         </div>
       )}
       <div className="grid gap-3 md:grid-cols-2">
-        <Field label="관리번호">
+        <Field label="사업장">
           <Input
-            value={form.documentNo}
-            maxLength={50}
-            disabled={disabled}
-            onChange={(e) => setField('documentNo', e.target.value)}
+            readOnly
+            value={
+              document ? (document.siteId ?? '') : (user?.siteId ?? '')
+            }
           />
         </Field>
         <Field label="점검명" required>
@@ -384,11 +415,7 @@ function PMEditor({ mode, id }: { mode: FormMode; id?: string }) {
             onChange={(e) => setField('equipmentId', e.target.value)}
           >
             <option value="">선택</option>
-            {form.equipmentId && !equipment && (
-              <option value={form.equipmentId}>
-                {form.equipmentId} (기존 값)
-              </option>
-            )}
+
             {options.equipment.map((r) => (
               <option key={r.equipmentId} value={r.equipmentId}>
                 {r.name} ({r.equipmentId})
@@ -403,10 +430,7 @@ function PMEditor({ mode, id }: { mode: FormMode; id?: string }) {
             onChange={(e) => setField('typeCode', e.target.value)}
           >
             <option value="">선택</option>
-            {form.typeCode &&
-              !options.types.some((r) => r.value === form.typeCode) && (
-                <option value={form.typeCode}>{form.typeCode} (기존 값)</option>
-              )}
+
             {options.types.map((r) => (
               <option key={r.value} value={r.value}>
                 {r.label}
@@ -421,33 +445,25 @@ function PMEditor({ mode, id }: { mode: FormMode; id?: string }) {
             onChange={(e) => setField('result', e.target.value)}
           >
             <option value="">선택</option>
-            <option value="OK">OK</option>
-            <option value="NOK">NOK</option>
+            <option value="OK">정상</option>
+            <option value="NOK">이상</option>
           </Select>
         </Field>
-        {(['inspectionDeptId', 'inspectorId'] as const).map((key) => {
+        {(['deptId', 'inspectorId'] as const).map((key) => {
           const choices =
-            key === 'inspectionDeptId' ? options.departments : options.users
-          const oldName =
-            key === 'inspectionDeptId'
-              ? document?.inspectionDeptName
-              : document?.inspectorName
+            key === 'deptId' ? options.departments : options.users
           return (
             <Field
               key={key}
-              label={key === 'inspectionDeptId' ? '점검부서' : '점검자'}
+              label={key === 'deptId' ? '점검부서' : '점검자'}
             >
               <Select
                 value={form[key]}
-                disabled={disabled}
+                disabled={disabled || key === 'deptId'}
                 onChange={(e) => setField(key, e.target.value)}
               >
                 <option value="">선택</option>
-                {form[key] && !choices.some((r) => r.value === form[key]) && (
-                  <option value={form[key]}>
-                    {oldName || form[key]} (기존 값)
-                  </option>
-                )}
+
                 {choices.map((r) => (
                   <option key={r.value} value={r.value}>
                     {r.label}
@@ -457,10 +473,31 @@ function PMEditor({ mode, id }: { mode: FormMode; id?: string }) {
             </Field>
           )
         })}
-        <Field label="점검일">
+        <Field label="점검 주기">
+          <Input
+            value={equipment?.inspectionPeriod ?? ''}
+            readOnly
+            aria-label="설비 점검 주기"
+          />
+        </Field>
+        <Field label="주기 단위">
+          <Input
+            value={
+              inspectionUnits.find(
+                (unit) => unit.value === equipment?.inspectionUnit,
+              )?.label ??
+              equipment?.inspectionUnit ??
+              ''
+            }
+            readOnly
+            aria-label="설비 점검 주기 단위"
+          />
+        </Field>
+        <Field label="점검일" required>
           <Input
             type="date"
             value={form.inspectionDate}
+            required
             disabled={disabled}
             onChange={(e) => setField('inspectionDate', e.target.value)}
           />
@@ -470,7 +507,9 @@ function PMEditor({ mode, id }: { mode: FormMode; id?: string }) {
             type="date"
             value={form.nextInspectionDate}
             disabled={disabled || !hasCycle || !form.inspectionDate}
-            onChange={(e) => setField('nextInspectionDate', e.target.value)}
+            onChange={(e) =>
+              setField('nextInspectionDate', e.target.value)
+            }
           />
         </Field>
       </div>
@@ -488,8 +527,8 @@ function PMEditor({ mode, id }: { mode: FormMode; id?: string }) {
         />
       </Field>
       <section className="space-y-2">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold">점검 상세</h2>
+        <div className="flex flex-wrap items-center justify-between">
+          <h2 className="text-base font-semibold">점검 상세</h2>
           {!readOnly && (
             <Button
               type="button"
@@ -552,16 +591,28 @@ function PMEditor({ mode, id }: { mode: FormMode; id?: string }) {
                       ] as const
                     ).map((key, column) => (
                       <td key={key} className="border p-1">
-                        <Input
-                          aria-label={`${index + 1}행 ${['항목', '기준값', '점검값', '단위'][column]}`}
-                          required={key === 'name'}
-                          maxLength={
-                            key === 'name' ? 200 : key === 'unit' ? 50 : 500
-                          }
-                          value={item[key]}
-                          disabled={disabled}
-                          onChange={(e) => setItem(index, key, e.target.value)}
-                        />
+                        {key === 'unit' ? (
+                          <CodeSelect
+                            aria-label={`${index + 1}행 단위`}
+                            options={options.units}
+                            value={item.unit}
+                            disabled={readOnly || blocked}
+                            onChange={(event) =>
+                              setItem(index, 'unit', event.target.value)
+                            }
+                          />
+                        ) : (
+                          <Input
+                            aria-label={`${index + 1}행 ${['항목', '기준값', '점검값', '단위'][column]}`}
+                            required={key === 'name'}
+                            maxLength={key === 'name' ? 200 : 500}
+                            value={item[key]}
+                            disabled={disabled}
+                            onChange={(e) =>
+                              setItem(index, key, e.target.value)
+                            }
+                          />
+                        )}
                       </td>
                     ))}
                     {!readOnly && (
@@ -601,7 +652,7 @@ function PMEditor({ mode, id }: { mode: FormMode; id?: string }) {
       </Field>
       <AttachmentManager
         attachmentId={form.attachmentId}
-        refModule="preventive_maintenance"
+        refModule="PMAINT"
         refId={pmId ?? null}
         disabled={disabled}
         onBusyChange={setAttachmentBusy}
@@ -610,13 +661,7 @@ function PMEditor({ mode, id }: { mode: FormMode; id?: string }) {
           setForm((current) => ({ ...current, attachmentId }))
         }
       />
-      {document && (
-        <div className="text-xs text-slate-500">
-          등록자: {document.createdBy} / 등록일시: {document.createdAt} /
-          수정자: {document.updatedBy || '-'} / 수정일시:{' '}
-          {document.updatedAt || '-'}
-        </div>
-      )}
+      {document && <DocumentAudit record={document} />}
     </form>
   )
 }

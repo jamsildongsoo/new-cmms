@@ -1,24 +1,15 @@
-import { registerAs } from '@nestjs/config';
-import { ENV_DEFAULTS } from './env.schema';
+/** backend/.env의 업로드 설정. 상대 경로는 backend 기준이며 Compose는 /app/uploads를 지정한다. */
+import { resolve } from 'node:path';
+import { BACKEND_ROOT } from './env-file';
+import type { EnvironmentVariables } from './env.schema';
 
-export const storageConfig = registerAs('storage', () => ({
-  driver: process.env.FILE_STORAGE_DRIVER ?? ENV_DEFAULTS.FILE_STORAGE_DRIVER,
-  localRoot: process.env.FILE_LOCAL_ROOT ?? ENV_DEFAULTS.FILE_LOCAL_ROOT,
-  maxSizeBytes: Number(
-    process.env.FILE_MAX_SIZE_BYTES ?? ENV_DEFAULTS.FILE_MAX_SIZE_BYTES,
+export const buildStorageConfig = (env: EnvironmentVariables) => ({
+  driver: env.FILE_STORAGE_DRIVER,
+  localRoot: resolve(BACKEND_ROOT, env.FILE_LOCAL_ROOT),
+  maxSizeBytes: env.FILE_MAX_SIZE_BYTES,
+  maxFilesPerUpload: env.FILE_MAX_FILES_PER_UPLOAD,
+  maxUploadTotalBytes: env.FILE_MAX_UPLOAD_TOTAL_BYTES,
+  allowedMimeTypes: env.FILE_ALLOWED_MIME_TYPES.split(',').map((mime) =>
+    mime.trim(),
   ),
-  maxFilesPerUpload: Number(
-    process.env.FILE_MAX_FILES_PER_UPLOAD ??
-      ENV_DEFAULTS.FILE_MAX_FILES_PER_UPLOAD,
-  ),
-  maxUploadTotalBytes: Number(
-    process.env.FILE_MAX_UPLOAD_TOTAL_BYTES ??
-      ENV_DEFAULTS.FILE_MAX_UPLOAD_TOTAL_BYTES,
-  ),
-  allowedMimeTypes: (
-    process.env.FILE_ALLOWED_MIME_TYPES ?? ENV_DEFAULTS.FILE_ALLOWED_MIME_TYPES
-  )
-    .split(',')
-    .map((mimeType) => mimeType.trim())
-    .filter(Boolean),
-}));
+});

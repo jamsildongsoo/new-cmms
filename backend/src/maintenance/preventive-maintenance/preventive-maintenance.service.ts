@@ -1,4 +1,8 @@
-/** 회사별 PM과 작성자 초안을 관리하고 결재 완결 시 저장된 점검 날짜를 설비에 반영한다. */
+import { businessDate } from '../../common/utils/date.util';
+import { SearchPreventiveMaintenanceDto } from './dto/search-preventive-maintenance.dto';
+import { normalizePaginationQuery } from '../../common/utils/pagination.util';
+import type { EntityManager } from 'typeorm';
+/** 회사·사업장·부서 범위의 PM과 작성자 초안을 관리하고 결재 완결 시 저장된 점검 날짜를 설비에 반영한다. */
 import {
   BadRequestException,
   Logger,
@@ -15,8 +19,8 @@ import { UserContext } from '../../auth/types/user-context.type';
 import { DocumentStatus } from '../../common/constants/document-status';
 import { assertDraft } from '../../common/utils/document-status.util';
 import { CodeItem } from '../../codes/code-items/entities/code-item.entity';
-import { Code } from '../../common/constants/code';
-import { inspectionDate, nextInspectionDate } from './inspection-date.util';
+import { CodeGroup } from '../../common/constants/code';
+import { nextInspectionDate } from './inspection-date.util';
 import { InspectionItemDto } from './dto/inspection-item.dto';
 import { Equipment } from '../equipment/entities/equipment.entity';
 import { CreatePreventiveMaintenanceDto } from './dto/create-preventive-maintenance.dto';
@@ -26,6 +30,13 @@ import { PreventiveMaintenance } from './entities/preventive-maintenance.entity'
 @Injectable()
 export class PreventiveMaintenanceService {
   private readonly logger = new Logger(PreventiveMaintenanceService.name);
+  withManager(manager: EntityManager): PreventiveMaintenanceService {
+    return new PreventiveMaintenanceService(
+      manager.getRepository(PreventiveMaintenance),
+      manager.getRepository(Equipment),
+    );
+  }
+
   constructor(
     @InjectRepository(PreventiveMaintenance)
     private readonly repository: Repository<PreventiveMaintenance>,
@@ -33,7 +44,36 @@ export class PreventiveMaintenanceService {
     private readonly equipmentRepository: Repository<Equipment>,
   ) {}
 
+  private scoped(user: UserContext) {
+    // 이 모듈의 조회 정책이다. 기본 조건 뒤에는 andWhere로 업무 조건을 추가한다.
+    const query = this.repository.createQueryBuilder('pm');
+    query
+      .where('pm.companyId = :companyId', { companyId: user.companyId })
+      .andWhere('pm.deleteYn = :deleteYn', { deleteYn: 'N' });
+    if (user.accessScope === 'COMPANY_ALL') return query;
+    if (user.accessScope === 'OWN_SITE' && user.siteId)
+      return query.andWhere('pm.siteId = :scopeSiteId', {
+        scopeSiteId: user.siteId,
+      });
+    if (user.accessScope === 'OWN_DEPARTMENT' && user.deptId)
+      return query.andWhere(
+        `pm.deptId IN (
+        WITH RECURSIVE scope_departments AS (
+          SELECT "deptId" FROM "department" WHERE "companyId" = :companyId AND "deptId" = :scopeDeptId AND "deleteYn" = 'N'
+          UNION
+          SELECT d."deptId" FROM "department" d JOIN scope_departments p ON d."parentDeptId" = p."deptId"
+          WHERE d."companyId" = :companyId AND d."deleteYn" = 'N'
+        ) SELECT "deptId" FROM scope_departments
+      )`,
+        { scopeDeptId: user.deptId },
+      );
+    throw new ForbiddenException(
+      'Document access scope or affiliation is missing',
+    );
+  }
+
   async getOptions(userContext: UserContext) {
+    this.scoped(userContext);
     const companyId = userContext.companyId;
     const [equipment, types, departments, users] = await Promise.all([
       this.equipmentRepository.find({
@@ -41,7 +81,7 @@ export class PreventiveMaintenanceService {
         order: { equipmentId: 'ASC' },
       }),
       this.repository.manager.getRepository(CodeItem).find({
-        where: { companyId, codeId: Code.PREVENTIVE_MAINTENANCE_TYPE },
+        where: { companyId, codeId: CodeGroup.PMAINT_TYPE },
         order: { sortOrder: 'ASC', codeItemId: 'ASC' },
       }),
       this.repository.manager.getRepository(Department).find({
@@ -53,7 +93,16 @@ export class PreventiveMaintenanceService {
         order: { userId: 'ASC' },
       }),
     ]);
+    const units = await this.repository.manager.getRepository(CodeItem).find({
+      where: { companyId: companyId, codeId: CodeGroup.UNIT },
+      order: { sortOrder: 'ASC', codeItemId: 'ASC' },
+    });
     return {
+      // 프런트의 해당 업무 Options.units와 함께 수정한다. UNIT 항목은 DB에서 조회한다.
+      units: units.map(({ codeItemId, name }) => ({
+        value: codeItemId,
+        label: name,
+      })),
       departments: departments.map(({ deptId, name }) => ({
         value: deptId,
         label: name,
@@ -74,32 +123,87 @@ export class PreventiveMaintenanceService {
     };
   }
 
-  async findAll(userContext: UserContext) {
-    return this.responses(
-      await this.repository.find({
-        where: { companyId: userContext.companyId, deleteYn: 'N' },
-        order: { createdAt: 'DESC' },
+  async findAll(
+    user: UserContext,
+    filter: SearchPreventiveMaintenanceDto = {},
+  ) {
+    const { page, limit, offset } = normalizePaginationQuery(filter);
+    const query = this.scoped(user).select([
+      'pm.companyId',
+      'pm.pmId',
+      'pm.documentNo',
+      'pm.title',
+      'pm.equipmentId',
+      'pm.inspectionDate',
+      'pm.nextInspectionDate',
+      'pm.result',
+      'pm.deptId',
+      'pm.inspectorId',
+      'pm.status',
+    ]);
+    if (filter.search?.trim())
+      query.andWhere(
+        '(pm.pmId ILIKE :search OR pm.documentNo ILIKE :search OR pm.title ILIKE :search OR pm.equipmentId ILIKE :search)',
+        { search: `%${filter.search.trim().replace(/[\\%_]/g, '\\$&')}%` },
+      );
+    const [rows, total] = await query
+      .orderBy('pm.createdAt', 'DESC')
+      .addOrderBy('pm.pmId', 'DESC')
+      .skip(offset)
+      .take(limit)
+      .getManyAndCount();
+    const items = (await this.responses(rows)).map(
+      ({
+        pmId,
+        documentNo,
+        title,
+        equipmentId,
+        inspectionDate,
+        nextInspectionDate,
+        result,
+        deptId,
+        deptName,
+        inspectorId,
+        inspectorName,
+        status,
+      }) => ({
+        pmId,
+        documentNo,
+        title,
+        equipmentId,
+        inspectionDate,
+        nextInspectionDate,
+        result,
+        deptId,
+        deptName,
+        inspectorId,
+        inspectorName,
+        status,
       }),
     );
+    return { items, total, page, limit };
   }
 
-  async findOne(userContext: UserContext, pmId: string) {
-    return (
-      await this.responses([
-        await this.findActiveOrThrow(userContext.companyId, pmId),
-      ])
-    )[0];
+  async findOne(user: UserContext, pmId: string) {
+    return (await this.responses([await this.findAccessible(user, pmId)]))[0];
   }
 
-  // 기준정보가 삭제돼도 과거 점검 기록과 이름 조회는 유지한다.
+  private async findAccessible(user: UserContext, pmId: string) {
+    const document = await this.scoped(user)
+      .andWhere('pm.pmId = :id', { id: pmId })
+      .getOne();
+    if (!document)
+      throw new NotFoundException('Preventive maintenance not found');
+    return document;
+  }
+
+  // 저장된 ID는 유지하고 표시 이름은 같은 회사의 활성 기준정보에서만 조회한다.
   private async responses(rows: PreventiveMaintenance[]) {
     if (!rows.length) return [];
     const companyId = rows[0].companyId;
     const deptIds = [
       ...new Set(
-        rows
-          .map((r) => r.inspectionDeptId)
-          .filter((id): id is string => Boolean(id)),
+        rows.map((r) => r.deptId).filter((id): id is string => Boolean(id)),
       ),
     ];
     const userIds = [
@@ -113,22 +217,21 @@ export class PreventiveMaintenanceService {
       deptIds.length
         ? this.repository.manager
             .getRepository(Department)
-            .find({ where: { companyId, deptId: In(deptIds) } })
+            .find({ where: { companyId, deptId: In(deptIds), deleteYn: 'N' } })
         : Promise.resolve([]),
       userIds.length
         ? this.repository.manager
             .getRepository(User)
-            .find({ where: { companyId, userId: In(userIds) } })
+            .find({ where: { companyId, userId: In(userIds), deleteYn: 'N' } })
         : Promise.resolve([]),
     ]);
     return rows.map((row) =>
       Object.assign({}, row, {
         result: row.result ?? null,
-        inspectionDeptId: row.inspectionDeptId ?? null,
+        deptId: row.deptId ?? null,
         inspectorId: row.inspectorId ?? null,
-        inspectionDeptName:
-          departments.find((d) => d.deptId === row.inspectionDeptId)?.name ??
-          null,
+        deptName:
+          departments.find((d) => d.deptId === row.deptId)?.name ?? null,
         inspectorName:
           users.find((u) => u.userId === row.inspectorId)?.name ?? null,
       }),
@@ -143,6 +246,10 @@ export class PreventiveMaintenanceService {
   }
 
   async create(userContext: UserContext, dto: CreatePreventiveMaintenanceDto) {
+    const deptId =
+      dto.deptId === undefined
+        ? userContext.deptId || null
+        : dto.deptId?.trim() || null;
     const existing = await this.repository.findOneBy({
       companyId: userContext.companyId,
       pmId: dto.pmId,
@@ -162,16 +269,21 @@ export class PreventiveMaintenanceService {
         documentNo: dto.documentNo?.trim() ?? '',
         title: this.requireString(dto.title, 'title'),
         equipmentId: this.requireString(dto.equipmentId, 'equipmentId'),
-        inspectionDate: inspectionDate(dto.inspectionDate, 'inspectionDate'),
+        inspectionDate: this.requireInspectionDate(dto.inspectionDate),
         nextInspectionDate: this.resolveNextDate(
           equipment,
-          inspectionDate(dto.inspectionDate, 'inspectionDate'),
+          businessDate(
+            dto.inspectionDate?.trim() === '' ? null : dto.inspectionDate,
+            true,
+            'inspectionDate',
+          ),
           dto.nextInspectionDate,
         ),
         items: this.normalizeItems(dto.items ?? []),
         typeCode: dto.typeCode?.trim() || null,
         result: this.normalizeResult(dto.result),
-        inspectionDeptId: dto.inspectionDeptId?.trim() || null,
+        siteId: userContext.siteId ?? null,
+        deptId,
         inspectorId: dto.inspectorId?.trim() || null,
         content: dto.content?.trim() || null,
         requesterId: userContext.userId,
@@ -190,7 +302,7 @@ export class PreventiveMaintenanceService {
     pmId: string,
     dto: UpdatePreventiveMaintenanceDto,
   ) {
-    const document = await this.findActiveOrThrow(userContext.companyId, pmId);
+    const document = await this.findAccessible(userContext, pmId);
     assertDraft(document.status);
     if (document.createdBy !== userContext.userId) {
       throw new ForbiddenException('Only the owner can change this document');
@@ -215,10 +327,7 @@ export class PreventiveMaintenanceService {
       dto.inspectionDate !== undefined &&
       dto.inspectionDate !== document.inspectionDate;
     if (dto.inspectionDate !== undefined)
-      document.inspectionDate = inspectionDate(
-        dto.inspectionDate,
-        'inspectionDate',
-      );
+      document.inspectionDate = this.requireInspectionDate(dto.inspectionDate);
     const requestedNext =
       dto.nextInspectionDate !== undefined
         ? dto.nextInspectionDate
@@ -234,8 +343,10 @@ export class PreventiveMaintenanceService {
       document.items = this.normalizeItems(dto.items ?? []);
     if (dto.result !== undefined)
       document.result = this.normalizeResult(dto.result);
-    if (dto.inspectionDeptId !== undefined)
-      document.inspectionDeptId = dto.inspectionDeptId?.trim() || null;
+    if (dto.deptId !== undefined) {
+      const deptId = dto.deptId?.trim() || null;
+      document.deptId = deptId;
+    }
     if (dto.inspectorId !== undefined)
       document.inspectorId = dto.inspectorId?.trim() || null;
     if (dto.typeCode !== undefined) {
@@ -254,7 +365,7 @@ export class PreventiveMaintenanceService {
   }
 
   async remove(userContext: UserContext, pmId: string) {
-    const document = await this.findActiveOrThrow(userContext.companyId, pmId);
+    const document = await this.findAccessible(userContext, pmId);
     assertDraft(document.status);
     if (document.createdBy !== userContext.userId) {
       throw new ForbiddenException('Only the owner can change this document');
@@ -266,15 +377,12 @@ export class PreventiveMaintenanceService {
   }
 
   async assertCanSubmit(user: UserContext, id: string) {
-    const row = await this.findActiveOrThrow(user.companyId, id);
+    const row = await this.findAccessible(user, id);
     assertDraft(row.status);
     if (row.createdBy !== user.userId)
       throw new ForbiddenException('Only the owner can submit this document');
-    if (
-      !row.result ||
-      !row.inspectionDeptId?.trim() ||
-      !row.inspectorId?.trim()
-    )
+    this.requireInspectionDate(row.inspectionDate);
+    if (!row.result || !row.deptId?.trim() || !row.inspectorId?.trim())
       throw new BadRequestException(
         '판정·점검부서·점검자를 입력한 뒤 상신하십시오.',
       );
@@ -320,6 +428,17 @@ export class PreventiveMaintenanceService {
     }
   }
 
+  private requireInspectionDate(value: string | null | undefined): string {
+    const date = businessDate(
+      value?.trim() === '' ? null : value,
+      true,
+      'inspectionDate',
+    );
+    if (!date) throw new BadRequestException('점검일을 입력해 주세요.');
+    return date;
+  }
+
+  /** 사용자가 지정한 다음 점검일을 우선한다. 값이 생략된 경우에만 설비 주기로 다음 날짜를 제안한다. */
   private resolveNextDate(
     equipment: Equipment,
     date: string | null,
@@ -333,7 +452,11 @@ export class PreventiveMaintenanceService {
           equipment.inspectionPeriod,
           equipment.inspectionUnit,
         )
-      : inspectionDate(requested, 'nextInspectionDate');
+      : businessDate(
+          requested?.trim() === '' ? null : requested,
+          true,
+          'nextInspectionDate',
+        );
   }
 
   private requireString(value: string | undefined, field: string) {
