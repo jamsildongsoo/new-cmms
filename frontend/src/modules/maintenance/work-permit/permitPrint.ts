@@ -78,8 +78,8 @@ export function permitPrintHtml(
 <section><h2>작업 정보</h2><table>${columns}
 <tr><th>허가번호</th>${cell(row.workPermitId ?? row.workPermitRequestId ?? row.documentNo)}<th>유형</th>${cell(data.workType === 'INTERNAL' ? '자체' : '외주')}</tr>
 <tr><th>작업명</th>${cell(data.title)}<th>작업지역</th>${cell(data.location)}</tr>
-<tr><th>설비번호</th>${cell(data.equipmentNo)}<th>설비명</th>${cell(data.equipmentName)}</tr>
-<tr><th>신청인 / 소속</th><td>${esc(data.applicantName)} / ${esc(data.organization)} / ${esc(data.phoneNumber)}</td><th>허가기간</th><td>${esc(data.startTime)} ~ ${esc(data.endTime)}</td></tr>
+<tr><th>대상 설비</th><td colspan="3">${esc(data.equipmentNo ? `${data.equipmentNo}(${data.equipmentName})` : data.equipmentName)}</td></tr>
+<tr><th>신청인 / 소속</th><td>${esc(data.applicantName)} / ${esc(data.organization)}</td><th>허가기간</th><td>${esc(data.startTime)} ~ ${esc(data.endTime)}</td></tr>
 <tr><th>작업개요</th><td colspan="3">${esc(data.summary)}</td></tr>
 <tr><th>보충허가</th><td colspan="3">${supplements}</td></tr></table></section>
 <section><h2>안전조치 요구사항</h2><table>${requirementColumns}<tr><th>제목</th><th colspan="2">내용</th><th>확인</th></tr>${requirements}</table></section>

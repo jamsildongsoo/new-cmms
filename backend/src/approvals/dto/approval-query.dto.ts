@@ -1,6 +1,12 @@
 import { IsIn, IsOptional, IsString } from 'class-validator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
-import { DocumentStatus } from '../../common/constants/document-status';
+
+export const APPROVAL_SEARCH_TYPES = [
+  'approvalId',
+  'documentNo',
+  'title',
+  'submitterId',
+] as const;
 
 export class ApprovalQueryDto extends PaginationQueryDto {
   @IsOptional()
@@ -8,6 +14,6 @@ export class ApprovalQueryDto extends PaginationQueryDto {
   search?: string;
 
   @IsOptional()
-  @IsIn(Object.values(DocumentStatus))
-  status?: DocumentStatus;
+  @IsIn(APPROVAL_SEARCH_TYPES)
+  searchType?: (typeof APPROVAL_SEARCH_TYPES)[number];
 }

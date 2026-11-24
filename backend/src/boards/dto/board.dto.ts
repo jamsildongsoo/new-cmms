@@ -1,5 +1,6 @@
 import {
   IsNotEmpty,
+  IsIn,
   IsOptional,
   IsString,
   IsUUID,
@@ -16,5 +17,6 @@ export class SaveCommentDto {
   @IsString() @IsNotEmpty() @MaxLength(5000) content: string;
 }
 export class SearchBoardDto extends PaginationQueryDto {
+  @IsOptional() @IsIn(['title', 'content', 'createdBy']) searchType?: 'title' | 'content' | 'createdBy';
   @IsOptional() @IsString() @MaxLength(200) search?: string;
 }

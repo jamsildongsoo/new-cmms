@@ -1,4 +1,4 @@
-/** 개발 DB만 DB_SYNCHRONIZE=true 허용. 운영 스키마 설치는 bootstrap.sh schema로 별도 실행한다. */
+/** 개발 DB만 DB_SYNCHRONIZE=true 허용. 운영 스키마는 명시적 migration으로 반영한다. */
 import type { EnvironmentVariables } from './env.schema';
 
 export const buildDatabaseConfig = (env: EnvironmentVariables) => ({

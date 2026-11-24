@@ -42,9 +42,10 @@ export class EquipmentService {
   // 설비 조회 권한만으로 입력에 필요한 동일 회사의 선택 목록을 제공한다.
   async getOptions(userContext: UserContext) {
     const companyId = userContext.companyId;
+    const siteScope = this.siteScope(userContext);
     const [sites, departments, types] = await Promise.all([
       this.siteRepository.find({
-        where: { companyId, deleteYn: 'N' },
+        where: { companyId, deleteYn: 'N', ...(siteScope ? { siteId: siteScope } : {}) },
         order: { siteId: 'ASC' },
       }),
       this.departmentRepository.find({
@@ -74,11 +75,13 @@ export class EquipmentService {
     user: UserContext,
     siteId?: string,
   ): Promise<EquipmentResponseDto[]> {
+    const siteScope = this.siteScope(user);
+    if (siteScope && siteId && siteId !== siteScope) return [];
     const rows = await this.equipmentRepository.find({
       where: {
         companyId: user.companyId,
         deleteYn: 'N',
-        ...(siteId ? { siteId } : {}),
+        ...(siteScope || siteId ? { siteId: siteScope || siteId } : {}),
       },
       order: { equipmentId: 'ASC' },
     });
@@ -134,6 +137,7 @@ export class EquipmentService {
   ): Promise<PaginatedResponseDto<EquipmentResponseDto>> {
     const pagination = normalizePaginationQuery(query);
     const search = this.normalizeSearch(query);
+    const siteScope = this.siteScope(userContext);
     const queryBuilder = this.equipmentRepository
       .createQueryBuilder('equipment')
       .where('equipment.companyId = :companyId', {
@@ -143,6 +147,9 @@ export class EquipmentService {
       .orderBy('equipment.equipmentId', 'ASC')
       .skip(pagination.offset)
       .take(pagination.limit);
+    if (siteScope) queryBuilder.andWhere('equipment.siteId = :siteScope', { siteScope });
+    if (siteScope && query.siteId?.trim() && query.siteId.trim() !== siteScope)
+      queryBuilder.andWhere('1 = 0');
 
     for (const field of ['siteId', 'deptId', 'parentEquipmentId'] as const)
       if (query[field]?.trim())
@@ -152,9 +159,17 @@ export class EquipmentService {
 
     if (search) {
       if (search.searchType === 'typeCode') {
-        queryBuilder.andWhere('equipment.typeCode = :typeCode', {
-          typeCode: search.searchVal,
-        });
+        queryBuilder.andWhere(
+          `(equipment.typeCode ILIKE :typeSearch OR equipment.typeCode IN (
+             SELECT code."codeItemId" FROM code_item code
+             WHERE code."companyId" = :companyId AND code."codeId" = :typeGroup
+               AND code."name" ILIKE :typeSearch
+           ))`,
+          {
+            typeSearch: `%${search.searchVal.replace(/[\\%_]/g, '\\$&')}%`,
+            typeGroup: CodeGroup.EQUIP_TYPE,
+          },
+        );
       } else {
         queryBuilder.andWhere(
           `equipment.${search.searchType} ILIKE :searchVal`,
@@ -179,9 +194,9 @@ export class EquipmentService {
     userContext: UserContext,
     equipmentId: string,
   ): Promise<EquipmentResponseDto> {
-    return this.toResponse(
-      await this.findActiveByIdOrThrow(userContext.companyId, equipmentId),
-    );
+    const equipment = await this.findActiveByIdOrThrow(userContext.companyId, equipmentId);
+    this.assertSiteAccess(userContext, equipment.siteId);
+    return this.toResponse(equipment);
   }
 
   async create(
@@ -192,6 +207,8 @@ export class EquipmentService {
       dto.equipmentId,
       'equipmentId',
     );
+    const siteId = this.requireTrimmedString(dto.siteId, 'siteId');
+    this.assertSiteAccess(userContext, siteId);
     const existingEquipment = await this.equipmentRepository.findOneBy({
       companyId: userContext.companyId,
       equipmentId,
@@ -201,7 +218,6 @@ export class EquipmentService {
       throw new ConflictException('Equipment already exists');
     }
 
-    const siteId = this.requireTrimmedString(dto.siteId, 'siteId');
     const deptId = this.requireTrimmedString(dto.deptId, 'deptId');
     const typeCode = this.requireTrimmedString(dto.typeCode, 'typeCode');
 
@@ -282,11 +298,13 @@ export class EquipmentService {
       userContext.companyId,
       equipmentId,
     );
+    this.assertSiteAccess(userContext, equipment.siteId);
 
     const nextSiteId =
       dto.siteId === undefined
         ? equipment.siteId
         : this.requireTrimmedString(dto.siteId, 'siteId');
+    this.assertSiteAccess(userContext, nextSiteId);
     const nextParentId =
       dto.parentEquipmentId === undefined
         ? (equipment.parentEquipmentId ?? null)
@@ -406,6 +424,7 @@ export class EquipmentService {
       userContext.companyId,
       equipmentId,
     );
+    this.assertSiteAccess(userContext, equipment.siteId);
 
     await this.assertNoChildren(userContext.companyId, equipmentId);
     equipment.deleteYn = 'Y';
@@ -430,6 +449,20 @@ export class EquipmentService {
     }
 
     return equipment;
+  }
+
+  private siteScope(user: UserContext): string | null {
+    if (user.accessScope === 'OWN_SITE' || user.accessScope === 'OWN_DEPARTMENT') {
+      if (!user.siteId) throw new BadRequestException('소속 사업장이 필요합니다.');
+      return user.siteId;
+    }
+    return null;
+  }
+
+  private assertSiteAccess(user: UserContext, siteId: string): void {
+    const siteScope = this.siteScope(user);
+    if (siteScope && siteScope !== siteId)
+      throw new NotFoundException('Equipment not found');
   }
 
   private assertEquipmentTypeCode(

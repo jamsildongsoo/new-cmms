@@ -100,4 +100,33 @@ describe('UsersService organization selection', () => {
       });
     }
   });
+
+  it('keeps normal users assigned and permits the initial admin to remain unassigned', async () => {
+    const { service, user, manager } = fixture();
+    await expect(
+      service.update(context, 'worker', { deptId: null }),
+    ).rejects.toThrow('deptId');
+
+    user.roleId = 'ADMIN';
+    user.accessScope = AccessScope.COMPANY_ALL;
+    user.siteId = null;
+    user.deptId = null;
+    const saved = await service.update(context, 'worker', {
+      name: 'Administrator',
+      siteId: null,
+      deptId: null,
+    });
+    expect(saved).toMatchObject({
+      name: 'Administrator',
+      siteId: null,
+      deptId: null,
+    });
+    expect(manager.findOneBy).not.toHaveBeenCalled();
+    await expect(
+      service.update(context, 'worker', { roleId: 'WORKER' }),
+    ).rejects.toThrow('siteId and deptId');
+    await expect(
+      service.update(context, 'worker', { siteId: 'SITE' }),
+    ).rejects.toThrow('siteId and deptId');
+  });
 });

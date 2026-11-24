@@ -13,7 +13,8 @@
     "test:ui": "node test/ui-approvals.browser.cjs",
     "test:browser": "npm run build && node test/auth-session.browser.cjs && node test/purchase-inventory.browser.cjs && node test/ui-approvals.browser.cjs",
     "test:numeric": "node test/numeric.test.cjs",
-    "test:format": "node test/format.test.cjs"
+    "test:format": "node test/format.test.cjs",
+    "test:approval-print": "node test/approval-print.test.cjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",

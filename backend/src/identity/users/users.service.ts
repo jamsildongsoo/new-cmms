@@ -52,11 +52,13 @@ export class UsersService {
             deleteYn: 'N',
           })
         : null,
-      manager.findOneBy(Department, {
-        companyId: user.companyId,
-        deptId: user.deptId,
-        deleteYn: 'N',
-      }),
+      user.deptId
+        ? manager.findOneBy(Department, {
+            companyId: user.companyId,
+            deptId: user.deptId,
+            deleteYn: 'N',
+          })
+        : null,
       manager.findOneBy(Role, {
         companyId: user.companyId,
         roleId: user.roleId,
@@ -236,8 +238,29 @@ export class UsersService {
     userId: string,
     updateUserDto: UpdateUserDto,
   ): Promise<UserResponseDto> {
-    await this.findActiveByIdOrThrow(userContext.companyId, userId);
-    const validatedDto = this.validateUpdateDto(updateUserDto);
+    const user = await this.findActiveByIdOrThrow(userContext.companyId, userId);
+    const allowEmptyOrganization =
+      user.roleId === 'ADMIN' &&
+      user.accessScope === AccessScope.COMPANY_ALL &&
+      user.siteId === null &&
+      user.deptId === null &&
+      (updateUserDto.roleId === undefined || updateUserDto.roleId === 'ADMIN') &&
+      (updateUserDto.accessScope === undefined ||
+        updateUserDto.accessScope === AccessScope.COMPANY_ALL);
+    const validatedDto = this.validateUpdateDto(
+      updateUserDto,
+      allowEmptyOrganization,
+    );
+    const nextSiteId =
+      validatedDto.siteId === undefined ? user.siteId : validatedDto.siteId;
+    const nextDeptId =
+      validatedDto.deptId === undefined ? user.deptId : validatedDto.deptId;
+    if (
+      (!allowEmptyOrganization && (!nextSiteId || !nextDeptId)) ||
+      (allowEmptyOrganization && Boolean(nextSiteId) !== Boolean(nextDeptId))
+    ) {
+      throw new BadRequestException('siteId and deptId are required together');
+    }
 
     await this.userRepository.update(
       { companyId: userContext.companyId, userId },
@@ -329,7 +352,10 @@ export class UsersService {
     };
   }
 
-  private validateUpdateDto(updateUserDto: UpdateUserDto): UpdateUserDto {
+  private validateUpdateDto(
+    updateUserDto: UpdateUserDto,
+    allowEmptyOrganization = false,
+  ): UpdateUserDto {
     return {
       password:
         updateUserDto.password === undefined
@@ -362,11 +388,15 @@ export class UsersService {
       siteId:
         updateUserDto.siteId === undefined
           ? undefined
-          : this.requireTrimmedString(updateUserDto.siteId, 'siteId'),
+          : allowEmptyOrganization && !updateUserDto.siteId?.trim()
+            ? null
+            : this.requireTrimmedString(updateUserDto.siteId, 'siteId'),
       deptId:
         updateUserDto.deptId === undefined
           ? undefined
-          : this.requireTrimmedString(updateUserDto.deptId, 'deptId'),
+          : allowEmptyOrganization && !updateUserDto.deptId?.trim()
+            ? null
+            : this.requireTrimmedString(updateUserDto.deptId, 'deptId'),
       accessScope:
         updateUserDto.accessScope === undefined
           ? undefined
@@ -375,7 +405,7 @@ export class UsersService {
   }
 
   private requireTrimmedString(
-    value: string | undefined,
+    value: string | null | undefined,
     fieldName: string,
   ): string {
     if (typeof value !== 'string' || value.trim() === '') {
@@ -411,11 +441,13 @@ export class UsersService {
             deleteYn: 'N',
           })
         : null,
-      this.userRepository.manager.findOneBy(Department, {
-        companyId: user.companyId,
-        deptId: user.deptId,
-        deleteYn: 'N',
-      }),
+      user.deptId
+        ? this.userRepository.manager.findOneBy(Department, {
+            companyId: user.companyId,
+            deptId: user.deptId,
+            deleteYn: 'N',
+          })
+        : null,
     ]);
     return {
       companyId: user.companyId,

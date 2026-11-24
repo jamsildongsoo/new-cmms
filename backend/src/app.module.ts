@@ -26,6 +26,7 @@ import { PurchaseRequestModule } from './purchase/purchase-request/purchase-requ
 import { PurchaseOrderModule } from './purchase/purchase-order/purchase-order.module';
 import { NumberingModule } from './numbering/numbering.module';
 import { OrganizationModule } from './organization/organization.module';
+import { DirectoryModule } from './common/directory/directory.module';
 
 @Module({
   imports: [
@@ -60,6 +61,7 @@ import { OrganizationModule } from './organization/organization.module';
     AuthModule,
     IdentityModule,
     OrganizationModule,
+    DirectoryModule,
     AttachmentsModule,
     ApprovalsModule,
     CodesModule,

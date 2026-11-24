@@ -6,9 +6,12 @@ import { FontSize, TextStyle } from '@tiptap/extension-text-style'
 type Cell = string | number | boolean | null | undefined
 interface PrintOptions {
   title: string
+  landscape?: boolean
   columns?: string[]
   rows?: Cell[][]
   fields?: [string, Cell][]
+  htmlBeforeContent?: string
+  htmlAfterContent?: string
   contentJson?: unknown
   text?: string | null
 }
@@ -41,6 +44,7 @@ export function printDocument(options: PrintOptions) {
   if (options.columns)
     body += `<table><thead><tr>${options.columns.map((name) => `<th>${escape(name)}</th>`).join('')}</tr></thead><tbody>${(options.rows ?? []).map((row) => `<tr>${row.map((value) => `<td>${escape(value)}</td>`).join('')}</tr>`).join('')}</tbody></table>`
   if (options.text) body += `<p class="text">${escape(options.text)}</p>`
+  if (options.htmlBeforeContent) body += options.htmlBeforeContent
   if (options.contentJson && typeof options.contentJson === 'object') {
     const markup = generateHTML(options.contentJson, [
       StarterKit,
@@ -58,9 +62,10 @@ export function printDocument(options: PrintOptions) {
     })
     body += container.innerHTML
   }
+  if (options.htmlAfterContent) body += options.htmlAfterContent
   target.open()
   target.write(`<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${escape(options.title)}</title><style>
-    @page{size:A4;margin:16mm}body{font-family:Arial,"Malgun Gothic",sans-serif;color:#111;font-size:11px}h1{font-size:20px}table{width:100%;border-collapse:collapse;margin:16px 0}th,td{border:1px solid #999;padding:6px;text-align:left;vertical-align:top;overflow-wrap:anywhere}thead{display:table-header-group}tr{break-inside:avoid}dl{display:grid;grid-template-columns:130px 1fr}dt,dd{margin:0;padding:5px;border-bottom:1px solid #ddd;white-space:pre-wrap}.text{white-space:pre-wrap}p{line-height:1.6}
+    @page{size:A4 ${options.landscape ? 'landscape' : 'portrait'};margin:16mm}body{font-family:Arial,"Malgun Gothic",sans-serif;color:#111;font-size:11px}h1{font-size:20px}h2{font-size:14px;margin:24px 0 8px}table{width:100%;border-collapse:collapse;margin:16px 0}th,td{border:1px solid #999;padding:6px;text-align:left;vertical-align:top;overflow-wrap:anywhere;white-space:pre-wrap}thead{display:table-header-group}tr{break-inside:avoid}dl{display:grid;grid-template-columns:130px 1fr}dt,dd{margin:0;padding:5px;border-bottom:1px solid #ddd;white-space:pre-wrap}.text{white-space:pre-wrap}p{line-height:1.6}
     </style></head><body><h1>${escape(options.title)}</h1>${body}</body></html>`)
   target.close()
   const cleanup = () => frame.remove()

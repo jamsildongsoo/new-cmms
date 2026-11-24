@@ -70,6 +70,14 @@ export function IdentityFormPage({
   )
   const readOnly =
     mode !== 'create' && !hasPermission(`${config.permission}:update`)
+  const allowEmptyOrganization =
+    resource === 'users' &&
+    mode !== 'create' &&
+    original.roleId === 'ADMIN' &&
+    original.siteId === null &&
+    original.deptId === null &&
+    form.roleId === 'ADMIN' &&
+    form.accessScope === 'COMPANY_ALL'
   const [baseline, setBaseline] = useState('')
   const confirmLeave = useUnsavedChanges(
     Boolean(baseline) &&
@@ -151,7 +159,9 @@ export function IdentityFormPage({
         const value = form[field.key] ?? ''
         payload[field.key] =
           resource === 'users' &&
-          !field.required &&
+          (!field.required ||
+            (allowEmptyOrganization &&
+              (field.key === 'siteId' || field.key === 'deptId'))) &&
           field.key !== 'password' &&
           !value
             ? null
@@ -294,8 +304,13 @@ export function IdentityFormPage({
             .map((field) => {
               const selected = choices(field.key)
               const value = form[field.key] ?? ''
+              const organizationField =
+                field.key === 'siteId' || field.key === 'deptId'
               const required =
-                field.required ||
+                (field.required &&
+                  (!organizationField ||
+                    !allowEmptyOrganization ||
+                    Boolean(form.siteId || form.deptId))) ||
                 (field.key === 'password' && mode === 'create')
               const disabled =
                 readOnly ||

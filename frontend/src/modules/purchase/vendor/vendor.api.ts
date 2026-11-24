@@ -16,7 +16,7 @@ export interface Vendor extends VendorFields, AuditFields {
   deleteYn: string
 }
 export const vendorApi = {
-  list: async (params: { page: number; search: string }) =>
+  list: async (params: { page: number; search: string; searchType?: string }) =>
     (
       await http.get<{
         items: Vendor[]

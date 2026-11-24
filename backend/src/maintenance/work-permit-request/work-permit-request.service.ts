@@ -1,3 +1,4 @@
+import { applyTypedSearch } from '../../common/utils/typed-search.util';
 import { SearchPermitDto } from '../work-permit/dto/search-permit.dto';
 import { normalizePaginationQuery } from '../../common/utils/pagination.util';
 import { ForbiddenException } from '@nestjs/common';
@@ -11,6 +12,8 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { Site } from '../../organization/sites/entities/site.entity';
+import { Department } from '../../organization/departments/entities/department.entity';
 import { UserContext } from '../../auth/types/user-context.type';
 import {
   permitOwner,
@@ -23,6 +26,17 @@ import {
 } from './dto/work-permit-request.dto';
 @Injectable()
 export class WorkPermitRequestService {
+  async options(user: UserContext) {
+    this.query(user);
+    const [sites, departments] = await Promise.all([
+      this.repository.manager.getRepository(Site).find({ where: { companyId: user.companyId, deleteYn: 'N' } }),
+      this.repository.manager.getRepository(Department).find({ where: { companyId: user.companyId, deleteYn: 'N' } }),
+    ]);
+    return {
+      sites: sites.map(({ siteId, name }) => ({ value: siteId, label: name })),
+      departments: departments.map(({ deptId, name }) => ({ value: deptId, label: name })),
+    };
+  }
   withManager(manager: EntityManager): WorkPermitRequestService {
     return new WorkPermitRequestService(
       manager.getRepository(WorkPermitRequest),
@@ -69,11 +83,7 @@ export class WorkPermitRequestService {
       'r.status',
     ]);
     // 설비번호는 직접 입력 참고값이다. 검색 대상은 문서번호·관리번호·작업명만 둔다.
-    if (filter.search?.trim())
-      query.andWhere(
-        "(r.workPermitRequestId ILIKE :search OR r.documentNo ILIKE :search OR r.data->>'title' ILIKE :search)",
-        { search: `%${filter.search.trim().replace(/[\\%_]/g, '\\$&')}%` },
-      );
+    applyTypedSearch(query, filter.search, filter.searchType, { id: 'r.workPermitRequestId', documentNo: 'r.documentNo', title: "r.data->>'title'", createdBy: 'r.createdBy' }, ['r.workPermitRequestId', 'r.documentNo', "r.data->>'title'"]);
     const [rows, total] = await query
       .orderBy('r.createdAt', 'DESC')
       .addOrderBy('r.workPermitRequestId', 'DESC')

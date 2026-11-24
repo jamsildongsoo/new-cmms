@@ -51,10 +51,16 @@ export interface PermitRecord {
   }[]
 }
 export interface PermitOptions {
+  sites: { value: string; label: string }[]
+  departments: { value: string; label: string }[]
   templates: PermitSection[]
   names: Record<string, string>
   documents: { id: string; name: string }[]
   users: { value: string; label: string }[]
+}
+export interface PermitOrganizationOptions {
+  sites: { value: string; label: string }[]
+  departments: { value: string; label: string }[]
 }
 // API 계약: backend/src/maintenance/work-permit 및 work-permit-request의 목록 DTO·응답과 함께 수정한다.
 export interface PermitListItem {
@@ -72,11 +78,13 @@ export interface PermitPage {
   limit: number
 }
 export const permitApi = {
-  list: async (path: string, params: { page: number; search?: string }) =>
+  list: async (path: string, params: { page: number; search?: string; searchType?: 'id' | 'documentNo' | 'title' | 'createdBy' }) =>
     (await http.get<PermitPage>(path, { params })).data,
   get: async (path: string) => (await http.get<PermitRecord>(path)).data,
   options: async () =>
     (await http.get<PermitOptions>('/work-permit/options')).data,
+  requestOptions: async () =>
+    (await http.get<PermitOrganizationOptions>('/work-permit-request/options')).data,
   save: async (path: string, body: unknown, create: boolean) =>
     (
       await http.request<PermitRecord>({

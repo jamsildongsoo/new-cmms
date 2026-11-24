@@ -26,7 +26,7 @@ export const stepFromUser = (
   type,
   userId: info.userId,
   userName: info.userName,
-  deptId: info.deptId,
+  deptId: info.deptId ?? '',
   deptName: info.deptName ?? '',
   title: info.title ?? '',
   position: info.position ?? '',

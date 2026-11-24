@@ -1,4 +1,4 @@
-/** 서버 실행은 설정된 DB 동기화 정책만 적용한다. 초기 설치·관리자 생성은 bootstrap.sh로 별도 실행한다. */
+/** 서버 실행은 설정된 DB 동기화 정책만 적용한다. migration·관리자 생성은 별도 명령이다. */
 /** API prefix·CORS·엄격한 DTO 검증을 설정하고 NestJS 서버를 시작한다. */
 import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';

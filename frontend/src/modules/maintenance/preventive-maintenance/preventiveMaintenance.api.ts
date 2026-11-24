@@ -13,6 +13,7 @@ export interface InspectionItem {
 }
 
 export interface PMOptions {
+  sites: { value: string; label: string }[]
   // 백엔드 해당 업무 options API의 units(공통코드 UNIT)와 함께 수정한다.
   units: { value: string; label: string }[]
   departments: { value: string; label: string }[]
@@ -96,6 +97,7 @@ export interface PMPage {
 export async function getPreventiveMaintenanceList(params: {
   page: number
   search?: string
+  searchType?: 'pmId' | 'documentNo' | 'title' | 'equipmentId' | 'createdBy'
 }) {
   return (await http.get<PMPage>('/preventive-maintenance', { params })).data
 }

@@ -12,6 +12,7 @@ import { useAuth } from '@/modules/auth'
 import { AttachmentManager } from '@/modules/attachments'
 import { toMessage } from '@/shared/api/errors'
 import { useUnsavedChanges } from '@/shared/hooks/useUnsavedChanges'
+import { codeName } from '@/shared/lib/codeName'
 import { Button } from '@/shared/ui/Button'
 import { Field } from '@/shared/ui/Field'
 import { Input } from '@/shared/ui/Input'
@@ -249,7 +250,7 @@ function PurchaseOrderEditor({ id }: { id?: string }) {
         e.preventDefault()
         void save(false)
       }}
-      className="space-y-3 rounded-lg border border-slate-200 bg-white p-4 md:p-5"
+      className="document-form space-y-3 rounded-lg border border-slate-200 bg-white p-4 md:p-5"
     >
       <div className="flex flex-wrap justify-between gap-2">
         <h1 className="text-lg font-semibold">
@@ -312,32 +313,32 @@ function PurchaseOrderEditor({ id }: { id?: string }) {
           )}
         </div>
       </div>
-      <DocumentIdField
-        value={record?.orderId}
-        documentNo={form.documentNo}
-        onDocumentNoChange={(value) => change('documentNo', value)}
-        disabled={disabled}
-        readOnly={readOnly}
-      />
+      <div className="grid grid-cols-12 gap-3">
+        <div className="col-span-6 min-w-0"><DocumentIdField gridLayout value={record?.orderId}
+          documentNo={form.documentNo} onDocumentNoChange={(value) => change('documentNo', value)}
+          disabled={disabled} readOnly={readOnly} /></div>
+        <Field label="발주명" required className="col-span-6 min-w-0">
+          <Input maxLength={200} required value={form.title} disabled={disabled}
+            onChange={(e) => change('title', e.target.value)} />
+        </Field>
+      </div>
       {error && (
         <p role="alert" className="text-xs text-red-700">
           {error}
         </p>
       )}
       {!ready && <p>불러오는 중…</p>}
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className="grid grid-cols-12 gap-3">
         {(
           [
-            ['title', '발주명'],
             ['date', '발주일'],
             ['dueDate', '납기일'],
           ] as const
         ).map(([key, label]) => (
-          <Field key={key} label={label} required={key === 'title'}>
+          <Field key={key} label={label} className={`col-span-3 min-w-0 ${key === 'date' ? 'order-6' : 'order-7'}`}>
             <Input
               type={key === 'date' || key === 'dueDate' ? 'date' : 'text'}
-              maxLength={key === 'title' ? 200 : 50}
-              required={key === 'title'}
+              maxLength={50}
               value={form[key]}
               disabled={disabled}
               onChange={(e) => change(key, e.target.value)}
@@ -352,7 +353,7 @@ function PurchaseOrderEditor({ id }: { id?: string }) {
             ['typeCode', '유형', options.types],
           ] as const
         ).map(([key, label, choices]) => (
-          <Field key={key} label={label}>
+          <Field key={key} label={label} className={`col-span-3 min-w-0 ${key === 'siteId' ? 'order-1' : key === 'deptId' ? 'order-2' : key === 'requesterId' ? 'order-3' : 'order-4'}`}>
             <Select
               value={form[key]}
               disabled={disabled || key === 'siteId' || key === 'deptId'}
@@ -362,13 +363,13 @@ function PurchaseOrderEditor({ id }: { id?: string }) {
 
               {choices.map((r) => (
                 <option key={r.value} value={r.value}>
-                  {r.label} ({r.value})
+                  {codeName(r.value, r.label)}
                 </option>
               ))}
             </Select>
           </Field>
         ))}
-        <Field label="입고 예정 사업장" required>
+        <Field label="입고 예정 사업장" required className="order-8 col-span-3 min-w-0">
           <Select
             required
             value={form.toSiteId}
@@ -378,13 +379,13 @@ function PurchaseOrderEditor({ id }: { id?: string }) {
             <option value="">선택</option>
             {options.sites.map((site) => (
               <option key={site.value} value={site.value}>
-                {site.label} ({site.value})
+                {codeName(site.value, site.label)}
               </option>
             ))}
           </Select>
         </Field>
         {
-          <Field label="거래처" required>
+          <Field label="거래처" required className="order-5 col-span-3 min-w-0">
             <Select
               required
               value={form.vendorId}
@@ -395,42 +396,16 @@ function PurchaseOrderEditor({ id }: { id?: string }) {
 
               {options.vendors.map((v) => (
                 <option key={v.vendorId} value={v.vendorId}>
-                  {v.vendorId} / {v.name}
+                  {codeName(v.vendorId, v.name)}
                 </option>
               ))}
             </Select>
           </Field>
         }
-        {
-          <>
-            {(
-              [
-                ['name', '공급처'],
-                ['registrationNumber', '사업자번호'],
-                ['contactName', '공급처 담당자'],
-                ['phoneNumber', '연락처'],
-                ['email', '이메일'],
-              ] as const
-            ).map(([key, label]) => (
-              <Field key={key} label={label}>
-                <Input value={selectedVendor?.[key] ?? ''} readOnly />
-              </Field>
-            ))}
-            <Field label="납품 장소">
-              <Input
-                value={form.deliveryLocation}
-                disabled={disabled}
-                maxLength={300}
-                onChange={(e) =>
-                  change('deliveryLocation', e.target.value)
-                }
-              />
-            </Field>
-          </>
-        }
       </div>
       <section className="space-y-2 rounded-md border border-slate-200 p-3">
-        <Field label="참조 구매요청">
+        <div className="grid grid-cols-12 gap-3">
+        <Field label="참조 구매요청번호" className="col-span-3 min-w-0">
           <Select
             aria-label="참조 구매요청"
             value={refId}
@@ -441,12 +416,15 @@ function PurchaseOrderEditor({ id }: { id?: string }) {
 
             {options.requests.map((r) => (
               <option key={r.requestId} value={r.requestId}>
-                {r.requestId} / {r.documentNo ? `${r.documentNo} / ` : ''}
-                {r.title}
+                {r.requestId}
               </option>
             ))}
           </Select>
         </Field>
+        <Field label="참조 구매요청명" className="col-span-9 min-w-0">
+          <Input readOnly value={options.requests.find((r) => r.requestId === refId)?.title ?? ''} />
+        </Field>
+        </div>
         {refId && (
           <div className="flex items-center gap-3 text-xs">
             <Link
@@ -473,15 +451,6 @@ function PurchaseOrderEditor({ id }: { id?: string }) {
         </p>
         {refId && <LinkedPurchaseOrders requestId={refId} />}
       </section>
-      <PurchaseOrderItems
-        items={items}
-        setItems={setItems}
-        options={options}
-        disabled={disabled}
-        readOnly={readOnly}
-        blocked={blocked}
-        total={total}
-      />
       <Field label={'발주 내용'}>
         <Textarea
           rows={3}
@@ -497,6 +466,15 @@ function PurchaseOrderEditor({ id }: { id?: string }) {
           onChange={(e) => change('note', e.target.value)}
         />
       </Field>
+      <PurchaseOrderItems
+        items={items}
+        setItems={setItems}
+        options={options}
+        disabled={disabled}
+        readOnly={readOnly}
+        blocked={blocked}
+        total={total}
+      />
       <AttachmentManager
         attachmentId={attachmentId}
         refModule={module}

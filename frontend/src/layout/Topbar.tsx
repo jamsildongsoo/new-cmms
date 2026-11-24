@@ -117,7 +117,7 @@ export function Topbar({
               <UserRound className="h-4 w-4 shrink-0 text-slate-500" />
               <span className="max-w-36 truncate">{name}</span>
               <span className="hidden text-xs text-slate-500 sm:inline">
-                {ownProfile?.deptName || user?.deptId}
+                {ownProfile?.deptName || user?.deptId || '소속 없음'}
               </span>
               <ChevronDown className="h-3.5 w-3.5 shrink-0" />
             </summary>

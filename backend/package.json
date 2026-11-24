@@ -7,7 +7,10 @@
   "license": "UNLICENSED",
   "scripts": {
     "build": "nest build",
-    "bootstrap:admin": "DB_SYNCHRONIZE=false ts-node -r tsconfig-paths/register src/bootstrap/bootstrap-admin.ts",
+    "init:admin": "node dist/bootstrap/init-admin.js",
+    "migration:run": "node dist/database/run-migrations.js",
+    "migration:show": "typeorm migration:show -d dist/database/data-source.js",
+    "migration:generate": "node -r ts-node/register -r tsconfig-paths/register ./node_modules/typeorm/cli.js migration:generate -d src/database/data-source.ts",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
     "start:dev": "nest start --watch",
@@ -17,8 +20,7 @@
     "test": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js",
     "test:watch": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --watch",
     "test:cov": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --coverage",
-    "test:debug": "node --inspect-brk --experimental-vm-modules -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "bootstrap:schema": "DB_SYNCHRONIZE=false ts-node -r tsconfig-paths/register src/bootstrap/schema-init.ts"
+    "test:debug": "node --inspect-brk --experimental-vm-modules -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand"
   },
   "dependencies": {
     "@nestjs/common": "^12.0.1",

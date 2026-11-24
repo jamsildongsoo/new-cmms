@@ -39,6 +39,7 @@ export interface PurchaseOptionsFields {
 export interface PurchaseListQuery {
   page?: number
   search?: string
+  searchType?: string
 }
 export interface PurchasePage<T> {
   items: T[]

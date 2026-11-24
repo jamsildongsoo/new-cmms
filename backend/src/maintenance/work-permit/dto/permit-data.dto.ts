@@ -26,7 +26,7 @@ export class PermitDataDto {
   @IsIn(['INTERNAL', 'OUTSOURCED']) workType: string;
   @IsString() @IsNotEmpty() @MaxLength(100) location: string;
   @IsOptional() @IsString() @MaxLength(50) equipmentNo?: string;
-  @IsOptional() @IsString() @MaxLength(100) equipmentName?: string;
+  @IsOptional() @IsString() @MaxLength(500) equipmentName?: string;
   @IsString() startTime: string;
   @IsString() endTime: string;
   @IsString() @IsNotEmpty() @MaxLength(250) summary: string;

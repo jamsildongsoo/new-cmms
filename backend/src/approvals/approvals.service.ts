@@ -196,32 +196,6 @@ export class ApprovalsService {
       );
   }
 
-  async searchUsers(
-    userContext: UserContext,
-    query: string,
-  ): Promise<ApprovalUserInfoDto[]> {
-    const keyword = query.trim();
-    if (!keyword) {
-      return [];
-    }
-    const pattern = `%${keyword.replace(/[\\%_]/g, '\\$&')}%`;
-    const users = await this.userRepository
-      .createQueryBuilder('u')
-      .where('u.companyId = :companyId', { companyId: userContext.companyId })
-      .andWhere("u.deleteYn = 'N'")
-      .andWhere('(u.userId ILIKE :pattern OR u.name ILIKE :pattern)', {
-        pattern,
-      })
-      .orderBy('u.userId', 'ASC')
-      .limit(10)
-      .getMany();
-    const directory = await this.loadDirectory(
-      userContext.companyId,
-      users.map((user) => user.userId),
-    );
-    return users.map((user) => directory.get(user.userId)!);
-  }
-
   async findUserInfo(
     userContext: UserContext,
     userId: string,
@@ -253,7 +227,9 @@ export class ApprovalsService {
       userId: In(ids),
       deleteYn: 'N',
     });
-    const deptIds = [...new Set(users.map((user) => user.deptId))];
+    const deptIds = [
+      ...new Set(users.map((user) => user.deptId).filter((id): id is string => !!id)),
+    ];
     const departments = deptIds.length
       ? await this.departmentRepository.findBy({
           companyId,
@@ -267,7 +243,7 @@ export class ApprovalsService {
         userId: user.userId,
         userName: user.name,
         deptId: user.deptId,
-        deptName: deptNames.get(user.deptId) ?? null,
+        deptName: user.deptId ? (deptNames.get(user.deptId) ?? null) : null,
         title: user.title,
         position: user.position,
       });
@@ -411,14 +387,10 @@ export class ApprovalsService {
           ),
         )
         .setParameter('reference', ApprovalStepType.REFERENCE);
-    if (filter.status)
-      query.andWhere('a.status = :status', { status: filter.status });
     if (filter.search?.trim()) {
       const search = `%${filter.search.trim().replace(/[\\%_]/g, '\\$&')}%`;
-      query.andWhere(
-        '(a.approvalId ILIKE :search OR a.documentNo ILIKE :search OR a.title ILIKE :search OR a.submitterId ILIKE :search)',
-        { search },
-      );
+      const field = filter.searchType ?? 'title';
+      query.andWhere(`a.${field} ILIKE :search`, { search });
     }
     const [items, total] = await query
       .orderBy('a.createdAt', 'DESC')

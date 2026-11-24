@@ -14,6 +14,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Department } from '../../organization/departments/entities/department.entity';
+import { Site } from '../../organization/sites/entities/site.entity';
 import { User } from '../../identity/users/entities/user.entity';
 import { UserContext } from '../../auth/types/user-context.type';
 import { DocumentStatus } from '../../common/constants/document-status';
@@ -75,7 +76,7 @@ export class PreventiveMaintenanceService {
   async getOptions(userContext: UserContext) {
     this.scoped(userContext);
     const companyId = userContext.companyId;
-    const [equipment, types, departments, users] = await Promise.all([
+    const [equipment, types, departments, users, sites] = await Promise.all([
       this.equipmentRepository.find({
         where: { companyId, deleteYn: 'N' },
         order: { equipmentId: 'ASC' },
@@ -92,6 +93,10 @@ export class PreventiveMaintenanceService {
         where: { companyId, deleteYn: 'N' },
         order: { userId: 'ASC' },
       }),
+      this.repository.manager.getRepository(Site).find({
+        where: { companyId, deleteYn: 'N' },
+        order: { siteId: 'ASC' },
+      }),
     ]);
     const units = await this.repository.manager.getRepository(CodeItem).find({
       where: { companyId: companyId, codeId: CodeGroup.UNIT },
@@ -107,6 +112,7 @@ export class PreventiveMaintenanceService {
         value: deptId,
         label: name,
       })),
+      sites: sites.map(({ siteId, name }) => ({ value: siteId, label: name })),
       users: users.map(({ userId, name }) => ({ value: userId, label: name })),
       equipment: equipment.map(
         ({ equipmentId, name, inspectionPeriod, inspectionUnit }) => ({
@@ -141,11 +147,25 @@ export class PreventiveMaintenanceService {
       'pm.inspectorId',
       'pm.status',
     ]);
-    if (filter.search?.trim())
+    if (filter.search?.trim()) {
+      const search = `%${filter.search.trim().replace(/[\\%_]/g, '\\$&')}%`;
+      const searchColumns = {
+        pmId: 'pm.pmId',
+        documentNo: 'pm.documentNo',
+        title: 'pm.title',
+        equipmentId: 'pm.equipmentId',
+        createdBy: 'pm.createdBy',
+      };
+      const searchColumn = filter.searchType && searchColumns[filter.searchType];
+      if (filter.searchType && !searchColumn)
+        throw new BadRequestException('Invalid searchType');
       query.andWhere(
-        '(pm.pmId ILIKE :search OR pm.documentNo ILIKE :search OR pm.title ILIKE :search OR pm.equipmentId ILIKE :search)',
-        { search: `%${filter.search.trim().replace(/[\\%_]/g, '\\$&')}%` },
+        searchColumn
+          ? `${searchColumn} ILIKE :search`
+          : '(pm.pmId ILIKE :search OR pm.documentNo ILIKE :search OR pm.title ILIKE :search OR pm.equipmentId ILIKE :search)',
+        { search },
       );
+    }
     const [rows, total] = await query
       .orderBy('pm.createdAt', 'DESC')
       .addOrderBy('pm.pmId', 'DESC')

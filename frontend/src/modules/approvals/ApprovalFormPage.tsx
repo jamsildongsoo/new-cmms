@@ -1,7 +1,6 @@
 // 결재 코드 원본: backend/src/approvals/approval.constant.ts.
 // 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
 import { useMetadata } from '@/shared/metadata/metadata'
-import { useStatusLabels } from '@/shared/metadata/metadata'
 import { DocumentIdField } from '@/shared/ui/DocumentIdField'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
@@ -40,6 +39,7 @@ import {
   type ApprovalFormState,
 } from './approvalForm'
 import { ApprovalLineEditor } from './ApprovalLineEditor'
+import { printApprovalDetail } from './approvalPrint'
 import type { ApprovalDraft } from './snapshot'
 
 const titles: Record<FormMode, string> = {
@@ -233,7 +233,7 @@ function ApprovalEditor({
   }
 
   return (
-    <section className="space-y-3">
+    <section className="document-form space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-lg font-semibold text-slate-900">{titles[mode]}</h1>
         <div className="page-actions">
@@ -307,14 +307,17 @@ function ApprovalEditor({
           void save(false)
         }}
       >
-        <DocumentIdField
-          value={form.approvalId}
-          documentNo={form.documentNo}
-          onDocumentNoChange={(documentNo) => patch({ documentNo })}
-          disabled={isSaving || isAttachmentBusy}
-        />
-        <div className="grid gap-5 md:grid-cols-2">
-          <Field label="제목" required className="md:col-span-2">
+        <div className="grid grid-cols-12 gap-3">
+          <div className="col-span-6 min-w-0">
+            <DocumentIdField
+              gridLayout
+              value={form.approvalId}
+              documentNo={form.documentNo}
+              onDocumentNoChange={(documentNo) => patch({ documentNo })}
+              disabled={isSaving || isAttachmentBusy}
+            />
+          </div>
+          <Field label="제목" required className="col-span-6 min-w-0">
             <Input
               value={form.title}
               disabled={isPermitApproval}
@@ -323,6 +326,8 @@ function ApprovalEditor({
               autoFocus
             />
           </Field>
+        </div>
+        <div className="space-y-5">
           <ApprovalLineEditor
             line={form.line}
             references={form.references}
@@ -331,7 +336,7 @@ function ApprovalEditor({
             onChange={patch}
             onError={setError}
           />
-          <div className="space-y-2 md:col-span-2">
+          <div className="space-y-2">
             <h2 className="text-base font-semibold">
               본문 <span className="text-red-600">*</span>
             </h2>
@@ -341,7 +346,7 @@ function ApprovalEditor({
               onChange={(contentJson) => patch({ contentJson })}
             />
           </div>
-          <div className="md:col-span-2">
+          <div>
             {(form.sourceAttachmentIds ?? []).map((id) => (
               <AttachmentManager
                 key={id}
@@ -384,11 +389,11 @@ function ApprovalView({
   const stepLabels = Object.fromEntries(
     approvalStepTypes.map(({ value, label }) => [value, label]),
   )
-  const documentStatusLabels = useStatusLabels()
   const navigate = useNavigate()
   const { user } = useAuth()
   const [comment, setComment] = useState('')
   const [isSaving, setIsSaving] = useState(false)
+  const [isPrinting, setIsPrinting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(
     initialWarning ?? approval.sourceSyncWarning ?? null,
@@ -469,8 +474,20 @@ function ApprovalView({
     (step) => step.type === 'APPROVER' || step.type === 'AGREE',
   )
 
+  const printDetail = async () => {
+    setIsPrinting(true)
+    setError(null)
+    try {
+      await printApprovalDetail(approval, stepLabels)
+    } catch (failure) {
+      setError(toMessage(failure))
+    } finally {
+      setIsPrinting(false)
+    }
+  }
+
   return (
-    <section className="space-y-4">
+    <section className="document-form space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="flex min-w-0 flex-wrap items-center gap-2 text-lg font-semibold text-slate-900">
           <span className="break-words">{approval.title}</span>
@@ -488,22 +505,8 @@ function ApprovalView({
           <Button
             type="button"
             variant="secondary"
-            disabled={isSaving}
-            onClick={() =>
-              printDocument({
-                title: approval.title,
-                fields: [
-                  ['문서번호', approval.approvalId],
-                  ['관리번호', approval.documentNo],
-                  ['상신자', approval.submitterId],
-                  [
-                    '상태',
-                    documentStatusLabels[approval.status] ?? approval.status,
-                  ],
-                ],
-                contentJson: approval.contentJson,
-              })
-            }
+            disabled={isSaving || isPrinting}
+            onClick={() => void printDetail()}
           >
             인쇄
           </Button>

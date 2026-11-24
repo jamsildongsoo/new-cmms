@@ -2,14 +2,13 @@ import { Pagination } from '@/shared/ui/Pagination'
 import { dateInput } from '@/shared/lib/format'
 // 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
 import { useStatusLabels } from '@/shared/metadata/metadata'
-import { SearchActions } from '@/shared/ui/SearchActions'
+import { TypedSearchForm } from '@/shared/ui/TypedSearchForm'
 import { useEffect, useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/modules/auth'
 import { toMessage } from '@/shared/api/errors'
 import { printDocument } from '@/shared/lib/print'
 import { Button } from '@/shared/ui/Button'
-import { Input } from '@/shared/ui/Input'
 import { DataTable } from '@/shared/ui/DataTable'
 import { StatusBadge } from '@/shared/ui/StatusBadge'
 import {
@@ -30,14 +29,15 @@ export function PurchaseOrderList() {
       limit: 20,
     }),
     [search, setSearch] = useState(''),
-    [query, setQuery] = useState({ page: 1, search: '' }),
+    [searchType, setSearchType] = useState('title'),
+    [query, setQuery] = useState({ page: 1, search: '', searchType: 'title' }),
     [error, setError] = useState(''),
     [loading, setLoading] = useState(true)
   const rows = loading || error ? [] : result.items
-  function change(page: number, value = query.search) {
+  function change(page: number, value = query.search, type = query.searchType) {
     setLoading(true)
     setError('')
-    setQuery({ page, search: value })
+    setQuery({ page, search: value, searchType: type })
   }
   useEffect(() => {
     let active = true
@@ -96,25 +96,14 @@ export function PurchaseOrderList() {
           </Button>
         </div>
       </div>
-      <form
-        className="search-form"
-        onReset={() => {
-          setSearch('')
-          change(1, '')
-        }}
-        onSubmit={(e) => {
-          e.preventDefault()
-          change(1, search.trim())
-        }}
-      >
-        <Input
-          aria-label="검색어"
-          placeholder="문서번호·관리번호·제목"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        <SearchActions loading={loading} />
-      </form>
+      <TypedSearchForm
+        options={[{ value: 'id', label: '문서번호' }, { value: 'documentNo', label: '관리번호' },
+          { value: 'title', label: '제목' }, { value: 'createdBy', label: '작성자' }]}
+        searchType={searchType} onSearchTypeChange={setSearchType}
+        search={search} onSearchChange={setSearch} loading={loading}
+        onSubmit={(event) => { event.preventDefault(); change(1, search.trim(), searchType) }}
+        onReset={() => { setSearch(''); setSearchType('title'); change(1, '', 'title') }}
+      />
       {error && <p role="alert">{error}</p>}
       <DataTable
         rows={rows}

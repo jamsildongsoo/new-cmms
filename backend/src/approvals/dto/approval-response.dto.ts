@@ -4,7 +4,7 @@ import { ApprovalStepType } from '../approval.constant';
 export interface ApprovalUserInfoDto {
   userId: string;
   userName: string;
-  deptId: string;
+  deptId: string | null;
   deptName: string | null;
   title: string | null;
   position: string | null;

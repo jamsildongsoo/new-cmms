@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsIn, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 export class VendorFieldsDto {
   @IsOptional() @IsString() @MaxLength(50) registrationNumber?: string | null;
@@ -17,5 +17,6 @@ export class UpdateVendorDto extends VendorFieldsDto {
   @IsOptional() @IsString() @IsNotEmpty() @MaxLength(150) name?: string;
 }
 export class SearchVendorDto extends PaginationQueryDto {
+  @IsOptional() @IsIn(['vendorId', 'name', 'registrationNumber']) searchType?: 'vendorId' | 'name' | 'registrationNumber';
   @IsOptional() @IsString() @MaxLength(200) search?: string;
 }

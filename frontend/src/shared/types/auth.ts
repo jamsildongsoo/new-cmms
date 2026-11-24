@@ -2,7 +2,7 @@ export interface UserContext {
   companyId: string
   userId: string
   roleId: string
-  deptId: string
+  deptId: string | null
   siteId: string | null
   accessScope: string
   permissions: string[]

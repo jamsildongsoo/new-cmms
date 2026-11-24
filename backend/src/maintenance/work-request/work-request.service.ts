@@ -1,3 +1,4 @@
+import { applyTypedSearch } from '../../common/utils/typed-search.util';
 import { businessDate } from '../../common/utils/date.util';
 import { normalizePaginationQuery } from '../../common/utils/pagination.util';
 import {
@@ -21,6 +22,9 @@ import { UserContext } from '../../auth/types/user-context.type';
 import { DocumentStatus } from '../../common/constants/document-status';
 import { assertDraft } from '../../common/utils/document-status.util';
 import { Equipment } from '../equipment/entities/equipment.entity';
+import { Site } from '../../organization/sites/entities/site.entity';
+import { Department } from '../../organization/departments/entities/department.entity';
+import { User } from '../../identity/users/entities/user.entity';
 import { WorkOrder } from '../work-order/entities/work-order.entity';
 import { WorkRequest } from './entities/work-request.entity';
 import { CreateWorkRequestDto } from './dto/create-work-request.dto';
@@ -80,11 +84,7 @@ export class WorkRequestService {
       'wr.priorityCode',
       'wr.status',
     ]);
-    if (filter.search?.trim())
-      query.andWhere(
-        '(wr.workRequestId ILIKE :search OR wr.documentNo ILIKE :search OR wr.title ILIKE :search OR wr.equipmentId ILIKE :search)',
-        { search: `%${filter.search.trim().replace(/[\\%_]/g, '\\$&')}%` },
-      );
+    applyTypedSearch(query, filter.search, filter.searchType, { id: 'wr.workRequestId', documentNo: 'wr.documentNo', title: 'wr.title', equipmentId: 'wr.equipmentId', createdBy: 'wr.createdBy' }, ['wr.workRequestId', 'wr.documentNo', 'wr.title', 'wr.equipmentId']);
     const [rows, total] = await query
       .orderBy('wr.createdAt', 'DESC')
       .addOrderBy('wr.workRequestId', 'DESC')
@@ -154,11 +154,16 @@ export class WorkRequestService {
     this.scoped(user);
     // frontend/src/modules/maintenance/work-request/priority.ts의 상·중·하는 참고값이다.
     // 우선순위 목록은 프런트에서 관리하고 백엔드에서 공통코드 검증하지 않는다.
-    const equipment = await this.equipmentRepository.find({
-      where: { companyId: user.companyId, deleteYn: 'N' },
-      order: { equipmentId: 'ASC' },
-    });
+    const [equipment, sites, departments, users] = await Promise.all([
+      this.equipmentRepository.find({ where: { companyId: user.companyId, deleteYn: 'N' }, order: { equipmentId: 'ASC' } }),
+      this.repository.manager.getRepository(Site).find({ where: { companyId: user.companyId, deleteYn: 'N' } }),
+      this.repository.manager.getRepository(Department).find({ where: { companyId: user.companyId, deleteYn: 'N' } }),
+      this.repository.manager.getRepository(User).find({ where: { companyId: user.companyId, deleteYn: 'N' } }),
+    ]);
     return {
+      sites: sites.map(({ siteId, name }) => ({ value: siteId, label: name })),
+      departments: departments.map(({ deptId, name }) => ({ value: deptId, label: name })),
+      users: users.map(({ userId, name }) => ({ value: userId, label: name })),
       equipment: equipment.map(({ equipmentId, name }) => ({
         value: equipmentId,
         label: name,

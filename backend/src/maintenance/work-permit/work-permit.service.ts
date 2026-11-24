@@ -1,3 +1,4 @@
+import { applyTypedSearch } from '../../common/utils/typed-search.util';
 import { SearchPermitDto } from './dto/search-permit.dto';
 import { normalizePaginationQuery } from '../../common/utils/pagination.util';
 import { ForbiddenException } from '@nestjs/common';
@@ -16,6 +17,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { UserContext } from '../../auth/types/user-context.type';
 import { User } from '../../identity/users/entities/user.entity';
+import { Site } from '../../organization/sites/entities/site.entity';
+import { Department } from '../../organization/departments/entities/department.entity';
 import { AttachmentItem } from '../../attachments/entities/attachment-item.entity';
 import { Approval } from '../../approvals/entities/approval.entity';
 import { ApprovalStep } from '../../approvals/entities/approval-step.entity';
@@ -80,11 +83,7 @@ export class WorkPermitService {
       'p.status',
     ]);
     // 설비번호는 직접 입력 참고값이다. 검색 대상은 문서번호·관리번호·작업명만 둔다.
-    if (filter.search?.trim())
-      query.andWhere(
-        "(p.workPermitId ILIKE :search OR p.documentNo ILIKE :search OR p.data->>'title' ILIKE :search)",
-        { search: `%${filter.search.trim().replace(/[\\%_]/g, '\\$&')}%` },
-      );
+    applyTypedSearch(query, filter.search, filter.searchType, { id: 'p.workPermitId', documentNo: 'p.documentNo', title: "p.data->>'title'", createdBy: 'p.createdBy' }, ['p.workPermitId', 'p.documentNo', "p.data->>'title'"]);
     const [rows, total] = await query
       .orderBy('p.createdAt', 'DESC')
       .addOrderBy('p.workPermitId', 'DESC')
@@ -126,11 +125,14 @@ export class WorkPermitService {
   }
   async options(user: UserContext) {
     this.query(user);
-    const users = await this.repository.manager.getRepository(User).find({
-      where: { companyId: user.companyId, deleteYn: 'N' },
-      order: { userId: 'ASC' },
-    });
+    const [users, sites, departments] = await Promise.all([
+      this.repository.manager.getRepository(User).find({ where: { companyId: user.companyId, deleteYn: 'N' }, order: { userId: 'ASC' } }),
+      this.repository.manager.getRepository(Site).find({ where: { companyId: user.companyId, deleteYn: 'N' } }),
+      this.repository.manager.getRepository(Department).find({ where: { companyId: user.companyId, deleteYn: 'N' } }),
+    ]);
     return {
+      sites: sites.map(({ siteId, name }) => ({ value: siteId, label: name })),
+      departments: departments.map(({ deptId, name }) => ({ value: deptId, label: name })),
       templates: PERMIT_TEMPLATES,
       names: PERMIT_NAMES,
       documents: REQUIRED_DOCUMENTS,

@@ -6,5 +6,4 @@
 **/*.swo
 /data/
 /backups/
-/deploy/tls/
-/deploy/db-certs/
+/nginx/tls/

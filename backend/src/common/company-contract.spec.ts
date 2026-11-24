@@ -35,7 +35,7 @@ it('includes the company in every stored entity key ', () => {
     }).toEqual({ entity: table.name, primaryCompany: true });
   }
 });
-it('requires JWT on every API operation other than login and the deployment health check', () => {
+it('requires JWT except for login, cookie-authenticated refresh, logout, and health', () => {
   let checked = 0;
   for (const controller of controllers) {
     for (const key of Object.getOwnPropertyNames(controller.prototype)) {
@@ -48,7 +48,8 @@ it('requires JWT on every API operation other than login and the deployment heal
       )
         continue;
       if (
-        (controller.name === 'AuthController' && key === 'login') ||
+        (controller.name === 'AuthController' &&
+          ['login', 'refresh', 'logout'].includes(key)) ||
         (controller.name === 'HealthController' && key === 'check')
       )
         continue;

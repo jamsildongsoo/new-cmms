@@ -1,3 +1,4 @@
+import { applyTypedSearch } from '../../common/utils/typed-search.util';
 import { inputQuantity, inputPrice } from '../../common/utils/decimal.util';
 import { normalizePaginationQuery } from '../../common/utils/pagination.util';
 import { ModuleCode } from '../../common/constants/modules';
@@ -103,11 +104,7 @@ export class PurchaseOrderService {
       ])
       .orderBy('p.createdAt', 'DESC')
       .addOrderBy('p.orderId', 'DESC');
-    if (filter.search?.trim())
-      q.andWhere(
-        '(p.title ILIKE :search OR p.documentNo ILIKE :search OR p.orderId ILIKE :search)',
-        { search: `%${filter.search.trim().replace(/[\\%_]/g, '\\$&')}%` },
-      );
+    applyTypedSearch(q, filter.search, filter.searchType, { id: 'p.orderId', documentNo: 'p.documentNo', title: 'p.title', createdBy: 'p.createdBy' }, ['p.orderId', 'p.documentNo', 'p.title']);
     const [items, total] = await q.skip(offset).take(limit).getManyAndCount();
     return {
       items: items.map(

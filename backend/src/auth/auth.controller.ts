@@ -5,9 +5,11 @@ import {
   Post,
   Query,
   Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
-import type { Request } from 'express';
+import { ConfigService } from '@nestjs/config';
+import type { Request, Response } from 'express';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { RequirePermission } from './decorators/require-permissions.decorator';
 import { LoginDto } from './dto/login.dto';
@@ -25,15 +27,82 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly loginHistory: LoginHistoryService,
+    private readonly configService: ConfigService,
   ) {}
 
+  private cookiePath(): string {
+    const prefix = this.configService.get<string>('app.apiPrefix') || 'api';
+    return `/${prefix}/auth`;
+  }
+
+  private setRefreshCookie(request: Request, response: Response, token: string) {
+    response.cookie('cmms.refreshToken', token, {
+      httpOnly: true,
+      sameSite: 'strict',
+      secure: request.secure,
+      path: this.cookiePath(),
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+  }
+
+  private clearRefreshCookie(request: Request, response: Response) {
+    response.clearCookie('cmms.refreshToken', {
+      httpOnly: true,
+      sameSite: 'strict',
+      secure: request.secure,
+      path: this.cookiePath(),
+    });
+  }
+
+  private refreshCookie(request: Request): string | undefined {
+    const entry = request.headers.cookie
+      ?.split(';')
+      .map((part) => part.trim())
+      .find((part) => part.startsWith('cmms.refreshToken='));
+    return entry?.slice('cmms.refreshToken='.length);
+  }
+
   @Post('login')
-  login(@Body() dto: LoginDto, @Req() request: Request) {
+  async login(
+    @Body() dto: LoginDto,
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ) {
     // 직접 보낸 X-Forwarded-For 헤더는 신뢰하지 않는다.
-    return this.authService.login(dto, {
+    const session = await this.authService.login(dto, {
       ipAddress: request.ip ?? request.socket.remoteAddress,
       userAgent: request.get('user-agent'),
     });
+    this.setRefreshCookie(request, response, session.refreshToken);
+    const { refreshToken: _refreshToken, ...publicSession } = session;
+    void _refreshToken;
+    return publicSession;
+  }
+
+  @Post('refresh')
+  async refresh(
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    try {
+      const session = await this.authService.refresh(this.refreshCookie(request));
+      this.setRefreshCookie(request, response, session.refreshToken);
+      const { refreshToken: _refreshToken, ...publicSession } = session;
+      void _refreshToken;
+      return publicSession;
+    } catch (error) {
+      this.clearRefreshCookie(request, response);
+      throw error;
+    }
+  }
+
+  @Post('logout')
+  logout(
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    this.clearRefreshCookie(request, response);
+    return { message: 'Logged out' };
   }
 
   @UseGuards(JwtAuthGuard)

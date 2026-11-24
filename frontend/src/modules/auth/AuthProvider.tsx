@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from 'react'
-import { getMe, login as loginRequest } from './auth.api'
+import { getMe, login as loginRequest, logoutSession } from './auth.api'
 import type { LoginRequest, UserContext } from '@/shared/types/auth'
 import { AuthContext } from './authContext'
 import {
@@ -51,7 +51,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       // Context는 표시/버튼 제어용이다. 회사·사용자·권한은 서버 /auth/me의 DB 조회 결과만 사용한다.
       const current = await getMe()
-      if (request === version.current && getAccessToken() === token) {
+      if (request === version.current && getAccessToken()) {
+        knownToken.current = getAccessToken()
         setUser(current)
         setNotice('')
       }
@@ -113,9 +114,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
   const logout = useCallback(
     async (message = '') => {
-      clearTokens()
-      reset()
-      setNotice(message)
+      try {
+        await logoutSession()
+      } catch {
+        // 연결 오류가 있어도 브라우저의 현재 세션은 종료한다.
+      } finally {
+        clearTokens()
+        reset()
+        setNotice(message)
+      }
     },
     [reset],
   )

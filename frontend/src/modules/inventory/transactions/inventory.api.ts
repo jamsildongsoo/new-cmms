@@ -57,6 +57,7 @@ export type InventoryListItem = Pick<
   | 'status'
 >
 export interface InventoryOptions {
+  departments: { value: string; label: string }[]
   materials: {
     materialId: string
     name: string
@@ -77,6 +78,7 @@ export const inventoryApi = {
   list: async (params: {
     page?: number
     search?: string
+    searchType?: string
     type?: string
     kind?: string
     status?: string

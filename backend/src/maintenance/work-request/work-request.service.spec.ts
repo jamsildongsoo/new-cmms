@@ -4,6 +4,9 @@ import { validate } from 'class-validator';
 import { UserContext } from '../../auth/types/user-context.type';
 import { Equipment } from '../equipment/entities/equipment.entity';
 import { WorkOrder } from '../work-order/entities/work-order.entity';
+import { Site } from '../../organization/sites/entities/site.entity';
+import { Department } from '../../organization/departments/entities/department.entity';
+import { User } from '../../identity/users/entities/user.entity';
 import { WorkRequest } from './entities/work-request.entity';
 import { WorkRequestService } from './work-request.service';
 import { CreateWorkRequestDto } from './dto/create-work-request.dto';
@@ -133,6 +136,12 @@ function fixture() {
       getRepository: (entity: unknown) =>
         entity === WorkOrder
           ? { createQueryBuilder: () => builder(plans, 'workOrderId') }
+          : entity === Site
+            ? { find: async () => [{ siteId: 'S', name: '사업장' }] }
+            : entity === Department
+              ? { find: async () => [{ deptId: 'D', name: '설비팀' }] }
+              : entity === User
+                ? { find: async () => [{ userId: 'owner', name: '담당자' }] }
           : codeItems,
     },
   };

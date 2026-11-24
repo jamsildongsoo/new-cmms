@@ -1,4 +1,4 @@
-/** 실행 모드는 backend/.env의 NODE_ENV에서 읽는다(외부 환경변수 우선). npm 명령은 watch·디버그·빌드 코드 실행 방식만 선택한다. */
+/** 실행 모드는 환경변수 NODE_ENV에서 읽는다. Docker 밖의 직접 실행은 루트 .env를 읽는다. */
 import type { EnvironmentVariables } from './env.schema';
 
 export const buildAppConfig = (env: EnvironmentVariables) => ({

@@ -52,6 +52,29 @@ function fixture() {
 }
 
 describe('Equipment inspection fields', () => {
+  it('limits OWN_SITE choices and blocks equipment in another site', async () => {
+    const { service, sites } = fixture();
+    const scoped = {
+      ...actor,
+      accessScope: 'OWN_SITE',
+      siteId: 'S1',
+    } as UserContext;
+    await service.getOptions(scoped);
+    expect(sites.find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { companyId: 'A', deleteYn: 'N', siteId: 'S1' },
+      }),
+    );
+    await expect(service.findOne(scoped, 'EQ1')).rejects.toThrow(
+      'Equipment not found',
+    );
+    await expect(
+      service.create(scoped, {
+        equipmentId: 'EQ2', siteId: 'S2', deptId: 'D1',
+        name: '타 사업장 설비', typeCode: 'PUMP',
+      }),
+    ).rejects.toThrow('Equipment not found');
+  });
   it('creates optional dates and cycles as null and records the authenticated creator', async () => {
     const { service, repository } = fixture();
     repository.findOneBy.mockResolvedValueOnce(null);

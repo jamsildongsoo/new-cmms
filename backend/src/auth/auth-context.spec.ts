@@ -63,7 +63,8 @@ beforeAll(async () => {
     db.getRepository(LoginHistory),
     new ConfigService({ app: { loginHistoryRetentionDays: 0 } }),
   );
-  auth = new AuthService(users, roles, jwt, history);
+  const configService = new ConfigService({ jwt: { accessSecret: secret }, app: { apiPrefix: '' } });
+  auth = new AuthService(users, roles, jwt, history, configService);
   strategy = new JwtStrategy(
     auth,
     new ConfigService({ jwt: { accessSecret: secret } }),
@@ -75,6 +76,7 @@ beforeAll(async () => {
       { provide: AuthService, useValue: auth },
       { provide: UsersService, useValue: users },
       { provide: LoginHistoryService, useValue: history },
+      { provide: ConfigService, useValue: configService },
       PermissionsGuard,
       { provide: JwtStrategy, useValue: strategy },
       JwtAuthGuard,
@@ -247,6 +249,32 @@ it('rejects supplied login roles and business-request actor overrides at the DTO
 
 const client = () =>
   request(app.getHttpServer() as Parameters<typeof request>[0]);
+it('refreshes an expired access session with the HttpOnly cookie and rejects revoked sessions', async () => {
+  const login = await client()
+    .post('/auth/login')
+    .send({ companyId: 'A', userId: 'owner', password: 'test-password' })
+    .expect(201);
+  expect(login.body).not.toHaveProperty('refreshToken');
+  const cookie = login.headers['set-cookie'][0].split(';')[0];
+  expect(login.headers['set-cookie'][0]).toContain('HttpOnly');
+  const refreshed = await client()
+    .post('/auth/refresh')
+    .set('Cookie', cookie)
+    .expect(201);
+  expect((refreshed.body as { user: UserContext }).user.companyId).toBe('A');
+  await client()
+    .get('/auth/me')
+    .set('Authorization', `Bearer ${(refreshed.body as { accessToken: string }).accessToken}`)
+    .expect(200);
+  await client().post('/auth/refresh').expect(401);
+  await db.getRepository(User).update(
+    { companyId: 'A', userId: 'owner' },
+    { tokenVersion: 1 },
+  );
+  await client().post('/auth/refresh').set('Cookie', cookie).expect(401);
+  const logout = await client().post('/auth/logout').set('Cookie', cookie).expect(201);
+  expect(logout.headers['set-cookie'][0]).toContain('Expires=Thu, 01 Jan 1970');
+});
 it('validates Bearer authentication through the real Passport strategy and reloads current DB context', async () => {
   await client().get('/auth/me').expect(401);
   const login = await client()

@@ -1,3 +1,4 @@
+import { applyTypedSearch } from '../../common/utils/typed-search.util';
 import { inputQuantity, inputPrice } from '../../common/utils/decimal.util';
 /** 전표 확정·대기 입고 수령·취소를 회사 잠금과 단일 트랜잭션으로 처리한다. */
 import {
@@ -17,6 +18,7 @@ import { businessDate } from '../../common/utils/date.util';
 import { decimal, rounded, price, qty } from '../../common/utils/decimal.util';
 import { Material } from '../material/entities/material.entity';
 import { Site } from '../../organization/sites/entities/site.entity';
+import { Department } from '../../organization/departments/entities/department.entity';
 import { Warehouse } from '../../organization/warehouses/entities/warehouse.entity';
 import { PurchaseOrderItem } from '../../purchase/purchase-order/entities/purchase-order-item.entity';
 import { PurchaseOrder } from '../../purchase/purchase-order/entities/purchase-order.entity';
@@ -67,11 +69,7 @@ export class InventoryService {
       ])
       .orderBy('d.createdAt', 'DESC')
       .addOrderBy('d.inventoryDocumentId', 'DESC');
-    if (filter.search?.trim())
-      q.andWhere(
-        '(d.inventoryDocumentId ILIKE :search OR d.documentNo ILIKE :search OR d.title ILIKE :search)',
-        { search: `%${filter.search.trim().replace(/[\\%_]/g, '\\$&')}%` },
-      );
+    applyTypedSearch(q, filter.search, filter.searchType, { id: 'd.inventoryDocumentId', documentNo: 'd.documentNo', title: 'd.title', createdBy: 'd.createdBy' }, ['d.inventoryDocumentId', 'd.documentNo', 'd.title']);
     for (const field of [
       'type',
       'kind',
@@ -188,7 +186,7 @@ export class InventoryService {
   }
   async options(user: UserContext) {
     this.scoped(user);
-    const [materials, sites, warehouses, periods] = await Promise.all([
+    const [materials, sites, warehouses, periods, departments] = await Promise.all([
       this.db.getRepository(Material).find({
         where: { companyId: user.companyId, deleteYn: 'N' },
         order: { materialId: 'ASC' },
@@ -204,6 +202,9 @@ export class InventoryService {
       this.db.getRepository(InventoryPeriodLock).find({
         where: { companyId: user.companyId },
         order: { yearMonth: 'DESC' },
+      }),
+      this.db.getRepository(Department).find({
+        where: { companyId: user.companyId, deleteYn: 'N' },
       }),
     ]);
     // 입고 후보는 발주 소속이 아닌 목적지 기준이다. 구매 화면 자체의 scope는 변경하지 않는다.
@@ -240,6 +241,7 @@ export class InventoryService {
         baseUnit,
       })),
       sites: sites.map((s) => ({ value: s.siteId, label: s.name })),
+      departments: departments.map(({ deptId, name }) => ({ value: deptId, label: name })),
       warehouses: warehouses.map((w) => ({
         siteId: w.siteId,
         warehouseId: w.warehouseId,

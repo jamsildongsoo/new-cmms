@@ -492,14 +492,14 @@ async function main() {
     await field('거래처', 'V1')
     assert.equal(
       await evalJS(
-        "[...document.querySelectorAll('input')].some(i=>i.value==='업체 1'&&i.readOnly)",
+        "[...document.querySelectorAll('select')].find(s=>s.value==='V1')?.selectedOptions[0]?.textContent.includes('V1(업체 1)')",
       ),
       true,
     )
     await field('거래처', 'V2')
     assert.equal(
       await evalJS(
-        "[...document.querySelectorAll('input')].some(i=>i.value==='업체 2'&&i.readOnly)",
+        "[...document.querySelectorAll('select')].find(s=>s.value==='V2')?.selectedOptions[0]?.textContent.includes('V2(업체 2)')",
       ),
       true,
     )
@@ -523,7 +523,7 @@ async function main() {
     )
     assert.equal('requestDate' in orderPayload, false)
     console.log(
-      'PASS purchase order switches vendor details and saves order pricing without supplier fields',
+      'PASS purchase order switches vendors and saves order pricing without duplicate supplier fields',
     )
     await open('/purchase-order/new', '구매발주서')
     await field('참조 구매요청', 'PURREQ-1')
@@ -769,7 +769,7 @@ async function main() {
       await evalJS(
         "[...document.querySelectorAll('main label')].find(l=>l.textContent.startsWith('수령 사업장')).querySelector('input').value",
       ),
-      'S1',
+      'S1(사업장)',
     )
     assert.equal(
       await evalJS(

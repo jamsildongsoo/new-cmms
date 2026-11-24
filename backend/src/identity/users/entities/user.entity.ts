@@ -39,8 +39,8 @@ export class User extends AuditEntity {
   @Column({ type: 'varchar', length: 30, nullable: true })
   siteId: string | null;
 
-  @Column({ type: 'varchar', length: 30 })
-  deptId: string;
+  @Column({ type: 'varchar', length: 30, nullable: true })
+  deptId: string | null;
 
   @Column({ type: 'varchar', length: 30 })
   accessScope: AccessScope;

@@ -82,6 +82,8 @@ async function main() {
       meCount: 0,
       metadataCount: 0,
       metadataStatus: 200,
+      refreshStatus: 401,
+      refreshCount: 0,
     }
     const user = (companyId) => ({
       companyId,
@@ -150,12 +152,24 @@ async function main() {
             user: user(payload.companyId),
           })
         }
+        if (route.endsWith('/auth/refresh')) {
+          fixture.refreshCount++
+          return reply(
+            session,
+            data,
+            fixture.refreshStatus,
+            fixture.refreshStatus === 200
+              ? { accessToken: 'token-A-refreshed' }
+              : { message: 'refresh expired' },
+          )
+        }
         if (route.endsWith('/auth/me')) {
           fixture.meCount++
           const token =
             Object.entries(data.request.headers).find(
               ([key]) => key.toLowerCase() === 'authorization',
             )?.[1] ?? ''
+          const status = token.endsWith('refreshed') ? 200 : fixture.status
           if (fixture.delay) {
             fixture.held.push({ session, data })
             return
@@ -163,8 +177,8 @@ async function main() {
           return reply(
             session,
             data,
-            fixture.status,
-            fixture.status === 200
+            status,
+            status === 200
               ? user(token.endsWith('B') ? 'B' : 'A')
               : { message: 'fixture error' },
           )
@@ -204,13 +218,13 @@ async function main() {
         () =>
           cdp.eval(
             session,
-            `location.pathname==='/login' && document.querySelectorAll('input').length===3`,
+            `location.pathname==='/login' && document.querySelectorAll('input[required]').length===3`,
           ),
         'login screen',
       )
       await cdp.eval(
         session,
-        `(() => {const inputs=[...document.querySelectorAll('input')]; const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set; [${JSON.stringify(companyId)},'owner','test-password'].forEach((value,index)=>{setter.call(inputs[index],value); inputs[index].dispatchEvent(new Event('input',{bubbles:true}))})})()`,
+        `(() => {const inputs=[...document.querySelectorAll('input[required]')]; const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set; [${JSON.stringify(companyId)},'owner','test-password'].forEach((value,index)=>{setter.call(inputs[index],value); inputs[index].dispatchEvent(new Event('input',{bubbles:true}))})})()`,
       )
       await click(session, '로그인')
       await until(
@@ -365,7 +379,17 @@ async function main() {
       'cross-tab logout',
     )
     console.log('PASS storage events synchronize logout between tabs')
+    await login(first, 'A')
     fixture.status = 401
+    fixture.refreshStatus = 200
+    await cdp.eval(first, `window.dispatchEvent(new Event('focus'))`)
+    await until(
+      () => cdp.eval(first, `localStorage.getItem('cmms.accessToken')==='token-A-refreshed'`),
+      'access token refresh',
+    )
+    assert.equal(await cdp.eval(first, `location.pathname !== '/login'`), true)
+    console.log('PASS expired access token refreshes without logout')
+    fixture.refreshStatus = 401
     await cdp.eval(first, `localStorage.setItem('cmms.accessToken','token-A')`)
     await cdp.send('Page.reload', {}, first)
     await until(
@@ -379,6 +403,31 @@ async function main() {
     console.log(
       'PASS current-token 401 clears both token and protected context',
     )
+    assert.equal(
+      await cdp.eval(first, "document.querySelector('h1').parentElement.contains(document.querySelector('form')) && !document.querySelector('form').contains(document.querySelector('h1'))"),
+      true,
+    )
+    fixture.status = 200
+    await cdp.eval(first, "document.querySelector('input[type=checkbox]').click()")
+    await login(first, 'A')
+    assert.deepEqual(
+      await cdp.eval(first, "JSON.parse(localStorage.getItem('cmms.rememberedLogin'))"),
+      { companyId: 'A', userId: 'owner' },
+    )
+    await cdp.eval(first, "localStorage.removeItem('cmms.accessToken')")
+    await cdp.send('Page.navigate', { url: origin + '/login' }, first)
+    await until(
+      () => cdp.eval(first, "location.pathname==='/login' && document.querySelectorAll('input[required]').length===3"),
+      'remembered login screen',
+    )
+    assert.deepEqual(
+      await cdp.eval(first, "[...document.querySelectorAll('input[required]')].map(input => input.value)"),
+      ['A', 'owner', ''],
+    )
+    assert.equal(await cdp.eval(first, "document.querySelector('input[type=checkbox]').checked"), true)
+    await cdp.eval(first, "document.querySelector('input[type=checkbox]').click()")
+    assert.equal(await cdp.eval(first, "localStorage.getItem('cmms.rememberedLogin')"), null)
+    console.log('PASS remembered company/user IDs restore without a password and can be cleared')
     await cdp.send('Browser.close')
     socket.close()
   } finally {

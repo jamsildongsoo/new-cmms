@@ -113,7 +113,7 @@ export function AccountPanel({
     ['사용자 ID', profile.userId],
     ['회사', profile.companyName || profile.companyId],
     ['사업장', profile.siteName || profile.siteId || '-'],
-    ['부서', profile.deptName || profile.deptId],
+    ['부서', profile.deptName || profile.deptId || '-'],
     ['직책', profile.title || '-'],
     ['직위', profile.position || '-'],
     ['역할', profile.roleName || profile.roleId],

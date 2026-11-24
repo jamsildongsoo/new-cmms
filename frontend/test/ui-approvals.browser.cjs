@@ -271,6 +271,16 @@ async function main() {
           return json(
             users.filter((user) => user.userId === url.searchParams.get('q')),
           )
+        if (route === '/directory/users') {
+          const term = (url.searchParams.get('q') || '').toLowerCase()
+          const candidates = [
+            ...users,
+            { userId: 'owner2', userName: '홍작성', deptId: 'D2', deptName: '안전팀', title: '대리', position: '' },
+          ]
+          return json(candidates.filter((user) =>
+            [user.userId, user.userName].some((value) => value.toLowerCase().includes(term)),
+          ).slice(0, 10))
+        }
         if (route.startsWith('/approvals/users/'))
           return json(
             users.find((user) => user.userId === route.split('/').at(-1)),
@@ -296,13 +306,10 @@ async function main() {
           listCalls++
           listRequests.push(Object.fromEntries(url.searchParams))
           const search = (url.searchParams.get('search') || '').toLowerCase()
-          const status = url.searchParams.get('status')
+          const searchType = url.searchParams.get('searchType') || 'title'
           const rows = (listRowsOverride ?? (saved ? [saved] : [])).filter(
             (row) =>
-              (!status || row.status === status) &&
-              [row.approvalId, row.documentNo, row.title, row.submitterId].some(
-                (value) => String(value).toLowerCase().includes(search),
-              ),
+              String(row[searchType]).toLowerCase().includes(search),
           )
           const page = Number(url.searchParams.get('page') || 1),
             limit = Number(url.searchParams.get('limit') || 20)
@@ -337,19 +344,22 @@ async function main() {
             departments: [{ value: 'D1', label: '설비팀' }],
             types: [{ value: 'PUMP', label: '펌프' }],
           })
+        if (route === '/equipment' && req.method === 'GET')
+          return json({ items: savedEquipment ? [savedEquipment] : [], total: savedEquipment ? 1 : 0, page: 1, limit: 20 })
         if (route === '/equipment/tree')
           return json(savedEquipment ? [savedEquipment] : [])
         if (route === '/equipment/EQ-FORM' && req.method === 'GET')
           return json(savedEquipment)
         if (route === '/preventive-maintenance' && req.method === 'GET') {
           const search = (url.searchParams.get('search') || '').toLowerCase(),
+            searchType = url.searchParams.get('searchType'),
             page = Number(url.searchParams.get('page') || 1)
           const rows = Array.from({ length: 21 }, (_, index) => ({
             ...savedPm,
             pmId: `PM-LIST-${index + 1}`,
             title: `목록 점검 ${index + 1}`,
           })).filter((row) =>
-            [row.pmId, row.documentNo, row.title, row.equipmentId].some(
+            (searchType ? [row[searchType]] : [row.pmId, row.documentNo, row.title, row.equipmentId]).some(
               (value) => String(value).toLowerCase().includes(search),
             ),
           )
@@ -362,6 +372,7 @@ async function main() {
         }
         if (route === '/preventive-maintenance/options')
           return json({
+            sites: [{ value: 'S1', label: '서울사업장' }],
             departments: [
               { value: 'D1', label: '설비팀' },
               { value: 'D2', label: '안전팀' },
@@ -410,10 +421,17 @@ async function main() {
         }
         if (route === '/work-permit/options')
           return json({
+            sites: [{ value: 'S1', label: '서울사업장' }],
+            departments: [{ value: 'D1', label: '설비팀' }],
             names: { GENERAL: '일반' },
             templates: [],
             documents: [],
             users: [{ value: 'A', label: '김결재' }],
+          })
+        if (route === '/work-permit-request/options')
+          return json({
+            sites: [{ value: 'S1', label: '서울사업장' }],
+            departments: [{ value: 'D1', label: '설비팀' }],
           })
         if (
           route === '/work-permit/PERMIT-HISTORY' ||
@@ -506,6 +524,9 @@ async function main() {
           })
         if (route === '/work-request/options')
           return json({
+            sites: [{ value: 'S1', label: '서울사업장' }],
+            departments: [{ value: 'D1', label: '설비팀' }],
+            users: [{ value: 'owner', label: '홍작성' }],
             equipment: [],
             siteId: 'S1',
             deptId: 'D1',
@@ -747,9 +768,15 @@ async function main() {
     )
     assert.deepEqual(
       await evaluate(
-        "[...document.querySelector('#approval-form').children[1].children].slice(0,3).map(e=>e.tagName)",
+        "[...document.querySelector('#approval-form > div.grid.grid-cols-12').children].map(e=>e.className.includes('col-span-6'))",
       ),
-      ['LABEL', 'FIELDSET', 'DIV'],
+      [true, true],
+    )
+    assert.equal(
+      await evaluate(
+        "document.querySelector('#approval-form > div.grid.grid-cols-12 > div > div').classList.contains('grid-cols-2')",
+      ),
+      true,
     )
     assert.equal(
       await evaluate(
@@ -926,20 +953,32 @@ async function main() {
       'PASS work-permit approval line is editable independently of issuer/approver fields',
     )
     await navigate('/approvals?box=submit', '검색 결과 1건')
+    const listScreenshot = await cdp.send(
+      'Page.captureScreenshot',
+      { format: 'png', captureBeyondViewport: true },
+      sessionId,
+    )
+    await fs.writeFile(
+      '/tmp/cmms-approval-list.png',
+      Buffer.from(listScreenshot.data, 'base64'),
+    )
     const count = listCalls
     await click('상신함')
     await wait(100)
     assert.equal(listCalls, count)
     await input(
-      'input[placeholder="문서번호, 관리번호, 제목, 상신자"]',
+      'input[placeholder="검색어 입력"]',
       '설비팀-2026-015',
     )
+    await input('form select', 'documentNo', true)
     await click('검색')
     await until(
       () => evaluate("document.body.textContent.includes('검색 결과 1건')"),
       'server search result',
     )
     assert.ok(listCalls > count)
+    assert.equal(listRequests.at(-1).searchType, 'documentNo')
+    assert.equal('status' in listRequests.at(-1), false)
     assert.equal(
       await evaluate(
         "[...document.querySelectorAll('section button')].some(button => button.textContent.trim() === '인쇄')",
@@ -947,7 +986,7 @@ async function main() {
       false,
     )
     await input(
-      'input[placeholder="문서번호, 관리번호, 제목, 상신자"]',
+      'input[placeholder="검색어 입력"]',
       '없는번호',
     )
     await click('검색')
@@ -960,6 +999,28 @@ async function main() {
       () => evaluate("document.body.textContent.includes('검색 결과 1건')"),
       'filter reset',
     )
+    await input('form select', 'submitterId', true)
+    await input('input[aria-label="작성자 검색"]', '홍작')
+    await until(
+      () => evaluate("document.querySelectorAll('[role=listbox] [role=option]').length === 2"),
+      'same-name author candidates',
+    )
+    assert.equal(
+      await evaluate("document.querySelector('[role=listbox]').textContent.includes('안전팀')"),
+      true,
+    )
+    await evaluate("document.querySelector('[role=listbox] [role=option]').click()")
+    assert.equal(await evaluate("document.querySelector('input[role=combobox]').value"), 'owner')
+    await click('검색')
+    await until(() => listRequests.at(-1).searchType === 'submitterId', 'author search request')
+    assert.equal(listRequests.at(-1).search, 'owner')
+    await until(() => evaluate("document.body.textContent.includes('검색 결과 1건')"), 'author search result')
+    const authorRequests = listRequests.length
+    await input('input[aria-label="작성자 검색"]', 'owner')
+    await click('검색')
+    await until(() => listRequests.length > authorRequests, 'direct author ID search')
+    assert.equal(listRequests.at(-1).search, 'owner')
+    await click('초기화')
     assert.equal(
       await evaluate(
         "[...document.querySelectorAll('[role=columnheader]')].filter(c=>c.textContent.includes('번호')).length",
@@ -1077,6 +1138,14 @@ async function main() {
     console.log(
       'PASS equipment dates, integer cycles and fixed unit selections save canonical API values',
     )
+    await navigate('/equipment', '설비 마스터')
+    assert.deepEqual(
+      await evaluate("[...document.querySelectorAll('[role=columnheader]')].map(node => node.textContent.trim())"),
+      ['설비번호', '설비명', '설비유형', '사업장', '담당부서', '제조사', '모델', '설치일', '점검일', '다음점검일'],
+    )
+    assert.equal(await evaluate("[...document.querySelectorAll('main button')].some(button => button.textContent.trim()==='트리')"), false)
+    assert.equal(await evaluate("document.querySelector('select[aria-label=\"사업장 필터\"]') !== null"), true)
+    console.log('PASS equipment list uses the requested columns and no tree view')
     await navigate('/preventive-maintenance/new', '예방점검')
     await until(
       () =>
@@ -1142,7 +1211,7 @@ async function main() {
       await evaluate(
         "document.querySelectorAll('main select,main input[type=date]').length",
       ),
-      0,
+      1,
     )
     await click('다음')
     await until(
@@ -1152,6 +1221,7 @@ async function main() {
         ),
       'PM second page',
     )
+    await input('select[aria-label="예방점검 검색 기준"]', 'pmId', true)
     await input('input[aria-label="예방점검 검색"]', 'PM-LIST-21')
     await click('검색')
     await until(
@@ -1253,7 +1323,7 @@ async function main() {
     const requestPrintText = await evaluate(
       "(() => { [...document.querySelectorAll('main button')].find(button => button.textContent.trim() === '인쇄').click(); return [...document.querySelectorAll('iframe')].at(-1).contentDocument.body.textContent })()",
     )
-    assert.ok(requestPrintText.includes('연락처'))
+    assert.equal(requestPrintText.includes('연락처'), false)
     assert.equal(requestPrintText.includes('phoneNumber'), false)
     assert.equal(requestPrintText.includes('applicationDate'), false)
     console.log(
@@ -1295,7 +1365,7 @@ async function main() {
     )
     assert.equal(
       await evaluate(
-        "document.querySelector('.document-meta').textContent.includes('저장 시 자동 생성')",
+        "document.querySelector('main').textContent.includes('저장 시 자동 생성')",
       ),
       true,
     )

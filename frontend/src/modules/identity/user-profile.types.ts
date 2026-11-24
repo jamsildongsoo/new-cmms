@@ -5,7 +5,7 @@ export interface UserProfile {
   name: string
   siteId: string | null
   siteName: string | null
-  deptId: string
+  deptId: string | null
   deptName: string | null
   roleId: string
   roleName: string | null

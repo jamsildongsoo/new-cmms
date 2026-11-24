@@ -1,6 +1,6 @@
 import { Pagination } from '@/shared/ui/Pagination'
 // 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
-import { SearchActions } from '@/shared/ui/SearchActions'
+import { TypedSearchForm } from '@/shared/ui/TypedSearchForm'
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/modules/auth'
@@ -8,8 +8,6 @@ import { toMessage } from '@/shared/api/errors'
 import { printDocument } from '@/shared/lib/print'
 import { Button } from '@/shared/ui/Button'
 import { DataTable } from '@/shared/ui/DataTable'
-import { Input } from '@/shared/ui/Input'
-import { Select } from '@/shared/ui/Select'
 import {
   getMaterialList,
   type Material,
@@ -100,34 +98,14 @@ export function MaterialListPage() {
           </Button>
         </div>
       </div>
-      <form
-        onReset={() => {
-          setSearchType('name')
-          setSearchVal('')
-          changeQuery({ page: 1 })
-        }}
-        onSubmit={search}
-        className="search-form"
-      >
-        <Select
-          aria-label="검색 기준"
-          value={searchType}
-          onChange={(e) =>
-            setSearchType(e.target.value as typeof searchType)
-          }
-        >
-          <option value="name">자재명</option>
-          <option value="materialId">자재번호</option>
-          <option value="typeCode">자재 유형</option>
-        </Select>
-        <Input
-          aria-label="검색어"
-          value={searchVal}
-          maxLength={200}
-          onChange={(e) => setSearchVal(e.target.value)}
-        />
-        <SearchActions loading={loading} />
-      </form>
+      <TypedSearchForm
+        options={[{ value: 'name', label: '자재명' }, { value: 'materialId', label: '자재번호' },
+          { value: 'typeCode', label: '자재유형' }]}
+        searchType={searchType} onSearchTypeChange={(value) => setSearchType(value as typeof searchType)}
+        search={searchVal} onSearchChange={setSearchVal} referenceLookup={false}
+        loading={loading} onSubmit={search}
+        onReset={() => { setSearchType('name'); setSearchVal(''); changeQuery({ page: 1 }) }}
+      />
       {error && (
         <p role="alert" className="text-xs text-red-700">
           {error}

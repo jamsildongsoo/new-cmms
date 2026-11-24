@@ -5,7 +5,7 @@ export interface UserContext {
   userId: string;
   roleId: string;
   siteId: string | null;
-  deptId: string;
+  deptId: string | null;
   accessScope: AccessScope;
   permissions: readonly string[];
 }

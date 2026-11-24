@@ -1,18 +1,19 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { toMessage } from '@/shared/api/errors'
-import { useStatusLabels } from '@/shared/metadata/metadata'
 import { Button } from '@/shared/ui/Button'
 import { DataTable } from '@/shared/ui/DataTable'
 import { DocumentNumber } from '@/shared/ui/DocumentIdField'
 import { Input } from '@/shared/ui/Input'
 import { Select } from '@/shared/ui/Select'
 import { StatusBadge } from '@/shared/ui/StatusBadge'
+import { UserLookupInput } from '@/shared/lookup/UserLookupInput'
 import {
   getApprovalBox,
   type ApprovalListItem,
   type ApprovalPage,
   type ApprovalBox,
+  type ApprovalSearchType,
 } from './approvals.api'
 import { formatDate } from './approvalForm'
 
@@ -23,11 +24,13 @@ const boxes: { key: ApprovalBox; label: string }[] = [
   { key: 'closed', label: '종결함' },
   { key: 'reference', label: '참조함' },
 ]
-const emptyFilter = { search: '', status: '' }
+const emptyFilter: { search: string; searchType: ApprovalSearchType } = {
+  search: '',
+  searchType: 'title',
+}
 const pageSize = 20
 
 export function ApprovalListPage() {
-  const documentStatusLabels = useStatusLabels()
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
   const activeBox =
@@ -51,7 +54,7 @@ export function ApprovalListPage() {
       page,
       limit: pageSize,
       search: query.search || undefined,
-      status: query.status || undefined,
+      searchType: query.search ? query.searchType : undefined,
     })
       .then((data) => {
         if (active) {
@@ -125,42 +128,49 @@ export function ApprovalListPage() {
         ))}
       </nav>
       <form
-        className="flex flex-wrap items-end gap-3 rounded-lg border border-slate-200 bg-white p-4"
+        className="grid grid-cols-1 items-end gap-3 rounded-lg border border-slate-200 bg-white p-4 lg:grid-cols-12"
         onSubmit={(event) => {
           event.preventDefault()
           setQuery({ ...filter })
           setPage(1)
         }}
       >
-        <label className="min-w-40 space-y-1.5">
-          <span className="block text-sm font-medium text-slate-700">상태</span>
+        <label className="min-w-0 space-y-1.5 lg:col-span-2">
+          <span className="block text-sm font-medium text-slate-700">유형</span>
           <Select
-            value={filter.status}
+            value={filter.searchType}
             onChange={(event) =>
-              setFilter((value) => ({ ...value, status: event.target.value }))
+              setFilter((value) => ({ ...value, searchType: event.target.value as ApprovalSearchType }))
             }
           >
-            <option value="">전체 상태</option>
-            {Object.entries(documentStatusLabels).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
+            <option value="approvalId">문서번호</option>
+            <option value="documentNo">관리번호</option>
+            <option value="title">제목</option>
+            <option value="submitterId">작성자</option>
           </Select>
         </label>
-        <label className="min-w-48 flex-1 space-y-1.5">
+        <label className="min-w-0 space-y-1.5 lg:col-span-8">
           <span className="block text-sm font-medium text-slate-700">
             검색어
           </span>
-          <Input
-            value={filter.search}
-            onChange={(event) =>
-              setFilter((value) => ({ ...value, search: event.target.value }))
-            }
-            placeholder="문서번호, 관리번호, 제목, 상신자"
-          />
+          {filter.searchType === 'submitterId' ? (
+            <UserLookupInput
+              value={filter.search}
+              onChange={(search) => setFilter((value) => ({ ...value, search }))}
+              onSelect={(user) => setFilter((value) => ({ ...value, search: user.userId }))}
+            />
+          ) : (
+            <Input
+              value={filter.search}
+              type="text"
+              onChange={(event) =>
+                setFilter((value) => ({ ...value, search: event.target.value }))
+              }
+              placeholder="검색어 입력"
+            />
+          )}
         </label>
-        <div className="page-actions">
+        <div className="page-actions lg:col-span-2">
           <Button type="button" variant="secondary" onClick={reset}>
             초기화
           </Button>

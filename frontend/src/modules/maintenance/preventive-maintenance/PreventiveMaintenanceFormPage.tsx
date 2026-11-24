@@ -23,6 +23,7 @@ import {
 } from './preventiveMaintenance.api'
 import { printDocument } from '@/shared/lib/print'
 import { useUnsavedChanges } from '@/shared/hooks/useUnsavedChanges'
+import { codeName } from '@/shared/lib/codeName'
 import { toPreventiveMaintenanceDraft } from './approvalDraft'
 import { calculateNextInspectionDate } from './inspectionDate'
 import { Button } from '@/shared/ui/Button'
@@ -113,6 +114,7 @@ function PMEditor({ mode, id }: { mode: FormMode; id?: string }) {
   const pmId = document?.pmId ?? id
   const [form, setForm] = useState<FormState>(emptyForm)
   const [options, setOptions] = useState<PMOptions>({
+    sites: [],
     departments: [],
     users: [],
     equipment: [],
@@ -280,7 +282,7 @@ function PMEditor({ mode, id }: { mode: FormMode; id?: string }) {
         e.preventDefault()
         void save(false)
       }}
-      className="space-y-3 rounded-lg border border-slate-200 bg-white p-4 md:p-5"
+      className="document-form space-y-3 rounded-lg border border-slate-200 bg-white p-4 md:p-5"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="flex items-center gap-2 text-lg font-semibold text-slate-900">
@@ -371,13 +373,27 @@ function PMEditor({ mode, id }: { mode: FormMode; id?: string }) {
           )}
         </div>
       </div>
-      <DocumentIdField
-        value={document?.pmId}
-        documentNo={form.documentNo}
-        onDocumentNoChange={(value) => setField('documentNo', value)}
-        disabled={disabled}
-        readOnly={readOnly}
-      />
+      <div className="grid grid-cols-12 gap-3">
+        <div className="col-span-6 min-w-0">
+          <DocumentIdField
+            gridLayout
+            value={document?.pmId}
+            documentNo={form.documentNo}
+            onDocumentNoChange={(value) => setField('documentNo', value)}
+            disabled={disabled}
+            readOnly={readOnly}
+          />
+        </div>
+        <Field label="점검명" required className="col-span-6 min-w-0">
+          <Input
+            value={form.title}
+            required
+            maxLength={200}
+            disabled={disabled}
+            onChange={(e) => setField('title', e.target.value)}
+          />
+        </Field>
+      </div>
       {isLoading && (
         <div className="text-xs text-slate-500">불러오는 중…</div>
       )}
@@ -389,25 +405,16 @@ function PMEditor({ mode, id }: { mode: FormMode; id?: string }) {
           {error}
         </div>
       )}
-      <div className="grid gap-3 md:grid-cols-2">
-        <Field label="사업장">
+      <div className="grid grid-cols-12 gap-3">
+        <Field label="사업장" className="col-span-3 min-w-0 order-2">
           <Input
             readOnly
-            value={
-              document ? (document.siteId ?? '') : (user?.siteId ?? '')
-            }
+            value={codeName(document ? document.siteId : user?.siteId,
+              options.sites.find((site) => site.value === (document ? document.siteId : user?.siteId))?.label)}
           />
         </Field>
-        <Field label="점검명" required>
-          <Input
-            value={form.title}
-            required
-            maxLength={200}
-            disabled={disabled}
-            onChange={(e) => setField('title', e.target.value)}
-          />
-        </Field>
-        <Field label="대상 설비" required>
+        <div className="order-3 col-span-3" aria-hidden="true" />
+        <Field label="대상 설비" required className="col-span-6 min-w-0 order-1">
           <Select
             value={form.equipmentId}
             required
@@ -418,12 +425,12 @@ function PMEditor({ mode, id }: { mode: FormMode; id?: string }) {
 
             {options.equipment.map((r) => (
               <option key={r.equipmentId} value={r.equipmentId}>
-                {r.name} ({r.equipmentId})
+                {codeName(r.equipmentId, r.name)}
               </option>
             ))}
           </Select>
         </Field>
-        <Field label="점검 유형">
+        <Field label="점검 유형" className="col-span-3 min-w-0 order-6">
           <Select
             value={form.typeCode}
             disabled={disabled}
@@ -433,12 +440,12 @@ function PMEditor({ mode, id }: { mode: FormMode; id?: string }) {
 
             {options.types.map((r) => (
               <option key={r.value} value={r.value}>
-                {r.label}
+                {codeName(r.value, r.label)}
               </option>
             ))}
           </Select>
         </Field>
-        <Field label="판정">
+        <Field label="판정" className="col-span-3 min-w-0 order-7">
           <Select
             value={form.result}
             disabled={disabled}
@@ -456,6 +463,7 @@ function PMEditor({ mode, id }: { mode: FormMode; id?: string }) {
             <Field
               key={key}
               label={key === 'deptId' ? '점검부서' : '점검자'}
+              className={`col-span-3 min-w-0 ${key === 'deptId' ? 'order-4' : 'order-5'}`}
             >
               <Select
                 value={form[key]}
@@ -466,21 +474,21 @@ function PMEditor({ mode, id }: { mode: FormMode; id?: string }) {
 
                 {choices.map((r) => (
                   <option key={r.value} value={r.value}>
-                    {r.label}
+                  {codeName(r.value, r.label)}
                   </option>
                 ))}
               </Select>
             </Field>
           )
         })}
-        <Field label="점검 주기">
+        <Field label="점검 주기" className="col-span-3 min-w-0 order-10">
           <Input
             value={equipment?.inspectionPeriod ?? ''}
             readOnly
             aria-label="설비 점검 주기"
           />
         </Field>
-        <Field label="주기 단위">
+        <Field label="주기 단위" className="col-span-3 min-w-0 order-11">
           <Input
             value={
               inspectionUnits.find(
@@ -493,7 +501,7 @@ function PMEditor({ mode, id }: { mode: FormMode; id?: string }) {
             aria-label="설비 점검 주기 단위"
           />
         </Field>
-        <Field label="점검일" required>
+        <Field label="점검일" required className="col-span-3 min-w-0 order-8">
           <Input
             type="date"
             value={form.inspectionDate}
@@ -502,7 +510,7 @@ function PMEditor({ mode, id }: { mode: FormMode; id?: string }) {
             onChange={(e) => setField('inspectionDate', e.target.value)}
           />
         </Field>
-        <Field label="다음 점검일">
+        <Field label="다음 점검일" className="col-span-3 min-w-0 order-9">
           <Input
             type="date"
             value={form.nextInspectionDate}
@@ -524,6 +532,14 @@ function PMEditor({ mode, id }: { mode: FormMode; id?: string }) {
           disabled={disabled}
           rows={3}
           onChange={(e) => setField('content', e.target.value)}
+        />
+      </Field>
+      <Field label="비고">
+        <Textarea
+          value={form.note}
+          disabled={disabled}
+          rows={2}
+          onChange={(e) => setField('note', e.target.value)}
         />
       </Field>
       <section className="space-y-2">
@@ -642,14 +658,6 @@ function PMEditor({ mode, id }: { mode: FormMode; id?: string }) {
           </table>
         </div>
       </section>
-      <Field label="비고">
-        <Textarea
-          value={form.note}
-          disabled={disabled}
-          rows={2}
-          onChange={(e) => setField('note', e.target.value)}
-        />
-      </Field>
       <AttachmentManager
         attachmentId={form.attachmentId}
         refModule="PMAINT"

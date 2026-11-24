@@ -22,6 +22,9 @@ export interface WorkRequest extends WorkRequestPayload, AuditFields {
   deleteYn: string
 }
 export interface WorkRequestOptions {
+  sites: { value: string; label: string }[]
+  departments: { value: string; label: string }[]
+  users: { value: string; label: string }[]
   equipment: { value: string; label: string }[]
   siteId: string | null
   deptId: string | null
@@ -37,6 +40,7 @@ export interface RelatedPlan {
 export interface WorkRequestSearch {
   page?: number
   search?: string
+  searchType?: 'id' | 'documentNo' | 'title' | 'equipmentId' | 'createdBy'
 }
 export type WorkRequestListItem = Pick<
   WorkRequest,

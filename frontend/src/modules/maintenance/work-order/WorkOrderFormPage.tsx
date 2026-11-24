@@ -18,6 +18,7 @@ import {
 import { useAuth } from '@/modules/auth'
 import { toMessage } from '@/shared/api/errors'
 import { useUnsavedChanges } from '@/shared/hooks/useUnsavedChanges'
+import { codeName } from '@/shared/lib/codeName'
 import { printDocument } from '@/shared/lib/print'
 import type { FormMode } from '@/shared/types/form'
 import { Button } from '@/shared/ui/Button'
@@ -128,6 +129,8 @@ function WorkOrderEditor({
   const [form, setForm] = useState<WorkOrderForm>(emptyForm)
   const [baseline, setBaseline] = useState(JSON.stringify(emptyForm))
   const [options, setOptions] = useState<WorkOrderOptions>({
+    sites: [],
+    departments: [],
     equipment: [],
     types: [],
     units: [],
@@ -222,13 +225,16 @@ function WorkOrderEditor({
     form.orderKind === 'PLAN'
       ? options.requests.map((r) => ({
           value: r.workRequestId,
-          label: `${r.workRequestId} / ${r.documentNo ? `${r.documentNo} / ` : ''}${r.title}`,
+          label: r.workRequestId,
         }))
       : options.plans.map((p) => ({
           value: p.workOrderId,
-          label: `${p.workOrderId} / ${p.documentNo ? `${p.documentNo} / ` : ''}${p.title}`,
+          label: p.workOrderId,
         }))
   const referenceLabel = form.orderKind === 'PLAN' ? '참조 의뢰서' : '참조 계획'
+  const referenceTitle = form.orderKind === 'PLAN'
+    ? options.requests.find((r) => r.workRequestId === form.refId)?.title
+    : options.plans.find((p) => p.workOrderId === form.refId)?.title
   const labels = {
     equipment: options.equipment.find((e) => e.value === form.equipmentId)
       ?.label,
@@ -343,7 +349,7 @@ function WorkOrderEditor({
         e.preventDefault()
         void save(false)
       }}
-      className="space-y-4 rounded-lg border border-slate-200 bg-white p-4 md:p-5"
+      className="document-form space-y-4 rounded-lg border border-slate-200 bg-white p-4 md:p-5"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="flex items-center gap-2 text-lg font-semibold">
@@ -397,13 +403,15 @@ function WorkOrderEditor({
           )}
         </div>
       </div>
-      <DocumentIdField
-        value={document?.workOrderId}
-        documentNo={form.documentNo}
-        onDocumentNoChange={(value) => update('documentNo', value)}
-        disabled={disabled}
-        readOnly={readOnly}
-      />
+      <div className="grid grid-cols-12 gap-3">
+        <div className="col-span-6 min-w-0"><DocumentIdField gridLayout value={document?.workOrderId}
+          documentNo={form.documentNo} onDocumentNoChange={(value) => update('documentNo', value)}
+          disabled={disabled} readOnly={readOnly} /></div>
+        <Field label="작업명" required className="col-span-6 min-w-0">
+          <Input maxLength={200} required value={form.title} disabled={disabled}
+            onChange={(e) => update('title', e.target.value)} />
+        </Field>
+      </div>
       {loading && <p className="text-xs text-slate-500">불러오는 중…</p>}
       {error && (
         <div
@@ -413,8 +421,8 @@ function WorkOrderEditor({
           {error}
         </div>
       )}
-      <div className="grid gap-3 md:grid-cols-2">
-        <Field label="계획/실적" required>
+      <div className="grid grid-cols-12 gap-3">
+        <Field label="계획/실적" required className="order-5 col-span-3 min-w-0">
           <Select
             required
             disabled={disabled || !isNew}
@@ -425,16 +433,7 @@ function WorkOrderEditor({
             <option value="ACTUAL">실적</option>
           </Select>
         </Field>
-        <Field label="작업명" required>
-          <Input
-            maxLength={200}
-            required
-            value={form.title}
-            disabled={disabled}
-            onChange={(e) => update('title', e.target.value)}
-          />
-        </Field>
-        <Field label="대상 설비" required>
+        <Field label="대상 설비" required className="order-1 col-span-6 min-w-0">
           <Select
             required
             value={form.equipmentId}
@@ -445,12 +444,12 @@ function WorkOrderEditor({
 
             {options.equipment.map((e) => (
               <option key={e.value} value={e.value}>
-                {e.label} ({e.value})
+                {codeName(e.value, e.label)}
               </option>
             ))}
           </Select>
         </Field>
-        <Field label="작업일" required>
+        <Field label="작업일" required className="order-7 col-span-3 min-w-0">
           <Input
             type="date"
             required
@@ -459,7 +458,7 @@ function WorkOrderEditor({
             onChange={(e) => update('workDate', e.target.value)}
           />
         </Field>
-        <Field label="작업유형">
+        <Field label="작업유형" className="order-6 col-span-3 min-w-0">
           <Select
             value={form.typeCode}
             disabled={disabled}
@@ -469,12 +468,12 @@ function WorkOrderEditor({
 
             {options.types.map((e) => (
               <option key={e.value} value={e.value}>
-                {e.label}
+                {codeName(e.value, e.label)}
               </option>
             ))}
           </Select>
         </Field>
-        <Field label={referenceLabel}>
+        <Field label="참조 문서번호" className="order-10 col-span-4 min-w-0">
           <Select
             value={form.refId}
             disabled={disabled}
@@ -489,17 +488,26 @@ function WorkOrderEditor({
             ))}
           </Select>
         </Field>
-        <Field label="사업장">
+        <Field label="참조 문서명" className="order-11 col-span-6 min-w-0">
+          <Input readOnly value={referenceTitle ?? referenceDocument?.title ?? ''} />
+        </Field>
+        <Field label="사업장" className="order-2 col-span-3 min-w-0">
           <Input
             disabled
-            value={(document ? document.siteId : options.siteId) || ''}
+            value={codeName(document ? document.siteId : options.siteId,
+              options.sites.find((r) => r.value === (document ? document.siteId : options.siteId))?.label)}
           />
         </Field>
-        <Field label="부서">
+        <div className="order-3 col-span-3" aria-hidden="true" />
+        <Field label="부서" className="order-4 col-span-3 min-w-0">
           <Input
             disabled
-            value={(document ? document.deptId : options.deptId) || ''}
+            value={codeName(document ? document.deptId : options.deptId,
+              options.departments.find((r) => r.value === (document ? document.deptId : options.deptId))?.label)}
           />
+        </Field>
+        <Field label="참조 문서 유형" className="order-9 col-span-2 min-w-0">
+          <Input readOnly value={form.orderKind === 'PLAN' ? '작업의뢰' : '계획 작업오더'} />
         </Field>
       </div>
       {form.refModule && form.refId && (
@@ -540,13 +548,6 @@ function WorkOrderEditor({
           onChange={(e) => update('content', e.target.value)}
         />
       </Field>
-      <WorkOrderDetails
-        units={options.units}
-        form={form}
-        setForm={setForm}
-        readOnly={readOnly}
-        disabled={disabled}
-      />
       <Field label="비고">
         <Textarea
           rows={2}
@@ -555,6 +556,13 @@ function WorkOrderEditor({
           onChange={(e) => update('note', e.target.value)}
         />
       </Field>
+      <WorkOrderDetails
+        units={options.units}
+        form={form}
+        setForm={setForm}
+        readOnly={readOnly}
+        disabled={disabled}
+      />
       <AttachmentManager
         attachmentId={form.attachmentId}
         refModule="WRKORD"

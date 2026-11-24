@@ -13,6 +13,7 @@ import { ApprovalsController } from './approvals.controller';
 import { ApprovalsService } from './approvals.service';
 import { ApprovalStep } from './entities/approval-step.entity';
 import { Approval } from './entities/approval.entity';
+import { DirectoryModule } from '../common/directory/directory.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { Approval } from './entities/approval.entity';
     WorkPermitRequestModule,
     WorkPermitModule,
     WorkRequestModule,
+    DirectoryModule,
     TypeOrmModule.forFeature([Approval, ApprovalStep, User, Department]),
   ],
   controllers: [ApprovalsController],

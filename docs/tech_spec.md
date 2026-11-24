@@ -4,7 +4,7 @@
 
 ## 1. 구성
 
-브라우저 React SPA → Nginx → NestJS → 외부 PostgreSQL 구조다. Nginx는 Vite 정적 빌드와 `/api` 프록시를 제공하고 NestJS는 서버 업로드 디렉터리를 사용한다. DB 컨테이너와 브라우저 직접 DB 연결은 없다.
+브라우저 React SPA → Nginx → NestJS → 같은 호스트의 PostgreSQL 컨테이너 구조다. Nginx는 Vite 정적 빌드와 `/api` 프록시를 제공하고 NestJS는 호스트 업로드 디렉터리를 사용한다. 브라우저 직접 DB 연결은 없다.
 
 | 경로 | 책임 |
 |---|---|
@@ -17,8 +17,8 @@
 | backend/src/purchase, inventory | 구매·거래처·자재·재고·월 마감 |
 | backend/src/approvals, attachments, boards | 결재·로컬 파일·게시글/댓글 |
 | backend/src/numbering | 문서번호·저장·첨부 연결 |
-| backend/src/bootstrap | 회사·관리자·실제 Controller 권한 초기화 |
-| compose.yaml, deploy/nginx | 외부 DB 연결·TLS·업로드 지속성·프록시 |
+| backend/src/bootstrap, backend/src/database | 초기 회사·관리자와 DB migration |
+| compose.yaml, nginx, postgres/init | 서비스·DB 계정·업로드 지속성·프록시 |
 
 Controller는 인증·RBAC·DTO 경계, Service는 회사·scope·owner·상태·업무 조건을 담당한다. 프런트 Context와 버튼 숨김은 서버 접근 검사를 대체하지 않는다.
 
@@ -38,9 +38,9 @@ Controller는 인증·RBAC·DTO 경계, Service는 회사·scope·owner·상태�
 - React는 index.html→main.tsx→BrowserRouter/AuthProvider→RequireAuth→AppLayout 순으로 시작한다. useAuth는 useContext를 사용하고 업무 폼은 화면별 useState로 관리한다.
 - localStorage에는 access token만 저장한다. 사용자·권한은 로그인 또는 `/auth/me` 응답을 메모리에 보관하며 JWT를 브라우저에서 해석해 권한으로 사용하지 않는다.
 - 최초 복원 중에는 업무 화면을 가리고, 재인증 후 원래 경로·검색·해시로 이동한다. 통신 장애는 토큰을 보존하며 재시도를 제공한다.
-- 현재 토큰의 401은 토큰·Context를 해제하고 403은 세션을 유지한다. 이전 토큰의 늦은 401과 오래된 `/me` 응답은 새 세션을 덮어쓰지 않는다.
+- 현재 토큰의 401은 refresh를 한 번 시도하고, refresh가 거부되면 토큰·Context를 해제한다. 403은 세션을 유지한다. 이전 토큰의 늦은 401과 오래된 `/me` 응답은 새 세션을 덮어쓰지 않는다.
 - storage 이벤트와 focus/visibility 복귀 시 사용자 정보를 갱신한다. 회사/사용자가 바뀌면 Outlet을 다시 생성하고 같은 사용자의 재조회는 입력 화면을 유지한다.
-- Refresh/서버 Logout API와 서버 토큰 폐기 목록은 없다. 브라우저 로그아웃은 저장 토큰과 Context 정리다. 기존 토큰은 비밀번호 변경·관리자 비밀번호 재설정에 따른 tokenVersion 증가, 사용자 삭제 또는 만료로 무효화된다.
+- 로그인은 access token과 7일짜리 HttpOnly·SameSite=Strict refresh 쿠키를 발급한다. access token 만료의 401에서는 `/auth/refresh`로 갱신하고 원 요청을 한 번 재시도한다. `/auth/logout`은 refresh 쿠키를 지우고 브라우저 토큰·Context를 정리한다. 비밀번호 변경·관리자 비밀번호 재설정에 따른 tokenVersion 증가, 사용자 삭제 또는 만료는 두 토큰을 무효화한다. 별도 서버 토큰 폐기 목록은 없다.
 
 ## 3. 회사 격리와 배포 경계
 
@@ -109,7 +109,7 @@ MODULES는 backend/src/common/constants/modules.ts에 고정 모듈 코드와 �
 | 게시판 | Board, BoardComment |
 | 첨부 | Attachment, AttachmentItem |
 
-- 설비 DTO의 varchar 길이는 DB 컬럼과 일치시키고 text 사양·비고에는 별도 길이 제한을 추가하지 않는다. 설비번호·설비명 부분검색은 %·_·역슬래시를 일반 문자로 처리한다. 목록은 서버 페이지네이션을 사용한다. 트리는 목록과 별도 API이지만 현재 사업장별 전체 활성 노드를 한 번에 조회하여 모두 펼쳐 표시하며, 최상위·하위 노드 지연 조회 방식은 아직 적용하지 않았다.
+- 설비 DTO의 varchar 길이는 DB 컬럼과 일치시키고 text 사양·비고에는 별도 길이 제한을 추가하지 않는다. 설비번호·설비명 부분검색은 %·_·역슬래시를 일반 문자로 처리한다. 목록은 서버 페이지네이션을 사용하고 사업장 및 선택한 검색 기준으로 조회한다. 목록의 트리 전환은 제공하지 않으며 상위 설비 선택에는 기존 트리 API를 사용한다. COMPANY_ALL은 회사 전체, OWN_SITE/OWN_DEPARTMENT는 본인 사업장만 조회·선택·변경할 수 있다.
 - 설비 계층은 회사·사업장·활성 부모·순환을 검사한다. PM 완료 시 PM 날짜를 설비에 직접 반영하며 법정점검 값은 변경하지 않는다.
 - WO의 PLAN은 C 작업의뢰, ACTUAL은 완결(C)된 계획 WO를 선택 참조한다. refModule/refId는 쌍으로 저장한다. 금액·시간 합계는 서버 계산이다.
 - 허가요청은 신청 API로 C 처리하고, 허가는 GENERAL+선택 유형의 템플릿·발급자/승인자·실제 필수 첨부를 검증한다. 출력은 permitPrint.ts에서 유형별 A4 페이지를 생성한다.
@@ -154,18 +154,19 @@ MODULES는 backend/src/common/constants/modules.ts에 고정 모듈 코드와 �
 
 ## 10. 런타임·검증
 
-운영 배포는 Nginx와 NestJS를 **동일한 물리 서버의 별도 Docker 컨테이너**에서 실행하는 구성을 기준으로 한다. 브라우저의 운영 접속은 **HTTPS 443**을 사용하며, HTTPS 전환 후 HTTP 80 매핑을 유지한 경우 HTTPS로 리다이렉트하며, 필요하지 않으면 80 매핑을 닫는다. 화면·로그인·API·첨부 전송 모두 브라우저와 Nginx 사이에서 TLS로 보호한다.
+운영 배포는 Nginx·NestJS·PostgreSQL을 **동일한 물리 서버의 별도 Docker 컨테이너**에서 실행한다. 현재 외부 접속은 **HTTP 80**이며 브라우저 통신은 TLS로 암호화되지 않는다. NestJS 3000은 호스트에 공개하지 않는다. PostgreSQL 5432는 같은 호스트의 DB 클라이언트가 접속할 수 있도록 `127.0.0.1:5432`에만 바인딩한다.
 
 ```text
-브라우저 ── HTTPS :443 ── Nginx ── HTTP backend:3000 ── NestJS
-                         TLS 종료       동일 서버 Docker 내부망
+브라우저 ── HTTP :80 ── Nginx ── HTTP backend:3000 ── NestJS
+                                             │
+                                      postgres:5432
 ```
 
-Nginx가 TLS를 종료하고 `/api` 요청을 `http://backend:3000`으로 전달한다. 동일 물리 서버의 Docker 내부 통신을 전제로 이 구간에는 별도 TLS를 구성하지 않으며, NestJS 3000 포트는 호스트 외부에 공개하지 않는다. HTTPS 인증서와 개인키는 Nginx에서만 사용한다. 향후 Nginx와 NestJS를 서로 다른 서버로 분리할 경우 내부 구간의 TLS 정책을 다시 검토한다.
+Nginx는 `/api` 요청을 `http://backend:3000`으로 전달한다. NestJS는 Compose 내부 이름 `postgres`로 DB에 연결한다. 이 호스트 내부 구간에는 별도 TLS를 구성하지 않는다.
 
-운영 적용에는 `CMMS_NGINX_CONFIG=./deploy/nginx/https.conf`, 실제 서비스 도메인에 유효한 인증서·개인키, 외부 접속 가능한 바인딩 주소 및 443 포트 허용이 필요하다. 현재 개발 기본 구성은 default.conf와 HTTP 80 매핑을 사용한다. 운영 HTTPS 전환에 사용할 https.conf 선택과 443 설정·매핑은 환경파일과 Compose에 주석으로 병기한다. NODE_ENV에 따라 HTTP/HTTPS를 자동 선택하지 않고 운영자가 명시적으로 전환한다. 인증서·개인키가 없으면 HTTPS Nginx는 시작할 수 없다.
+외부 IP 접속은 `CMMS_BIND_ADDRESS`와 방화벽의 80 허용으로 설정한다. HTTPS로 전환할 때는 별도 인증서·443 설정을 추가해야 한다.
 
-- Node.js 24, npm ci, NestJS/TypeORM/PostgreSQL, React/Vite를 사용한다. Docker는 개발·테스트·운영 공통 compose.yaml에서 빌드된 backend+nginx 정적 SPA를 실행하고 소스 변경은 이미지 재빌드로 반영한다. 파일은 UID/GID 1000의 호스트 디렉터리에 bind mount한다. 루트 .env는 Compose의 프로젝트 이름·포트·호스트 경로·Nginx 설정 선택만 담당한다. NestJS·관리자 bootstrap은 backend/.env, Vite는 frontend/.env를 읽는다. Docker의 backend env_file은 backend/.env를 전달하며 프런트 빌드는 공개 설정만 담은 frontend/.env를 읽는다. 최종 프런트 이미지에는 정적 빌드 결과만 포함한다. 실행은 docker compose up -d --build, 종료는 docker compose down이며 start.sh / stop.sh도 단축 명령으로 유지한다. 개별 개발은 NestJS watch와 Vite를 사용하고 Vite는 /api를 NestJS로 프록시한다. 개발 DB는 synchronize=true, 운영 DB는 false이며 두 환경 모두 외부 DB를 사용한다.
+- Node.js 24, npm ci, NestJS/TypeORM/PostgreSQL, React/Vite를 사용한다. Compose는 세 서비스를 실행하고 고객별 값은 루트 .env에서 명시적으로 전달한다. 운영 프런트 API는 동일 출처 /api를 사용한다. 백엔드와 프런트는 빌드된 이미지를 사용하며 업로드는 UID/GID 1000의 호스트 디렉터리에 저장한다. DB 데이터는 /srv/new-cmms/data/postgres, 첨부는 /srv/new-cmms/data/uploads에 둔다. 개발 DB는 development에서만 synchronize=true를 허용하고 운영은 false 및 명시적 migration을 사용한다.
 - Nginx는 /api prefix를 유지하고 SPA 경로는 index.html로 복원한다. API no-store, 해시 자산 immutable, index no-cache이며 본문 제한은 60 MiB다.
 - /api/health는 SELECT 1의 성공/503만 제공한다. 스키마·관리자 준비나 전체 업무 정상성을 보장하는 검사는 아니다.
 - 환경변수는 env.schema.ts와 .env 예시가 기준이다. `NODE_ENV=development`와 `DB_SYNCHRONIZE=true`를 함께 설정한 경우에만 연결된 개발 DB 스키마를 자동 동기화한다. 개발에서도 false로 끌 수 있으며 기본값은 false다. 배포는 `NODE_ENV=production`, `DB_SYNCHRONIZE=false`를 사용한다. test는 자동 검사 전용이며 개발 외 모드에서 true이면 시작을 거부한다. JWT_ACCESS_SECRET/EXPIRES_IN과 local 업로드 설정을 사용한다.
@@ -272,11 +273,11 @@ DocumentRequest 엔티티·Idempotency-Key·프런트 요청 키·생성 복구 
 - `LOGIN_HISTORY_RETENTION_DAYS` 기본값은 90일이다. 시작 시와 매일 보관기간이 지난 이력을 삭제한다. 0은 자동 삭제를 비활성화한다.
 - 직접 실행은 `TRUST_PROXY_HOPS=0`으로 전달 헤더를 신뢰하지 않는다. 현재 Compose는 외부로 직접 노출하지 않는 백엔드 앞의 Nginx 한 단계만 신뢰하도록 `1`로 지정한다. 프록시 경로가 바뀌면 이 설정도 경로에 맞춰 변경한다.
 
-새 지원 권한은 MODULE_ACTIONS에 추가한다. 역할 화면에서 회사별 역할에 배정하거나 `npm run bootstrap:admin --prefix backend`로 대상 회사 관리자 역할을 갱신한다. bootstrap에서 비밀번호 재설정을 선택하지 않으면 기존 관리자 비밀번호는 유지한다.
+새 지원 권한은 MODULE_ACTIONS에 추가한다. 기존 회사의 역할 권한은 역할 화면에서 배정한다. 초기 관리자 생성 명령은 새 사용자 생성용이며 기존 관리자 비밀번호를 재설정하지 않는다.
 
 ### 결재 목록·원문 반영 실패
 
-GET /api/approvals/boxes/:box는 ApprovalQueryDto의 page·limit·search·status를 받는다. 기본 20건·최대 100건으로 공통 페이지 계산을 사용하고 items·total·page·limit를 반환한다. 회사·삭제 여부·문서함 참여 조건과 검색은 페이지 제한 전에 DB에서 적용한다. 통합 검색은 문서번호·관리번호·제목·상신자 ID를 대상으로 하며 %·_는 일반 문자로 검색한다. 정렬은 작성일시와 결재번호 내림차순이다. EXISTS로 결재선 참여·현재 순번을 판단하여 문서 중복 집계를 방지한다. 목록은 approvalId·documentNo·title·submitterId·status·createdAt만 반환하고 본문·결재선은 상세에서 조회한다. 프런트는 검색·문서함 변경 시 1페이지로 이동한다. 목록 인쇄는 제공하지 않고 상세 인쇄는 유지한다.
+GET /api/approvals/boxes/:box는 ApprovalQueryDto의 page·limit·search·searchType을 받는다. 기본 20건·최대 100건으로 공통 페이지 계산을 사용하고 items·total·page·limit를 반환한다. 회사·삭제 여부·문서함 참여 조건과 검색은 페이지 제한 전에 DB에서 적용한다. 검색 유형은 approvalId(문서번호)·documentNo(관리번호)·title(제목)·submitterId(작성자)이며 선택한 필드만 검색한다. searchType이 없으면 제목을 기준으로 하고 %·_는 일반 문자로 검색한다. 정렬은 작성일시와 결재번호 내림차순이다. EXISTS로 결재선 참여·현재 순번을 판단하여 문서 중복 집계를 방지한다. 목록은 approvalId·documentNo·title·submitterId·status·createdAt만 반환하고 본문·결재선은 상세에서 조회한다. 프런트는 검색·문서함 변경 시 1페이지로 이동한다. 목록 인쇄는 제공하지 않고 상세 인쇄는 유지한다.
 
 결재 저장 후 원문 반영 실패는 결재를 되돌리지 않는다. 응답의 sourceSyncWarning에 “결재 처리는 완료되었으나 원문 상태 반영에 실패했습니다. 관리자에게 문의해 주세요.”를 넣고 화면은 결재 상태와 안내를 함께 표시한다. 회사·결재번호·원문·상태·오류 로그를 유지한다. 안내는 해당 처리 응답용이며 DB 오류 이력·재반영 버튼·시스템 복구 기능은 추가하지 않는다.
 
@@ -320,7 +321,7 @@ GET /api/preventive-maintenance는 page·limit·search로 서버 페이지네이
 
 대상은 예방점검, 작업의뢰, 작업오더, 허가요청, 작업허가, 구매요청, 구매발주, 재고전표 8개다. 회사 전체/사업장/하위 부서 범위를 각 서비스 내부에서 판단한다. 관련 작업오더 조회도 작업의뢰 서비스 안에 명시한다.
 
-설비·자재 등 마스터와 조직·사용자·권한·공통코드는 회사 기준으로 관리한다. 재고 보고서는 회사+허용 사업장 범위를 적용하고 월 잠금은 회사 단위다. 결재·게시판·첨부는 각 모듈의 참여자·작성자·회사 정책을 따른다. 모든 회사별 데이터는 인증된 companyId 조건을 필수로 사용한다. 공통 시스템 정의는 DB 대신 코드 상수에서 제공한다.
+설비는 회사 및 허용 사업장 기준으로 관리한다. 자재 등 다른 마스터와 조직·사용자·권한·공통코드는 회사 기준이다. 재고 보고서는 회사+허용 사업장 범위를 적용하고 월 잠금은 회사 단위다. 결재·게시판·첨부는 각 모듈의 참여자·작성자·회사 정책을 따른다. 모든 회사별 데이터는 인증된 companyId 조건을 필수로 사용한다. 공통 시스템 정의는 DB 대신 코드 상수에서 제공한다.
 
 ### 첨부의 회사 확인
 
@@ -559,7 +560,7 @@ Jest는 src/**/*.spec.ts만 대상으로 하고 미사용 libs/apps/별칭 설�
 | `position` | string \| null | { type: 'varchar', length: 100, nullable: true } |
 | `roleId` | string | { type: 'varchar', length: 30 } |
 | `siteId` | string \| null | { type: 'varchar', length: 30, nullable: true } |
-| `deptId` | string | { type: 'varchar', length: 30 } |
+| `deptId` | string \| null | { type: 'varchar', length: 30, nullable: true } |
 | `accessScope` | AccessScope | { type: 'varchar', length: 30 } |
 | `deleteYn` | string | { type: 'char', length: 1, default: 'N' } |
 

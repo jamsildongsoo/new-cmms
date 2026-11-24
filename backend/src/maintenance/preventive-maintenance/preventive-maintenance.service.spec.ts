@@ -9,6 +9,7 @@ import { Equipment } from '../equipment/entities/equipment.entity';
 import { UserContext } from '../../auth/types/user-context.type';
 
 function fixture() {
+  const whereClauses: string[] = [];
   const document: PreventiveMaintenance = Object.assign(
     new PreventiveMaintenance(),
     {
@@ -40,13 +41,19 @@ function fixture() {
         }),
         andWhere: jest.fn(function (
           this: object,
-          _sql: string,
+          sql: string,
           values?: Record<string, unknown>,
         ) {
+          whereClauses.push(sql);
           Object.assign(parameters, values);
           return this;
         }),
+        select: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getManyAndCount: jest.fn(async () => [[], 0]),
         getOne: async () =>
           parameters.companyId === document.companyId &&
           (!parameters.id || parameters.id === document.pmId) &&
@@ -77,6 +84,7 @@ function fixture() {
   };
   return {
     document,
+    whereClauses,
     repository,
     master,
     equipment,
@@ -96,6 +104,15 @@ const actor = (userId: string) =>
   }) as UserContext;
 
 describe('PM detail actions', () => {
+  it('searches only the selected list field', async () => {
+    const { service, whereClauses } = fixture();
+    await service.findAll(actor('owner'), {
+      page: 1,
+      searchType: 'equipmentId',
+      search: 'EQ1',
+    });
+    expect(whereClauses).toContain('pm.equipmentId ILIKE :search');
+  });
   it('persists the source attachment group and preserves it on unrelated saves', async () => {
     const { service } = fixture();
     expect(

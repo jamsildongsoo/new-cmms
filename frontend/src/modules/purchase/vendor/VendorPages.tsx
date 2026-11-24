@@ -1,6 +1,6 @@
 import { Pagination } from '@/shared/ui/Pagination'
 // 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
-import { SearchActions } from '@/shared/ui/SearchActions'
+import { TypedSearchForm } from '@/shared/ui/TypedSearchForm'
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '@/modules/auth'
@@ -45,8 +45,9 @@ function toForm(row: Vendor): VendorForm {
 export function VendorListPage() {
   const { hasPermission } = useAuth(),
     navigate = useNavigate()
-  const [query, setQuery] = useState({ page: 1, search: '' }),
-    [search, setSearch] = useState('')
+  const [query, setQuery] = useState({ page: 1, search: '', searchType: 'name' }),
+    [search, setSearch] = useState(''),
+    [searchType, setSearchType] = useState('name')
   const [result, setResult] = useState({
       items: [] as Vendor[],
       total: 0,
@@ -67,10 +68,10 @@ export function VendorListPage() {
       active = false
     }
   }, [query])
-  function change(page: number, value = query.search) {
+  function change(page: number, value = query.search, type = query.searchType) {
     setLoading(true)
     setError('')
-    setQuery({ page, search: value })
+    setQuery({ page, search: value, searchType: type })
   }
   if (!hasPermission('VENDOR:read')) return <Navigate to="/" replace />
   return (
@@ -113,25 +114,14 @@ export function VendorListPage() {
           </Button>
         </div>
       </div>
-      <form
-        onReset={() => {
-          setSearch('')
-          change(1, '')
-        }}
-        className="search-form"
-        onSubmit={(e) => {
-          e.preventDefault()
-          change(1, search.trim())
-        }}
-      >
-        <Input
-          aria-label="거래처 검색"
-          placeholder="거래처번호·거래처명·사업자번호"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        <SearchActions loading={loading} />
-      </form>
+      <TypedSearchForm
+        options={[{ value: 'vendorId', label: '거래처번호' }, { value: 'name', label: '거래처명' },
+          { value: 'registrationNumber', label: '사업자번호' }]}
+        searchType={searchType} onSearchTypeChange={setSearchType}
+        search={search} onSearchChange={setSearch} loading={loading}
+        onSubmit={(event) => { event.preventDefault(); change(1, search.trim(), searchType) }}
+        onReset={() => { setSearch(''); setSearchType('name'); change(1, '', 'name') }}
+      />
       {error && (
         <p role="alert" className="text-xs text-red-700">
           {error}

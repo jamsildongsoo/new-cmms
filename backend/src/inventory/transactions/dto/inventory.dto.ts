@@ -51,6 +51,7 @@ export class CancelInventoryDto {
   @IsString() @IsNotEmpty() reason: string;
 }
 export class InventorySearchDto extends PaginationQueryDto {
+  @IsOptional() @IsIn(['id', 'documentNo', 'title', 'createdBy']) searchType?: 'id' | 'documentNo' | 'title' | 'createdBy';
   @IsOptional() @IsString() search?: string;
   @IsOptional() @IsString() @MaxLength(30) siteId?: string;
   @IsOptional() @IsString() @MaxLength(30) warehouseId?: string;

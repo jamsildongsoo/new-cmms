@@ -7,6 +7,7 @@ import { http } from '@/shared/api/http'
 
 export type ApprovalBox =
   'submit' | 'pending' | 'processed' | 'closed' | 'reference'
+export type ApprovalSearchType = 'approvalId' | 'documentNo' | 'title' | 'submitterId'
 
 export type { ApprovalStepType } from './approval.constant'
 
@@ -80,7 +81,7 @@ export interface ApprovalCreatePayload extends ApprovalPayload {
 export interface ApprovalUserInfo {
   userId: string
   userName: string
-  deptId: string
+  deptId: string | null
   deptName: string | null
   title: string | null
   position: string | null
@@ -106,7 +107,7 @@ export interface ApprovalActionPayload {
 
 export async function getApprovalBox(
   box: ApprovalBox,
-  params: { page: number; limit: number; search?: string; status?: string },
+  params: { page: number; limit: number; search?: string; searchType?: ApprovalSearchType },
 ) {
   const response = await http.get<ApprovalPage>(`/approvals/boxes/${box}`, {
     params,

@@ -12,7 +12,7 @@ export interface UserResponseDto {
   siteId: string | null;
   siteName: string | null;
   deptName: string | null;
-  deptId: string;
+  deptId: string | null;
   accessScope: AccessScope;
   deleteYn: string;
   createdBy: string;

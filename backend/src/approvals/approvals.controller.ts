@@ -19,6 +19,7 @@ import { ApprovalActionDto } from './dto/approval-action.dto';
 import { CreateApprovalDto } from './dto/create-approval.dto';
 import { UpdateApprovalDto } from './dto/update-approval.dto';
 import { ApprovalsService } from './approvals.service';
+import { DirectoryService } from '../common/directory/directory.service';
 
 /** 결재 API. 경로별 동작 권한 외에 참여자·처리 차례·문서 상태를 Service가 추가 검사한다. */
 @UseGuards(JwtAuthGuard)
@@ -27,6 +28,7 @@ export class ApprovalsController {
   constructor(
     private readonly numbering: NumberingService,
     private readonly approvalsService: ApprovalsService,
+    private readonly directory: DirectoryService,
   ) {}
 
   // List approvals for one UI box: submit, pending, processed, closed, or reference.
@@ -43,7 +45,7 @@ export class ApprovalsController {
   // Search users by id or name for the approver picker.
   @Get('users')
   searchUsers(@CurrentUser() user: UserContext, @Query('q') q?: string) {
-    return this.approvalsService.searchUsers(user, q ?? '');
+    return this.directory.searchUsers(user.companyId, q ?? '');
   }
 
   // Look up a user's name, department, title and position for the approver picker.

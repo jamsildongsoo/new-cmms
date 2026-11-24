@@ -69,10 +69,7 @@ export class AttachmentsController {
       itemNo,
     );
 
-    response.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${encodeURIComponent(download.item.originalName)}"`,
-    );
+    response.attachment(download.item.originalName);
     if (download.item.mimeType) {
       response.setHeader('Content-Type', download.item.mimeType);
     }

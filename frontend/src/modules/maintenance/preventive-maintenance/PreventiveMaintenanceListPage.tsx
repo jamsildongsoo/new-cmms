@@ -8,8 +8,8 @@ import { isInspectionOverdue } from '@/modules/maintenance/equipment'
 import { useAuth } from '@/modules/auth'
 import { toMessage } from '@/shared/api/errors'
 import { printDocument } from '@/shared/lib/print'
-import { Input } from '@/shared/ui/Input'
 import { Button } from '@/shared/ui/Button'
+import { TypedSearchForm } from '@/shared/ui/TypedSearchForm'
 import { DataTable } from '@/shared/ui/DataTable'
 import { StatusBadge } from '@/shared/ui/StatusBadge'
 import {
@@ -22,7 +22,10 @@ export function PreventiveMaintenanceListPage() {
   const navigate = useNavigate()
   const [rows, setRows] = useState<PMListItem[]>([])
   const [search, setSearch] = useState('')
-  const [query, setQuery] = useState({ page: 1, search: '' })
+  const [searchType, setSearchType] = useState<
+    'pmId' | 'documentNo' | 'title' | 'equipmentId' | 'createdBy'
+  >('title')
+  const [query, setQuery] = useState({ page: 1, search: '', searchType: 'title' as typeof searchType })
   const [total, setTotal] = useState(0)
   const [limit, setLimit] = useState(20)
   const [isLoading, setIsLoading] = useState(true)
@@ -35,6 +38,7 @@ export function PreventiveMaintenanceListPage() {
     getPreventiveMaintenanceList({
       page: query.page,
       search: query.search || undefined,
+      searchType: query.search ? query.searchType : undefined,
     })
       .then((data) => {
         if (!active) return
@@ -104,36 +108,20 @@ export function PreventiveMaintenanceListPage() {
         </div>
       </div>
 
-      <form
-        className="search-form"
+      <TypedSearchForm
+        options={[{ value: 'pmId', label: '문서번호' }, { value: 'documentNo', label: '관리번호' },
+          { value: 'title', label: '제목' }, { value: 'equipmentId', label: '설비번호' },
+          { value: 'createdBy', label: '작성자' }]}
+        searchType={searchType} onSearchTypeChange={(value) => setSearchType(value as typeof searchType)}
+        search={search} onSearchChange={setSearch} loading={isLoading}
         onSubmit={(event) => {
-          event.preventDefault()
-          setIsLoading(true)
-          setQuery({ page: 1, search: search.trim() })
+          event.preventDefault(); setIsLoading(true); setQuery({ page: 1, search: search.trim(), searchType })
         }}
-      >
-        <Input
-          aria-label="예방점검 검색"
-          placeholder="문서번호·관리번호·제목·설비번호"
-          maxLength={200}
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-        />
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={() => {
-            setSearch('')
-            setIsLoading(true)
-            setQuery({ page: 1, search: '' })
-          }}
-        >
-          초기화
-        </Button>
-        <Button type="submit" disabled={isLoading}>
-          검색
-        </Button>
-      </form>
+        onReset={() => {
+          setSearch(''); setSearchType('title'); setIsLoading(true);
+          setQuery({ page: 1, search: '', searchType: 'title' })
+        }}
+      />
       {error && (
         <div className="border border-red-200 bg-red-50 p-2 text-xs text-red-700">
           {error}

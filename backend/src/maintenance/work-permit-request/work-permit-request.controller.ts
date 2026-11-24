@@ -40,6 +40,12 @@ export class WorkPermitRequestController {
   }
 
   @RequirePermission(ModuleCode.PERREQ, PermissionAction.READ)
+  @Get('options')
+  options(@CurrentUser() user: UserContext) {
+    return this.service.options(user);
+  }
+
+  @RequirePermission(ModuleCode.PERREQ, PermissionAction.READ)
   @Get(':workPermitRequestId')
   findOne(
     @CurrentUser() user: UserContext,

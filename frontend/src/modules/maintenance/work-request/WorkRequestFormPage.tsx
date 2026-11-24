@@ -9,6 +9,7 @@ import { useAuth } from '@/modules/auth'
 import { AttachmentManager } from '@/modules/attachments'
 import { toMessage } from '@/shared/api/errors'
 import { useUnsavedChanges } from '@/shared/hooks/useUnsavedChanges'
+import { codeName } from '@/shared/lib/codeName'
 import { printDocument } from '@/shared/lib/print'
 import type { FormMode } from '@/shared/types/form'
 import { Button } from '@/shared/ui/Button'
@@ -66,6 +67,9 @@ function Editor({ mode, id }: { mode: FormMode; id?: string }) {
   const [form, setForm] = useState(empty)
   const [baseline, setBaseline] = useState(JSON.stringify(empty))
   const [options, setOptions] = useState<WorkRequestOptions>({
+    sites: [],
+    departments: [],
+    users: [],
     equipment: [],
     siteId: null,
     deptId: null,
@@ -191,7 +195,7 @@ function Editor({ mode, id }: { mode: FormMode; id?: string }) {
         e.preventDefault()
         void save(false)
       }}
-      className="space-y-4 rounded-lg border border-slate-200 bg-white p-4 md:p-5"
+      className="document-form space-y-4 rounded-lg border border-slate-200 bg-white p-4 md:p-5"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="flex items-center gap-2 text-lg font-semibold">
@@ -254,30 +258,24 @@ function Editor({ mode, id }: { mode: FormMode; id?: string }) {
           )}
         </div>
       </div>
-      <DocumentIdField
-        value={record?.workRequestId}
-        documentNo={form.documentNo}
-        onDocumentNoChange={(value) => update('documentNo', value)}
-        disabled={disabled}
-        readOnly={readOnly}
-      />
+      <div className="grid grid-cols-12 gap-3">
+        <div className="col-span-6 min-w-0">
+          <DocumentIdField gridLayout value={record?.workRequestId} documentNo={form.documentNo}
+            onDocumentNoChange={(value) => update('documentNo', value)} disabled={disabled} readOnly={readOnly} />
+        </div>
+        <Field label="의뢰명" required className="col-span-6 min-w-0">
+          <Input required maxLength={200} value={form.title} disabled={disabled}
+            onChange={(e) => update('title', e.target.value)} />
+        </Field>
+      </div>
       {loading && <p className="text-xs text-slate-500">불러오는 중…</p>}
       {error && (
         <div role="alert" className="text-xs text-red-700">
           {error}
         </div>
       )}
-      <div className="grid gap-3 md:grid-cols-2">
-        <Field label="의뢰명" required>
-          <Input
-            required
-            maxLength={200}
-            value={form.title}
-            disabled={disabled}
-            onChange={(e) => update('title', e.target.value)}
-          />
-        </Field>
-        <Field label="대상 설비" required>
+      <div className="grid grid-cols-12 gap-3">
+        <Field label="대상 설비" required className="order-1 col-span-6 min-w-0">
           <Select
             required
             disabled={disabled}
@@ -288,12 +286,12 @@ function Editor({ mode, id }: { mode: FormMode; id?: string }) {
 
             {options.equipment.map((e) => (
               <option key={e.value} value={e.value}>
-                {e.label} ({e.value})
+                {codeName(e.value, e.label)}
               </option>
             ))}
           </Select>
         </Field>
-        <Field label="발생일" required>
+        <Field label="발생일" required className="order-6 col-span-3 min-w-0">
           <Input
             type="date"
             required
@@ -302,7 +300,7 @@ function Editor({ mode, id }: { mode: FormMode; id?: string }) {
             onChange={(e) => update('occurredDate', e.target.value)}
           />
         </Field>
-        <Field label="긴급도">
+        <Field label="긴급도" className="order-7 col-span-3 min-w-0">
           <Select
             value={form.priorityCode ?? ''}
             disabled={disabled}
@@ -317,22 +315,26 @@ function Editor({ mode, id }: { mode: FormMode; id?: string }) {
             ))}
           </Select>
         </Field>
-        <Field label="의뢰자">
+        <Field label="의뢰자" className="order-5 col-span-3 min-w-0">
           <Input
             disabled
-            value={record?.requesterId ?? user?.userId ?? ''}
+            value={codeName(record?.requesterId ?? user?.userId,
+              options.users.find((r) => r.value === (record?.requesterId ?? user?.userId))?.label)}
           />
         </Field>
-        <Field label="사업장">
+        <Field label="사업장" className="order-2 col-span-3 min-w-0">
           <Input
             disabled
-            value={(record ? record.siteId : options.siteId) ?? ''}
+            value={codeName(record ? record.siteId : options.siteId,
+              options.sites.find((r) => r.value === (record ? record.siteId : options.siteId))?.label)}
           />
         </Field>
-        <Field label="부서">
+        <div className="order-3 col-span-3" aria-hidden="true" />
+        <Field label="부서" className="order-4 col-span-3 min-w-0">
           <Input
             disabled
-            value={(record ? record.deptId : options.deptId) ?? ''}
+            value={codeName(record ? record.deptId : options.deptId,
+              options.departments.find((r) => r.value === (record ? record.deptId : options.deptId))?.label)}
           />
         </Field>
       </div>

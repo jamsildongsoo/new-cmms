@@ -9,6 +9,7 @@ import type { DataSource, EntityTarget, ObjectLiteral } from 'typeorm';
 import { postgresTestDatabase } from '../../test/support/pglite';
 import type { UserContext } from '../auth/types/user-context.type';
 import { Department } from '../organization/departments/entities/department.entity';
+import { Site } from '../organization/sites/entities/site.entity';
 import { User } from '../identity/users/entities/user.entity';
 import { Equipment } from '../maintenance/equipment/entities/equipment.entity';
 import { PreventiveMaintenance } from '../maintenance/preventive-maintenance/entities/preventive-maintenance.entity';
@@ -82,6 +83,7 @@ beforeAll(async () => {
   const fixture = await postgresTestDatabase([
     CodeItem,
     Department,
+    Site,
     User,
     Equipment,
     PreventiveMaintenance,

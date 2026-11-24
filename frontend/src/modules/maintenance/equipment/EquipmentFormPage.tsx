@@ -6,6 +6,7 @@ import { useAuth } from '@/modules/auth'
 import { AttachmentManager } from '@/modules/attachments'
 import { toMessage } from '@/shared/api/errors'
 import { useUnsavedChanges } from '@/shared/hooks/useUnsavedChanges'
+import { codeName } from '@/shared/lib/codeName'
 import { printDocument } from '@/shared/lib/print'
 import type { FormMode } from '@/shared/types/form'
 import { Button } from '@/shared/ui/Button'
@@ -31,7 +32,7 @@ export function EquipmentFormPage({ mode }: { mode: FormMode }) {
 
 function EquipmentEditor({ mode, id }: { mode: FormMode; id?: string }) {
   const navigate = useNavigate()
-  const { hasPermission } = useAuth()
+  const { hasPermission, user } = useAuth()
   const [form, setForm] = useState<EquipmentForm>({ ...emptyEquipmentForm })
   const [savedForm, setSavedForm] = useState(JSON.stringify(emptyEquipmentForm))
   const [record, setRecord] = useState<Equipment | null>(null)
@@ -56,6 +57,16 @@ function EquipmentEditor({ mode, id }: { mode: FormMode; id?: string }) {
       .then(([choices, row]) => {
         if (!active) return
         setOptions(choices)
+        if (
+          mode === 'create' &&
+          user?.accessScope !== 'COMPANY_ALL' &&
+          user?.siteId &&
+          choices.sites.some((site) => site.value === user.siteId)
+        ) {
+          const initial = { ...emptyEquipmentForm, siteId: user.siteId }
+          setForm(initial)
+          setSavedForm(JSON.stringify(initial))
+        }
         if (row) {
           const loaded = equipmentToForm(row)
           setForm(loaded)
@@ -69,7 +80,7 @@ function EquipmentEditor({ mode, id }: { mode: FormMode; id?: string }) {
     return () => {
       active = false
     }
-  }, [id, mode])
+  }, [id, mode, user?.accessScope, user?.siteId])
 
   if (
     !hasPermission(
@@ -204,7 +215,7 @@ function EquipmentEditor({ mode, id }: { mode: FormMode; id?: string }) {
 
             {choices.map((c) => (
               <option key={c.value} value={c.value}>
-                {c.label} ({c.value})
+                {codeName(c.value, c.label)}
               </option>
             ))}
           </Select>
@@ -296,16 +307,39 @@ function EquipmentEditor({ mode, id }: { mode: FormMode; id?: string }) {
       <form
         id="equipment-form"
         onSubmit={(e) => void save(e)}
-        className="space-y-4 rounded-lg border border-slate-200 bg-white p-4 md:p-5"
+        className="document-form space-y-4 rounded-lg border border-slate-200 bg-white p-4 md:p-5"
       >
         {equipmentFieldGroups.map((group) => (
           <section key={group.label} className="space-y-2">
             <h2 className="text-base font-semibold">{group.label}</h2>
-            <div className="grid gap-3 md:grid-cols-2">
-              {equipmentFields
-                .filter(([key]) => group.keys.includes(key))
-                .map(renderField)}
-            </div>
+            {group.label === '일반정보' ? (
+              <div className="space-y-3">
+                <div className="grid grid-cols-12 gap-3">
+                  <div className="col-span-3 min-w-0">{equipmentFields.filter(([key]) => key === 'equipmentId').map(renderField)}</div>
+                  <div className="col-span-9 min-w-0">{equipmentFields.filter(([key]) => key === 'name').map(renderField)}</div>
+                </div>
+                <div className="grid grid-cols-12 gap-3">
+                  {equipmentFields
+                    .filter(([key]) =>
+                      ['siteId', 'deptId', 'typeCode', 'parentEquipmentId'].includes(key),
+                    )
+                    .map((field) => <div key={field[0]} className="col-span-3 min-w-0">{renderField(field)}</div>)}
+                </div>
+                {equipmentFields.filter(([key]) => key === 'location').map(renderField)}
+              </div>
+            ) : (
+              <div className="grid grid-cols-12 gap-3">
+                {equipmentFields
+                  .filter(([key]) => group.keys.includes(key))
+                  .sort(([a], [b]) => (a === 'spec' ? 1 : b === 'spec' ? -1 : 0))
+                  .map((field) => {
+                    const key = field[0]
+                    const spanClass = key === 'spec' || key === 'note' ? 'col-span-12'
+                      : ['maker', 'model', 'serialNo', 'installDate', 'pmTargetYn', 'permitTargetYn'].includes(key) ? 'col-span-4' : 'col-span-3'
+                    return <div key={key} className={`${spanClass} min-w-0`}>{renderField(field)}</div>
+                  })}
+              </div>
+            )}
           </section>
         ))}
       </form>

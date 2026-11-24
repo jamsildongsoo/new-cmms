@@ -5,10 +5,9 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/modules/auth'
 import { Button } from '@/shared/ui/Button'
-import { Input } from '@/shared/ui/Input'
 import { Select } from '@/shared/ui/Select'
 import { DataTable } from '@/shared/ui/DataTable'
-import { SearchActions } from '@/shared/ui/SearchActions'
+import { TypedSearchForm } from '@/shared/ui/TypedSearchForm'
 import { toMessage } from '@/shared/api/errors'
 import { printDocument } from '@/shared/lib/print'
 
@@ -26,8 +25,9 @@ export function InventoryList({ mode = 'IN' }: { mode?: InventoryMenu }) {
     limit: 20,
   })
   const [search, setSearch] = useState(''),
+    [searchType, setSearchType] = useState('title'),
     [status, setStatus] = useState('')
-  const [query, setQuery] = useState({ page: 1, search: '', status: '' })
+  const [query, setQuery] = useState({ page: 1, search: '', searchType: 'title', status: '' })
   const [loading, setLoading] = useState(true),
     [error, setError] = useState('')
   const canRead = hasPermission('INVDOC:read')
@@ -64,10 +64,11 @@ export function InventoryList({ mode = 'IN' }: { mode?: InventoryMenu }) {
     page: number,
     value = query.search,
     selectedStatus = query.status,
+    selectedType = query.searchType,
   ) {
     setLoading(true)
     setError('')
-    setQuery({ page, search: value, status: selectedStatus })
+    setQuery({ page, search: value, searchType: selectedType, status: selectedStatus })
   }
   if (!canRead) return <p role="alert">조회 권한이 없습니다.</p>
   const rows = loading || error ? [] : result.items
@@ -113,40 +114,22 @@ export function InventoryList({ mode = 'IN' }: { mode?: InventoryMenu }) {
           </Button>
         </div>
       </div>
-      <form
-        className="search-form"
-        onSubmit={(e) => {
-          e.preventDefault()
-          change(1, search.trim(), status)
-        }}
-        onReset={() => {
-          setSearch('')
-          setStatus('')
-          change(1, '', '')
-        }}
-      >
-        <Input
-          aria-label="검색어"
-          placeholder="문서번호·관리번호·제목"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        <Select
-          aria-label="상태"
-          value={status}
-          onChange={(e) => setStatus(e.target.value)}
-        >
-          <option value="">전체 상태</option>
-          {inventoryStatuses
-            .filter((s) => mode === 'IN' || s.value !== 'W')
-            .map((s) => (
-              <option key={s.value} value={s.value}>
-                {s.label}
-              </option>
-            ))}
-        </Select>
-        <SearchActions loading={loading} />
-      </form>
+      <TypedSearchForm
+        options={[{ value: 'id', label: '문서번호' }, { value: 'documentNo', label: '관리번호' },
+          { value: 'title', label: '제목' }, { value: 'createdBy', label: '작성자' }]}
+        searchType={searchType} onSearchTypeChange={setSearchType}
+        search={search} onSearchChange={setSearch} loading={loading}
+        onSubmit={(event) => { event.preventDefault(); change(1, search.trim(), status, searchType) }}
+        onReset={() => { setSearch(''); setSearchType('title'); setStatus(''); change(1, '', '', 'title') }}
+        extra={<label className="block space-y-1.5 lg:max-w-xs">
+          <span className="block text-sm font-medium text-slate-700">상태</span>
+          <Select value={status} onChange={(event) => setStatus(event.target.value)}>
+            <option value="">전체 상태</option>
+            {inventoryStatuses.filter((item) => mode === 'IN' || item.value !== 'W').map((item) =>
+              <option key={item.value} value={item.value}>{item.label}</option>)}
+          </Select>
+        </label>}
+      />
       {error && <p role="alert">{error}</p>}
       <DataTable
         gridTemplateColumns="210px 130px 1fr 110px 110px 100px 100px 90px"

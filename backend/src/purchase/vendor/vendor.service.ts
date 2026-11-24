@@ -1,3 +1,4 @@
+import { applyTypedSearch } from '../../common/utils/typed-search.util';
 import {
   BadRequestException,
   ConflictException,
@@ -46,11 +47,7 @@ export class VendorService {
       .createQueryBuilder('v')
       .where('v.companyId=:companyId', { companyId: user.companyId })
       .andWhere("v.deleteYn='N'");
-    if (dto.search?.trim())
-      query.andWhere(
-        '(v.vendorId ILIKE :value OR v.name ILIKE :value OR v.registrationNumber ILIKE :value)',
-        { value: `%${dto.search.trim().replace(/[\\%_]/g, '\\$&')}%` },
-      );
+    applyTypedSearch(query, dto.search, dto.searchType, { vendorId: 'v.vendorId', name: 'v.name', registrationNumber: 'v.registrationNumber' }, ['v.vendorId', 'v.name', 'v.registrationNumber']);
     const [items, total] = await query
       .orderBy('v.vendorId', 'ASC')
       .skip(page.offset)

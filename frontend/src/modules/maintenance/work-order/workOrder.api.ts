@@ -54,6 +54,8 @@ export interface WorkOrder
   totalCost: number
 }
 export interface WorkOrderOptions {
+  sites: { value: string; label: string }[]
+  departments: { value: string; label: string }[]
   // 백엔드 해당 업무 options API의 units(공통코드 UNIT)와 함께 수정한다.
   units: { value: string; label: string }[]
   equipment: { value: string; label: string }[]
@@ -77,6 +79,7 @@ export interface WorkOrderOptions {
 export interface WorkOrderSearch {
   page?: number
   search?: string
+  searchType?: 'id' | 'documentNo' | 'title' | 'equipmentId' | 'createdBy'
 }
 export type WorkOrderListItem = Pick<
   WorkOrder,

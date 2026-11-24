@@ -1,3 +1,4 @@
+import { applyTypedSearch } from '../common/utils/typed-search.util';
 /** 같은 회사의 게시글·댓글을 제공하고 각 작성자만 변경한다. 활성 댓글이 있으면 원문 삭제를 차단한다. */
 import {
   BadRequestException,
@@ -27,11 +28,7 @@ export class BoardsService {
       .select(['b.boardId', 'b.title', 'b.createdBy', 'b.createdAt'])
       .where('b.companyId = :companyId', { companyId: user.companyId })
       .andWhere("b.deleteYn = 'N'");
-    if (query.search?.trim())
-      builder.andWhere(
-        '(b.title ILIKE :search OR b.content ILIKE :search OR b.boardId ILIKE :search)',
-        { search: `%${query.search.trim().replace(/[\\%_]/g, '\\$&')}%` },
-      );
+    applyTypedSearch(builder, query.search, query.searchType, { title: 'b.title', content: 'b.content', createdBy: 'b.createdBy' }, ['b.title', 'b.content']);
     const [items, total] = await builder
       .orderBy('b.createdAt', 'DESC')
       .addOrderBy('b.boardId', 'DESC')

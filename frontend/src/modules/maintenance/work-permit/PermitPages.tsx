@@ -21,12 +21,14 @@ import {
 } from '@/modules/attachments'
 import { toMessage } from '@/shared/api/errors'
 import { useUnsavedChanges } from '@/shared/hooks/useUnsavedChanges'
+import { codeName } from '@/shared/lib/codeName'
 import { Button } from '@/shared/ui/Button'
 import { Input } from '@/shared/ui/Input'
 import { Field } from '@/shared/ui/Field'
 import { Select } from '@/shared/ui/Select'
 import { Textarea } from '@/shared/ui/Textarea'
 import { DataTable } from '@/shared/ui/DataTable'
+import { TypedSearchForm } from '@/shared/ui/TypedSearchForm'
 import {
   permitApi,
   permitHttp,
@@ -34,6 +36,7 @@ import {
   type PermitListItem,
   type PermitData,
   type PermitOptions,
+  type PermitOrganizationOptions,
   type PermitSection,
 } from './permit.api'
 import {
@@ -90,14 +93,15 @@ function PermitListView({ request = false }: { request?: boolean }) {
   const [rows, setRows] = useState<PermitListItem[]>([]),
     [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
-  const [query, setQuery] = useState({ page: 1, search: '' })
+  const [searchType, setSearchType] = useState('title')
+  const [query, setQuery] = useState({ page: 1, search: '', searchType: 'title' })
   const [total, setTotal] = useState(0)
   const [limit, setLimit] = useState(20)
   const [loading, setLoading] = useState(true)
   useEffect(() => {
     let active = true
     permitApi
-      .list(base, { page: query.page, search: query.search || undefined })
+      .list(base, { page: query.page, search: query.search || undefined, searchType: query.search ? query.searchType as 'id' | 'documentNo' | 'title' | 'createdBy' : undefined })
       .then((data) => {
         if (!active) return
         setRows(data.items)
@@ -156,37 +160,14 @@ function PermitListView({ request = false }: { request?: boolean }) {
           </Button>
         </div>
       </div>
-      <form
-        className="search-form"
-        onSubmit={(event) => {
-          event.preventDefault()
-          setLoading(true)
-          setQuery({ page: 1, search: search.trim() })
-        }}
-      >
-        <Input
-          aria-label="허가 문서 검색"
-          placeholder="문서번호·관리번호·작업명"
-          maxLength={200}
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-        />
-        <Button
-          type="button"
-          variant="secondary"
-          disabled={loading}
-          onClick={() => {
-            setSearch('')
-            setLoading(true)
-            setQuery({ page: 1, search: '' })
-          }}
-        >
-          초기화
-        </Button>
-        <Button type="submit" disabled={loading}>
-          검색
-        </Button>
-      </form>
+      <TypedSearchForm
+        options={[{ value: 'id', label: '문서번호' }, { value: 'documentNo', label: '관리번호' },
+          { value: 'title', label: '작업명' }, { value: 'createdBy', label: '작성자' }]}
+        searchType={searchType} onSearchTypeChange={setSearchType}
+        search={search} onSearchChange={setSearch} loading={loading}
+        onSubmit={(event) => { event.preventDefault(); setLoading(true); setQuery({ page: 1, search: search.trim(), searchType }) }}
+        onReset={() => { setSearch(''); setSearchType('title'); setLoading(true); setQuery({ page: 1, search: '', searchType: 'title' }) }}
+      />
       {error && <p role="alert">{error}</p>}
       <DataTable<PermitListItem>
         gridTemplateColumns={
@@ -302,11 +283,14 @@ function Editor({
     [attachmentId, setAttachment] = useState<string | null>(null),
     [source, setSource] = useState<PermitRecord | null>(null)
   const [options, setOptions] = useState<PermitOptions>({
+      sites: [],
+      departments: [],
       templates: [],
       names: {},
       documents: [],
       users: [],
     }),
+    [organizationOptions, setOrganizationOptions] = useState<PermitOrganizationOptions>({ sites: [], departments: [] }),
     [sections, setSections] = useState<PermitSection[]>([]),
     [issuerId, setIssuer] = useState(''),
     [approverId, setApprover] = useState(''),
@@ -332,7 +316,7 @@ function Editor({
   useEffect(() => {
     let active = true
     Promise.all([
-      request ? Promise.resolve(null) : permitApi.options(),
+      request ? permitApi.requestOptions() : permitApi.options(),
       id ? permitApi.get(`${base}/${id}`) : Promise.resolve(null),
       requestId && !request
         ? permitApi.get(`/work-permit-request/${requestId}`)
@@ -344,7 +328,9 @@ function Editor({
           throw new Error(
             '신청 완료로 확정된 요청서만 참조할 수 있습니다.',
           )
-        if (opt) setOptions(opt)
+        const permitOptions = request ? null : opt as PermitOptions
+        setOrganizationOptions({ sites: opt.sites, departments: opt.departments })
+        if (permitOptions) setOptions(permitOptions)
         if (saved) {
           setRow(saved)
           setData(saved.data)
@@ -366,8 +352,8 @@ function Editor({
             setSource(src)
             setData(src.data)
           }
-          if (opt)
-            setSections(opt.templates.filter((s) => s.type === 'GENERAL'))
+          if (permitOptions)
+            setSections(permitOptions.templates.filter((s) => s.type === 'GENERAL'))
         }
         const initial = {
           data: saved?.data ?? src?.data ?? emptyData,
@@ -375,7 +361,7 @@ function Editor({
           attachmentId: saved?.attachmentId ?? null,
           sections:
             saved?.sections ??
-            opt?.templates.filter((s) => s.type === 'GENERAL') ??
+            permitOptions?.templates.filter((s) => s.type === 'GENERAL') ??
             [],
           issuerId: saved?.issuerId ?? '',
           approverId: saved?.approverId ?? '',
@@ -509,11 +495,13 @@ function Editor({
         fields: [
           ['문서번호', row.workPermitRequestId ?? row.workPermitId],
           ['관리번호', row.documentNo],
-          ...Object.entries(row.data).map(
+          ...Object.entries(row.data).filter(([key]) => key !== 'phoneNumber' && key !== 'equipmentNo').map(
             ([key, value]) =>
               [
                 permitDataLabels[key as keyof PermitData] ?? key,
-                value,
+                key === 'equipmentName' && row.data.equipmentNo
+                  ? codeName(row.data.equipmentNo, value)
+                  : value,
               ] as [string, string],
           ),
         ],
@@ -542,7 +530,7 @@ function Editor({
         e.preventDefault()
         void save(false)
       }}
-      className="space-y-3 rounded-lg border border-slate-200 bg-white p-4 md:p-5"
+      className="document-form space-y-3 rounded-lg border border-slate-200 bg-white p-4 md:p-5"
     >
       <div className="flex flex-wrap justify-between gap-2">
         <h1>
@@ -601,57 +589,42 @@ function Editor({
           )}
         </div>
       </div>
-      <DocumentIdField
-        value={row?.workPermitRequestId ?? row?.workPermitId}
-        documentNo={documentNo}
-        onDocumentNoChange={(value) => setNo(value)}
-        disabled={disabled}
-        readOnly={readOnly}
-      />
+      <div className="grid grid-cols-12 gap-3">
+        <div className="col-span-6 min-w-0"><DocumentIdField gridLayout
+          value={row?.workPermitRequestId ?? row?.workPermitId} documentNo={documentNo}
+          onDocumentNoChange={(value) => setNo(value)} disabled={disabled} readOnly={readOnly} /></div>
+        <Field label="작업명" required className="col-span-6 min-w-0">
+          <Input required maxLength={100} value={data.title} disabled={disabled}
+            onChange={(e) => setData((d) => ({ ...d, title: e.target.value }))} />
+        </Field>
+      </div>
       {error && (
         <p role="alert" className="text-xs text-red-700">
           {error}
         </p>
       )}
       {!ready && <p>불러오는 중…</p>}
-      <div className="grid gap-3 md:grid-cols-2">
-        <Field label="사업장">
+      <div className="grid grid-cols-12 gap-3">
+        <Field label="사업장" className="col-span-3 min-w-0 order-2">
           <Input
             readOnly
-            value={row ? (row.siteId ?? '') : (user?.siteId ?? '')}
+            value={codeName(row ? row.siteId : user?.siteId,
+              organizationOptions.sites.find((s) => s.value === (row ? row.siteId : user?.siteId))?.label)}
           />
         </Field>
-        <Field label="부서">
+        <Field label="담당부서" className="col-span-3 min-w-0 order-3">
           <Input
             readOnly
-            value={row ? (row.deptId ?? '') : (user?.deptId ?? '')}
+            value={codeName(row ? row.deptId : user?.deptId,
+              organizationOptions.departments.find((d) => d.value === (row ? row.deptId : user?.deptId))?.label)}
           />
         </Field>
         {(
           [
-            { key: 'title', label: '작업명', max: 100 },
             { key: 'applicationDate', label: '신청일', date: true },
             { key: 'applicantName', label: '신청인', max: 50 },
             { key: 'organization', label: '소속·시공사', max: 100 },
-            {
-              key: 'phoneNumber',
-              label: '연락처',
-              optional: true,
-              max: 50,
-            },
             { key: 'location', label: '작업지역', max: 100 },
-            {
-              key: 'equipmentNo',
-              label: '설비번호',
-              optional: true,
-              max: 50,
-            },
-            {
-              key: 'equipmentName',
-              label: '설비명',
-              optional: true,
-              max: 100,
-            },
             { key: 'startTime', label: '허가기간 시작', time: true },
             { key: 'endTime', label: '허가기간 종료', time: true },
           ] as {
@@ -663,7 +636,9 @@ function Editor({
             time?: boolean
           }[]
         ).map((f) => (
-          <Field key={f.key} label={f.label} required={!f.optional}>
+          <div key={f.key} className={f.key === 'location' ? 'col-span-12 min-w-0' : f.key === 'organization' ? 'col-span-6 min-w-0' : 'col-span-3 min-w-0'}
+            style={{ order: f.key === 'applicantName' ? (request ? 4 : 6) : f.key === 'applicationDate' ? (request ? 5 : 7) : f.key === 'organization' ? (request ? 8 : 10) : f.key === 'startTime' ? (request ? 9 : 11) : f.key === 'endTime' ? (request ? 10 : 12) : (request ? 11 : 13) }}>
+          <Field label={f.label} required={!f.optional}>
             <Input
               type={f.date ? 'date' : f.time ? 'datetime-local' : 'text'}
               step={f.time ? 3600 : undefined}
@@ -689,8 +664,9 @@ function Editor({
               }
             />
           </Field>
+          </div>
         ))}
-        <Field label="신청인 구분">
+        <Field label="신청인 구분" className={`col-span-3 min-w-0 ${request ? 'order-6' : 'order-8'}`}>
           <Select
             value={data.applicantType}
             disabled={disabled}
@@ -702,7 +678,7 @@ function Editor({
             <option value="EXTERNAL">외부</option>
           </Select>
         </Field>
-        <Field label="작업 유형">
+        <Field label="작업 유형" className={`col-span-3 min-w-0 ${request ? 'order-7' : 'order-9'}`}>
           <Select
             value={data.workType}
             disabled={disabled}
@@ -714,6 +690,19 @@ function Editor({
             <option value="OUTSOURCED">외주</option>
           </Select>
         </Field>
+        <Field label="대상 설비" className="order-1 col-span-6 min-w-0">
+          <Textarea rows={2} maxLength={500}
+            value={data.equipmentNo ? codeName(data.equipmentNo, data.equipmentName) : data.equipmentName}
+            disabled={disabled} onChange={(e) => setData((d) => ({ ...d, equipmentNo: '', equipmentName: e.target.value }))} />
+        </Field>
+        {!request && <>
+          <Field label="참조 허가요청번호" className="order-4 col-span-3 min-w-0">
+            <Input readOnly value={source?.workPermitRequestId ?? row?.refId ?? ''} />
+          </Field>
+          <Field label="참조 허가요청명" className="order-5 col-span-9 min-w-0">
+            <Input readOnly value={source?.data.title ?? ''} />
+          </Field>
+        </>}
       </div>
       <Field label="작업개요" required>
         <Textarea
@@ -758,9 +747,9 @@ function Editor({
           {sections.map((s, i) => (
             <section
               key={s.type}
-              className="grid gap-2 border p-2 md:grid-cols-3"
+              className="grid grid-cols-12 gap-2 border p-2"
             >
-              <h3 className="md:col-span-3">{options.names[s.type]}</h3>
+              <h3 className="col-span-12">{options.names[s.type]}</h3>
               {(
                 [
                   ['safetyRequirements', '안전조치요구사항', 100],
@@ -768,7 +757,7 @@ function Editor({
                   ['safetyReviewOpinion', '안전검토의견', 60],
                 ] as const
               ).map(([key, label, max]) => (
-                <Field key={key} label={label}>
+                <Field key={key} label={label} className="col-span-4 min-w-0">
                   <Textarea
                     rows={2}
                     required={key === 'safetyRequirements'}
@@ -787,12 +776,12 @@ function Editor({
               ))}
             </section>
           ))}
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className="grid grid-cols-12 gap-3">
             {[
               ['발급자', issuerId, setIssuer],
               ['승인자', approverId, setApprover],
             ].map(([label, value, setter]) => (
-              <Field key={String(label)} label={String(label)} required>
+              <Field key={String(label)} label={String(label)} required className="col-span-6 min-w-0">
                 <Select
                   required
                   disabled={disabled}
@@ -804,7 +793,7 @@ function Editor({
                   <option value="">선택</option>
                   {options.users.map((u) => (
                     <option key={u.value} value={u.value}>
-                      {u.label} ({u.value})
+                      {codeName(u.value, u.label)}
                     </option>
                   ))}
                 </Select>

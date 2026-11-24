@@ -1,7 +1,40 @@
-# 개발·배포 공통. backend/.env: 개발 NODE_ENV=development, 운영 production.
-# DB_SYNCHRONIZE: 개발 true/false, 운영 false. 초기 설정은 ./bootstrap.sh, 시작은 ./start.sh.
 name: new-cmms
 services:
+  postgres:
+    image: ${CMMS_POSTGRES_IMAGE:-postgres:18.7}
+    restart: unless-stopped
+    shm_size: 128mb
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${DB_NAME:-cmms}
+      CMMS_APP_DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+    volumes:
+      - type: bind
+        source: ./data/postgres
+        target: /var/lib/postgresql
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./postgres/init
+        target: /docker-entrypoint-initdb.d
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 10
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   backend:
     image: ${CMMS_BACKEND_IMAGE:-cmms-backend:local}
     pull_policy: never
@@ -11,28 +44,37 @@ services:
       target: runtime
     restart: unless-stopped
     init: true
-    env_file: backend/.env
-    # Docker 내부 통신 규약. backend/.env의 동일 항목보다 우선한다.
     environment:
+      NODE_ENV: ${NODE_ENV:-production}
       PORT: "3000"
       API_PREFIX: api
+      CORS_ORIGINS: ${CORS_ORIGINS:?Set CORS_ORIGINS in .env}
       TRUST_PROXY_HOPS: "1"
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: cmms
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+      DB_NAME: ${DB_NAME:-cmms}
+      DB_SSL: "false"
+      DB_SYNCHRONIZE: ${DB_SYNCHRONIZE:-false}
+      DB_LOGGING: ${DB_LOGGING:-false}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?Set JWT_ACCESS_SECRET in .env}
+      JWT_ACCESS_EXPIRES_IN: ${JWT_ACCESS_EXPIRES_IN:-15m}
+      LOGIN_HISTORY_RETENTION_DAYS: ${LOGIN_HISTORY_RETENTION_DAYS:-90}
       FILE_STORAGE_DRIVER: local
       FILE_LOCAL_ROOT: /app/uploads
-    expose:
-      - "3000"
+      FILE_MAX_SIZE_BYTES: ${FILE_MAX_SIZE_BYTES:-10485760}
+      FILE_MAX_FILES_PER_UPLOAD: ${FILE_MAX_FILES_PER_UPLOAD:-10}
+      FILE_MAX_UPLOAD_TOTAL_BYTES: ${FILE_MAX_UPLOAD_TOTAL_BYTES:-52428800}
     volumes:
       - type: bind
-        source: ${UPLOADS_HOST_PATH:-./backend/uploads}
+        source: ./data/uploads
         target: /app/uploads
         bind:
           create_host_path: false
-      - type: bind
-        source: ${DB_CERTS_HOST_PATH:-./deploy/db-certs}
-        target: /app/certs
-        read_only: true
-        bind:
-          create_host_path: false
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health',{signal:AbortSignal.timeout(4000)}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
@@ -45,6 +87,7 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
   nginx:
     image: ${CMMS_FRONTEND_IMAGE:-cmms-frontend:local}
     pull_policy: never
@@ -56,21 +99,18 @@ services:
     depends_on:
       backend:
         condition: service_healthy
-    # 개발 기본 HTTP 80. 운영 전환 시 443 매핑과 루트 .env의 HTTPS 설정을 활성화한다.
-    # HTTPS 전환 후 80을 유지하면 리다이렉트용으로 사용하며, 필요 없으면 80 매핑을 주석 처리한다.
     ports:
       - "${CMMS_BIND_ADDRESS:-127.0.0.1}:${CMMS_HTTP_PORT:-80}:80"
-      # - "${CMMS_BIND_ADDRESS:-127.0.0.1}:${CMMS_HTTPS_PORT:-443}:443"
     volumes:
       - type: bind
-        source: ${CMMS_NGINX_CONFIG:-./deploy/nginx/default.conf}
+        source: ./nginx/default.conf
         target: /etc/nginx/conf.d/default.conf
         read_only: true
         bind:
           create_host_path: false
       - type: bind
-        source: ${TLS_CERT_DIR:-./deploy/tls}
-        target: /etc/nginx/tls
+        source: ./nginx/app-locations.conf
+        target: /etc/nginx/snippets/app-locations.conf
         read_only: true
         bind:
           create_host_path: false

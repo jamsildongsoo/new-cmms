@@ -31,10 +31,10 @@ export interface BoardPayload {
 }
 const path = (id: string) => `/boards/${encodeURIComponent(id)}`
 export const boardApi = {
-  list: async (search: string, page: number) =>
+  list: async (search: string, page: number, searchType: string) =>
     (
       await http.get<BoardPage>('/boards', {
-        params: { search, page, limit: 20 },
+        params: { search, searchType, page, limit: 20 },
       })
     ).data,
   get: async (id: string) => (await http.get<BoardDetail>(path(id))).data,

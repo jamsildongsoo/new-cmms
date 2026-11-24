@@ -11,6 +11,7 @@ import { toMessage } from '@/shared/api/errors'
 import { Button } from '@/shared/ui/Button'
 import { Input } from '@/shared/ui/Input'
 import { DataTable } from '@/shared/ui/DataTable'
+import { TypedSearchForm } from '@/shared/ui/TypedSearchForm'
 import { DocumentIdField } from '@/shared/ui/DocumentIdField'
 import {
   boardApi,
@@ -24,7 +25,9 @@ const textareaClass =
 export function BoardListPage() {
   const navigate = useNavigate()
   const [search, setSearch] = useState(''),
+    [searchType, setSearchType] = useState('title'),
     [filter, setFilter] = useState(''),
+    [filterType, setFilterType] = useState('title'),
     [page, setPage] = useState(1),
     [reload, setReload] = useState(0)
   const [result, setResult] = useState<BoardPage>({
@@ -38,7 +41,7 @@ export function BoardListPage() {
   useEffect(() => {
     let active = true
     boardApi
-      .list(filter, page)
+      .list(filter, page, filterType)
       .then((data) => {
         if (active) {
           setResult(data)
@@ -54,7 +57,7 @@ export function BoardListPage() {
     return () => {
       active = false
     }
-  }, [filter, page, reload])
+  }, [filter, filterType, page, reload])
   const print = () =>
     printDocument({
       title: '게시판 목록',
@@ -83,27 +86,20 @@ export function BoardListPage() {
           </Button>
         </div>
       </div>
-      <form
-        className="flex gap-2"
+      <TypedSearchForm
+        options={[{ value: 'title', label: '제목' }, { value: 'content', label: '본문' },
+          { value: 'createdBy', label: '작성자' }]}
+        searchType={searchType} onSearchTypeChange={setSearchType}
+        search={search} onSearchChange={setSearch} loading={loading}
         onSubmit={(event) => {
-          event.preventDefault()
-          setLoading(true)
-          setPage(1)
-          setFilter(search.trim())
-          setReload((value) => value + 1)
+          event.preventDefault(); setLoading(true); setPage(1);
+          setFilter(search.trim()); setFilterType(searchType); setReload((value) => value + 1)
         }}
-      >
-        <Input
-          value={search}
-          maxLength={200}
-          aria-label="게시글 검색"
-          placeholder="문서번호·제목·본문"
-          onChange={(event) => setSearch(event.target.value)}
-        />
-        <Button type="submit" variant="secondary">
-          조회
-        </Button>
-      </form>
+        onReset={() => {
+          setSearch(''); setSearchType('title'); setLoading(true); setPage(1);
+          setFilter(''); setFilterType('title'); setReload((value) => value + 1)
+        }}
+      />
       {error && (
         <p role="alert" className="text-sm text-red-700">
           {error}

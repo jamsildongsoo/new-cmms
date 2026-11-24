@@ -1,7 +1,7 @@
 import { Pagination } from '@/shared/ui/Pagination'
 import { dateInput } from '@/shared/lib/format'
 // 모듈·권한 원본: backend/src/common/constants/modules.ts (MODULES), backend/src/common/constants/permissions.ts (MODULE_ACTIONS).
-import { SearchActions } from '@/shared/ui/SearchActions'
+import { TypedSearchForm } from '@/shared/ui/TypedSearchForm'
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/modules/auth'
@@ -9,7 +9,6 @@ import { toMessage } from '@/shared/api/errors'
 import { printDocument } from '@/shared/lib/print'
 import { Button } from '@/shared/ui/Button'
 import { DataTable } from '@/shared/ui/DataTable'
-import { Input } from '@/shared/ui/Input'
 import { StatusBadge } from '@/shared/ui/StatusBadge'
 import {
   getWorkOrders,
@@ -23,6 +22,7 @@ export function WorkOrderListPage() {
   const { hasPermission } = useAuth()
   const [rows, setRows] = useState<WorkOrderListItem[]>([])
   const [search, setSearch] = useState('')
+  const [searchType, setSearchType] = useState('title')
   const [query, setQuery] = useState<WorkOrderSearch>({ page: 1 })
   const [total, setTotal] = useState(0)
   const [limit, setLimit] = useState(20)
@@ -54,7 +54,7 @@ export function WorkOrderListPage() {
     e.preventDefault()
     setLoading(true)
     setError(null)
-    setQuery({ page: 1, search: search.trim() || undefined })
+    setQuery({ page: 1, search: search.trim() || undefined, searchType: search.trim() ? searchType as WorkOrderSearch['searchType'] : undefined })
   }
   return (
     <section className="space-y-3">
@@ -100,25 +100,17 @@ export function WorkOrderListPage() {
           </Button>
         </div>
       </div>
-      <form
-        className="search-form"
+      <TypedSearchForm
+        options={[{ value: 'id', label: '문서번호' }, { value: 'documentNo', label: '관리번호' },
+          { value: 'title', label: '제목' }, { value: 'equipmentId', label: '설비번호' },
+          { value: 'createdBy', label: '작성자' }]}
+        searchType={searchType} onSearchTypeChange={setSearchType}
+        search={search} onSearchChange={setSearch} loading={loading}
         onSubmit={filter}
         onReset={() => {
-          setSearch('')
-          setLoading(true)
-          setError(null)
-          setQuery({ page: 1 })
+          setSearch(''); setSearchType('title'); setLoading(true); setError(null); setQuery({ page: 1 })
         }}
-      >
-        <Input
-          aria-label="검색어"
-          placeholder="문서번호·관리번호·제목·설비번호"
-          maxLength={200}
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-        />
-        <SearchActions loading={loading} />
-      </form>
+      />
       {error && (
         <div role="alert" className="text-xs text-red-700">
           {error}

@@ -12,6 +12,7 @@ import { useAuth } from '@/modules/auth'
 import { AttachmentManager } from '@/modules/attachments'
 import { toMessage } from '@/shared/api/errors'
 import { useUnsavedChanges } from '@/shared/hooks/useUnsavedChanges'
+import { codeName } from '@/shared/lib/codeName'
 import { Button } from '@/shared/ui/Button'
 import { Field } from '@/shared/ui/Field'
 import { Input } from '@/shared/ui/Input'
@@ -186,7 +187,7 @@ function PurchaseRequestEditor({ id }: { id?: string }) {
         e.preventDefault()
         void save(false)
       }}
-      className="space-y-3 rounded-lg border border-slate-200 bg-white p-4 md:p-5"
+      className="document-form space-y-3 rounded-lg border border-slate-200 bg-white p-4 md:p-5"
     >
       <div className="flex flex-wrap justify-between gap-2">
         <h1 className="text-lg font-semibold">
@@ -246,32 +247,32 @@ function PurchaseRequestEditor({ id }: { id?: string }) {
           )}
         </div>
       </div>
-      <DocumentIdField
-        value={record?.requestId}
-        documentNo={form.documentNo}
-        onDocumentNoChange={(value) => change('documentNo', value)}
-        disabled={disabled}
-        readOnly={readOnly}
-      />
+      <div className="grid grid-cols-12 gap-3">
+        <div className="col-span-6 min-w-0"><DocumentIdField gridLayout value={record?.requestId}
+          documentNo={form.documentNo} onDocumentNoChange={(value) => change('documentNo', value)}
+          disabled={disabled} readOnly={readOnly} /></div>
+        <Field label="요청명" required className="col-span-6 min-w-0">
+          <Input maxLength={200} required value={form.title} disabled={disabled}
+            onChange={(e) => change('title', e.target.value)} />
+        </Field>
+      </div>
       {error && (
         <p role="alert" className="text-xs text-red-700">
           {error}
         </p>
       )}
       {!ready && <p>불러오는 중…</p>}
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className="grid grid-cols-12 gap-3">
         {(
           [
-            ['title', '요청명'],
             ['date', '요청일'],
             ['dueDate', '필요일'],
           ] as const
         ).map(([key, label]) => (
-          <Field key={key} label={label} required={key === 'title'}>
+          <Field key={key} label={label} className={`col-span-3 min-w-0 ${key === 'date' ? 'order-5' : 'order-6'}`}>
             <Input
               type={key === 'date' || key === 'dueDate' ? 'date' : 'text'}
-              maxLength={key === 'title' ? 200 : 50}
-              required={key === 'title'}
+              maxLength={50}
               value={form[key]}
               disabled={disabled}
               onChange={(e) => change(key, e.target.value)}
@@ -286,7 +287,7 @@ function PurchaseRequestEditor({ id }: { id?: string }) {
             ['typeCode', '유형', options.types],
           ] as const
         ).map(([key, label, choices]) => (
-          <Field key={key} label={label}>
+          <Field key={key} label={label} className={`col-span-3 min-w-0 ${key === 'siteId' ? 'order-1' : key === 'deptId' ? 'order-2' : key === 'requesterId' ? 'order-3' : 'order-4'}`}>
             <Select
               value={form[key]}
               disabled={disabled || key === 'siteId' || key === 'deptId'}
@@ -296,22 +297,15 @@ function PurchaseRequestEditor({ id }: { id?: string }) {
 
               {choices.map((r) => (
                 <option key={r.value} value={r.value}>
-                  {r.label} ({r.value})
+                  {codeName(r.value, r.label)}
                 </option>
               ))}
             </Select>
           </Field>
         ))}
+        <div className="order-7 col-span-6" aria-hidden="true" />
       </div>
 
-      <PurchaseRequestItems
-        items={items}
-        setItems={setItems}
-        options={options}
-        disabled={disabled}
-        readOnly={readOnly}
-        blocked={blocked}
-      />
       <Field label={'구매 사유'}>
         <Textarea
           rows={3}
@@ -327,6 +321,14 @@ function PurchaseRequestEditor({ id }: { id?: string }) {
           onChange={(e) => change('note', e.target.value)}
         />
       </Field>
+      <PurchaseRequestItems
+        items={items}
+        setItems={setItems}
+        options={options}
+        disabled={disabled}
+        readOnly={readOnly}
+        blocked={blocked}
+      />
       <AttachmentManager
         attachmentId={attachmentId}
         refModule={module}

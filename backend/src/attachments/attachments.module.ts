@@ -16,6 +16,8 @@ import { FILE_STORAGE } from './storage/storage.types';
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
+        // 브라우저 FormData의 multipart 파일명은 UTF-8로 전송된다.
+        defParamCharset: 'utf8',
         limits: {
           fileSize: config.getOrThrow<number>('storage.maxSizeBytes'),
           files: config.getOrThrow<number>('storage.maxFilesPerUpload'),

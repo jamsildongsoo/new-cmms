@@ -32,11 +32,11 @@ export class UpdateUserDto {
 
   @IsOptional()
   @IsString()
-  siteId?: string;
+  siteId?: string | null;
 
   @IsOptional()
   @IsString()
-  deptId?: string;
+  deptId?: string | null;
 
   @IsOptional()
   @IsIn(Object.values(AccessScope))

@@ -9,6 +9,7 @@ interface DocumentIdFieldProps {
   onDocumentNoChange?: (value: string) => void
   disabled?: boolean
   readOnly?: boolean
+  gridLayout?: boolean
 }
 
 /** 자동 문서번호와 선택 입력 관리번호를 한 메타정보 영역에 표시한다. */
@@ -18,6 +19,7 @@ export function DocumentIdField({
   onDocumentNoChange,
   disabled = false,
   readOnly = false,
+  gridLayout = false,
 }: DocumentIdFieldProps) {
   const [notice, setNotice] = useState('')
   const copy = async () => {
@@ -30,8 +32,8 @@ export function DocumentIdField({
     }
   }
   return (
-    <div className="document-meta">
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
+    <div className={gridLayout ? 'grid grid-cols-2 gap-3 text-xs text-slate-600' : 'document-meta'}>
+      <div className={gridLayout ? 'min-w-0 space-y-1.5' : 'flex min-w-0 flex-wrap items-center gap-2'}>
         <span className="font-medium">문서번호</span>
         <span className="select-all break-all font-medium text-slate-900">
           {value || '저장 시 자동 생성'}
@@ -50,11 +52,11 @@ export function DocumentIdField({
         )}
       </div>
       {onDocumentNoChange && !readOnly ? (
-        <label className="flex w-full items-center gap-2 sm:w-auto">
+        <label className={gridLayout ? 'block min-w-0' : 'flex w-full items-center gap-2 sm:w-auto'}>
           <span className="shrink-0 font-medium">관리번호</span>
           <Input
             aria-label="관리번호"
-            className="sm:w-56"
+            className={gridLayout ? 'mt-1.5 w-full' : 'sm:w-56'}
             value={documentNo ?? ''}
             maxLength={50}
             placeholder="선택 입력"
@@ -62,10 +64,10 @@ export function DocumentIdField({
             onChange={(event) => onDocumentNoChange(event.target.value)}
           />
         </label>
-      ) : documentNo ? (
-        <div className="flex min-w-0 items-center gap-2">
+      ) : documentNo || gridLayout ? (
+        <div className={gridLayout ? 'min-w-0 space-y-1.5' : 'flex min-w-0 items-center gap-2'}>
           <span className="shrink-0 font-medium">관리번호</span>
-          <span className="break-all text-slate-900">{documentNo}</span>
+          <span className="break-all text-slate-900">{documentNo || '-'}</span>
         </div>
       ) : null}
       <span role="status" className={notice ? 'w-full text-xs' : 'sr-only'}>

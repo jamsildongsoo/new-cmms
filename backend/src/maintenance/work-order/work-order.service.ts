@@ -1,3 +1,4 @@
+import { applyTypedSearch } from '../../common/utils/typed-search.util';
 import { businessDate } from '../../common/utils/date.util';
 import { inputQuantity, inputPrice } from '../../common/utils/decimal.util';
 import { normalizePaginationQuery } from '../../common/utils/pagination.util';
@@ -20,6 +21,8 @@ import { assertDraft } from '../../common/utils/document-status.util';
 import { CodeGroup } from '../../common/constants/code';
 import { CodeItem } from '../../codes/code-items/entities/code-item.entity';
 import { Equipment } from '../equipment/entities/equipment.entity';
+import { Site } from '../../organization/sites/entities/site.entity';
+import { Department } from '../../organization/departments/entities/department.entity';
 import { CreateWorkOrderDto } from './dto/create-work-order.dto';
 import { UpdateWorkOrderDto } from './dto/update-work-order.dto';
 import { SearchWorkOrderDto } from './dto/search-work-order.dto';
@@ -96,11 +99,7 @@ export class WorkOrderService {
       'wo.materials',
       'wo.costItems',
     ]);
-    if (filter.search?.trim())
-      query.andWhere(
-        '(wo.workOrderId ILIKE :search OR wo.documentNo ILIKE :search OR wo.title ILIKE :search OR wo.equipmentId ILIKE :search)',
-        { search: `%${filter.search.trim().replace(/[\\%_]/g, '\\$&')}%` },
-      );
+    applyTypedSearch(query, filter.search, filter.searchType, { id: 'wo.workOrderId', documentNo: 'wo.documentNo', title: 'wo.title', equipmentId: 'wo.equipmentId', createdBy: 'wo.createdBy' }, ['wo.workOrderId', 'wo.documentNo', 'wo.title', 'wo.equipmentId']);
     const [rows, total] = await query
       .orderBy('wo.createdAt', 'DESC')
       .addOrderBy('wo.workOrderId', 'DESC')
@@ -147,7 +146,7 @@ export class WorkOrderService {
       .andWhere('wo.status = :planStatus', {
         planStatus: DocumentStatus.CONFIRMED,
       });
-    const [equipment, types, plans, requests] = await Promise.all([
+    const [equipment, types, plans, requests, sites, departments] = await Promise.all([
       this.equipmentRepository.find({
         where: { companyId: user.companyId, deleteYn: 'N' },
         order: { equipmentId: 'ASC' },
@@ -161,12 +160,16 @@ export class WorkOrderService {
         .orderBy('wo.createdAt', 'DESC')
         .getMany(),
       this.workRequestService.listForPlan(user),
+      this.repository.manager.getRepository(Site).find({ where: { companyId: user.companyId, deleteYn: 'N' } }),
+      this.repository.manager.getRepository(Department).find({ where: { companyId: user.companyId, deleteYn: 'N' } }),
     ]);
     const units = await this.repository.manager.getRepository(CodeItem).find({
       where: { companyId: user.companyId, codeId: CodeGroup.UNIT },
       order: { sortOrder: 'ASC', codeItemId: 'ASC' },
     });
     return {
+      sites: sites.map(({ siteId, name }) => ({ value: siteId, label: name })),
+      departments: departments.map(({ deptId, name }) => ({ value: deptId, label: name })),
       // 프런트의 해당 업무 Options.units와 함께 수정한다. UNIT 항목은 DB에서 조회한다.
       units: units.map(({ codeItemId, name }) => ({
         value: codeItemId,

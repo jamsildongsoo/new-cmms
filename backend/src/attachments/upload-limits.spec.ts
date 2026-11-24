@@ -12,6 +12,10 @@ import { AttachmentItem } from './entities/attachment-item.entity';
 describe('configured upload reception limits without Docker or Nginx', () => {
   let app: INestApplication;
   const uploadItems = jest.fn().mockResolvedValue([]);
+  const downloadItem = jest.fn().mockResolvedValue({
+    item: { originalName: '설비 점검표.txt', mimeType: 'text/plain' },
+    buffer: Buffer.from('x'),
+  });
 
   beforeAll(async () => {
     const module = await Test.createTestingModule({
@@ -33,7 +37,7 @@ describe('configured upload reception limits without Docker or Nginx', () => {
       .overrideProvider(getRepositoryToken(AttachmentItem))
       .useValue({})
       .overrideProvider(AttachmentsService)
-      .useValue({ uploadItems })
+      .useValue({ uploadItems, downloadItem })
       .overrideGuard(JwtAuthGuard)
       .useValue({ canActivate: () => true })
       .compile();
@@ -68,5 +72,24 @@ describe('configured upload reception limits without Docker or Nginx', () => {
       .attach('files', Buffer.from('123'), 'file.txt')
       .expect(201);
     expect(uploadItems).toHaveBeenCalledTimes(1);
+  });
+
+  it('passes a UTF-8 filename from multipart upload to the service', async () => {
+    await request(app.getHttpServer())
+      .post('/attachments/group/items')
+      .attach('files', Buffer.from('x'), '설비 점검표.txt')
+      .expect(201);
+    expect(uploadItems.mock.calls[0][2][0].originalname).toBe(
+      '설비 점검표.txt',
+    );
+  });
+
+  it('returns an encoded UTF-8 download filename', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/attachments/group/items/1/download')
+      .expect(200);
+    expect(response.headers['content-disposition']).toContain(
+      "filename*=UTF-8''%EC%84%A4%EB%B9%84%20%EC%A0%90%EA%B2%80%ED%91%9C.txt",
+    );
   });
 });

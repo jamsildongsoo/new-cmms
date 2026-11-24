@@ -20,6 +20,7 @@ import { Textarea } from '@/shared/ui/Textarea'
 import { Field } from '@/shared/ui/Field'
 import { toMessage } from '@/shared/api/errors'
 import { useUnsavedChanges } from '@/shared/hooks/useUnsavedChanges'
+import { codeName } from '@/shared/lib/codeName'
 import {
   formatDateTime,
   dateInput,
@@ -40,6 +41,7 @@ import {
 } from './inventory.api'
 
 const emptyOptions: InventoryOptions = {
+  departments: [],
   materials: [],
   sites: [],
   warehouses: [],
@@ -110,6 +112,10 @@ function InventoryEditor({
         setOptions(o)
         if (r) {
           setRecord(r)
+          if (r.type === 'IN' && r.kind === 'PURCHASE' && r.refId)
+            void inventoryApi.purchaseOrder(r.refId)
+              .then((reference) => { if (active) setSource(reference) })
+              .catch(() => undefined)
           setForm({
             documentNo: r.documentNo,
             title: r.title,
@@ -272,7 +278,7 @@ function InventoryEditor({
     <form
       ref={formRef}
       onSubmit={(e) => void submit(e)}
-      className="space-y-3 rounded-lg border border-slate-200 bg-white p-4 md:p-5"
+      className="document-form space-y-3 rounded-lg border border-slate-200 bg-white p-4 md:p-5"
     >
       <div className="flex flex-wrap justify-between gap-2">
         <h1 className="text-lg font-semibold">
@@ -337,30 +343,23 @@ function InventoryEditor({
           )}
         </div>
       </div>
-      <DocumentIdField
-        value={record?.inventoryDocumentId}
-        documentNo={form.documentNo}
-        onDocumentNoChange={(v) => set('documentNo', v)}
-        disabled={disabled}
-        readOnly={readonly}
-      />
+      <div className="grid grid-cols-12 gap-3">
+        <div className="col-span-6 min-w-0"><DocumentIdField gridLayout value={record?.inventoryDocumentId}
+          documentNo={form.documentNo} onDocumentNoChange={(v) => set('documentNo', v)}
+          disabled={disabled} readOnly={readonly} /></div>
+        <Field label="전표명" required className="col-span-6 min-w-0">
+          <Input required maxLength={200} disabled={disabled} value={form.title}
+            onChange={(e) => set('title', e.target.value)} />
+        </Field>
+      </div>
       {error && (
         <p role="alert" className="text-xs text-red-700">
           {error}
         </p>
       )}
       {!ready && <p>불러오는 중…</p>}
-      <div className="grid gap-3 md:grid-cols-2">
-        <Field label="전표명" required>
-          <Input
-            required
-            maxLength={200}
-            disabled={disabled}
-            value={form.title}
-            onChange={(e) => set('title', e.target.value)}
-          />
-        </Field>
-        <Field label="수불 유형" required>
+      <div className="grid grid-cols-12 gap-3">
+        <Field label="수불 유형" required className="order-1 col-span-3 min-w-0">
           <Select
             required
             disabled={disabled}
@@ -408,7 +407,7 @@ function InventoryEditor({
               ))}
           </Select>
         </Field>
-        <Field label="전기일" required>
+        <Field label="전기일" required className="order-4 col-span-3 min-w-0">
           <Input
             type="date"
             required
@@ -425,6 +424,7 @@ function InventoryEditor({
         </Field>
         <Field
           label={form.type === 'OUT' ? '출발 사업장' : '입고/처리 사업장'}
+          className="order-2 col-span-3 min-w-0"
         >
           <Select
             disabled={
@@ -442,13 +442,14 @@ function InventoryEditor({
             <option value="">선택</option>
             {options.sites.map((site) => (
               <option key={site.value} value={site.value}>
-                {site.label} ({site.value})
+                {codeName(site.value, site.label)}
               </option>
             ))}
           </Select>
         </Field>
-        <Field label="담당부서">
-          <Input readOnly value={form.deptId} />
+        <Field label="담당부서" className="order-3 col-span-3 min-w-0">
+          <Input readOnly value={codeName(form.deptId,
+            options.departments.find((d) => d.value === form.deptId)?.label)} />
         </Field>
         <Field
           label={
@@ -459,6 +460,7 @@ function InventoryEditor({
                 : '조정 창고'
           }
           required
+          className="order-5 col-span-6 min-w-0"
         >
           <Select
             required
@@ -469,13 +471,14 @@ function InventoryEditor({
             <option value="">선택</option>
             {wh.map((w) => (
               <option key={w.warehouseId} value={w.warehouseId}>
-                {w.name} ({w.warehouseId})
+                {codeName(w.warehouseId, w.name)}
               </option>
             ))}
           </Select>
         </Field>
         {purchaseIn && (
-          <Field label="구매발주" required>
+          <><div className="order-6 col-span-6" aria-hidden="true" />
+          <Field label="구매발주번호" required className="order-7 col-span-3 min-w-0">
             <Select
               required
               disabled={disabled}
@@ -488,14 +491,17 @@ function InventoryEditor({
               )}
               {options.orders.map((o) => (
                 <option key={o.orderId} value={o.orderId}>
-                  {o.orderId} / {o.documentNo} / {o.title}
+                  {o.orderId}
                 </option>
               ))}
             </Select>
           </Field>
+          <Field label="구매발주명" className="order-8 col-span-9 min-w-0">
+            <Input readOnly value={options.orders.find((o) => o.orderId === form.refId)?.title ?? source?.title ?? ''} />
+          </Field></>
         )}
         {record?.refId && (
-          <Field label="원본 문서">
+          <Field label="원본 문서" className="order-9 col-span-12 min-w-0">
             <Link
               className="text-blue-700 underline"
               to={`${purchaseIn ? '/purchase-order' : base}/${encodeURIComponent(record.refId)}`}
@@ -504,10 +510,10 @@ function InventoryEditor({
             </Link>
           </Field>
         )}
-        {source && <p className="text-xs">입고 사업장: {source.siteId}</p>}
+        {source && <p className="order-10 col-span-12 text-xs">입고 사업장: {source.siteId}</p>}
         {movingOut && (
           <>
-            <Field label="수령 창고" required>
+            <Field label="수령 창고" required className="order-7 col-span-3 min-w-0">
               <Select
                 required
                 disabled={disabled}
@@ -539,27 +545,19 @@ function InventoryEditor({
                       key={JSON.stringify([w.siteId, w.warehouseId])}
                       value={JSON.stringify([w.siteId, w.warehouseId])}
                     >
-                      {w.siteId} / {w.name} ({w.warehouseId})
+                      {w.siteId} / {codeName(w.warehouseId, w.name)}
                     </option>
                   ))}
               </Select>
             </Field>
-            <Field label="수령 사업장">
-              <Input readOnly value={form.toSiteId} />
+            <Field label="수령 사업장" className="order-6 col-span-3 min-w-0">
+              <Input readOnly value={codeName(form.toSiteId,
+                options.sites.find((s) => s.value === form.toSiteId)?.label)} />
             </Field>
           </>
         )}
+        {!purchaseIn && !movingOut && <div className="order-6 col-span-6" aria-hidden="true" />}
       </div>
-      <InventoryItems
-        items={items}
-        setItems={setItems}
-        options={options}
-        disabled={disabled}
-        readonly={readonly}
-        linked={purchaseIn}
-        type={form.type}
-        kind={form.kind}
-      />
       <Field label="사유" required={form.type === 'ADJUST'}>
         <Textarea
           required={form.type === 'ADJUST'}
@@ -575,6 +573,16 @@ function InventoryEditor({
           onChange={(e) => set('note', e.target.value)}
         />
       </Field>
+      <InventoryItems
+        items={items}
+        setItems={setItems}
+        options={options}
+        disabled={disabled}
+        readonly={readonly}
+        linked={purchaseIn}
+        type={form.type}
+        kind={form.kind}
+      />
       {record?.status === 'X' && (
         <section className="text-xs space-y-1">
           <h2 className="text-base font-semibold">확정 취소</h2>

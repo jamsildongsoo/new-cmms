@@ -17,6 +17,10 @@ export async function getMe(): Promise<UserContext> {
   return response.data
 }
 
+export async function logoutSession(): Promise<void> {
+  await http.post('/auth/logout')
+}
+
 export async function getLoginHistory(query: LoginHistoryQuery) {
   return (
     await http.get<{
