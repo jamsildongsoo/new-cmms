@@ -2,10 +2,13 @@ import { Repository } from 'typeorm';
 import { DirectoryService } from './directory.service';
 import { User } from '../../identity/users/entities/user.entity';
 import { Department } from '../../organization/departments/entities/department.entity';
+import { Equipment } from '../../maintenance/equipment/entities/equipment.entity';
+import { Material } from '../../inventory/material/entities/material.entity';
 
 function queryBuilder<T>(items: T[]) {
   const conditions: Array<[string, Record<string, unknown>]> = [];
   const builder = {
+    select: jest.fn(() => builder),
     where: jest.fn((sql: string, params: Record<string, unknown>) => {
       conditions.push([sql, params]);
       return builder;
@@ -37,6 +40,8 @@ describe('DirectoryService', () => {
     const service = new DirectoryService(
       userRepo as unknown as Repository<User>,
       departmentRepo as unknown as Repository<Department>,
+      {} as Repository<Equipment>,
+      {} as Repository<Material>,
     );
 
     const result = await service.searchUsers('COMPANY', ' 김민 ');
@@ -57,6 +62,8 @@ describe('DirectoryService', () => {
     const service = new DirectoryService(
       {} as Repository<User>,
       { createQueryBuilder: () => departments.builder } as unknown as Repository<Department>,
+      {} as Repository<Equipment>,
+      {} as Repository<Material>,
     );
 
     expect(await service.searchDepartments('COMPANY', '설비')).toEqual([
@@ -65,5 +72,28 @@ describe('DirectoryService', () => {
     expect(departments.conditions).toContainEqual(['d.companyId = :companyId', { companyId: 'COMPANY' }]);
     expect(departments.conditions.map(([sql]) => sql)).toContain("d.deleteYn = 'N'");
     expect(departments.builder.limit).toHaveBeenCalledWith(10);
+  });
+
+  it('finds active equipment and material candidates by name or number within the company', async () => {
+    const equipment = queryBuilder([{ equipmentId: 'EQ1', name: '펌프', siteId: 'SITE1' }]);
+    const materials = queryBuilder([{ materialId: 'MAT1', name: '베어링' }]);
+    const service = new DirectoryService(
+      {} as Repository<User>,
+      {} as Repository<Department>,
+      { createQueryBuilder: () => equipment.builder } as unknown as Repository<Equipment>,
+      { createQueryBuilder: () => materials.builder } as unknown as Repository<Material>,
+    );
+
+    expect(await service.searchEquipment('COMPANY', '펌프')).toEqual([
+      { equipmentId: 'EQ1', name: '펌프', siteId: 'SITE1' },
+    ]);
+    expect(await service.searchMaterials('COMPANY', '베어링')).toEqual([
+      { materialId: 'MAT1', name: '베어링' },
+    ]);
+    for (const { builder, conditions } of [equipment, materials]) {
+      expect(conditions).toContainEqual([expect.stringContaining('companyId = :companyId'), { companyId: 'COMPANY' }]);
+      expect(conditions.map(([sql]) => sql)).toContainEqual(expect.stringContaining("deleteYn = 'N'"));
+      expect(builder.limit).toHaveBeenCalledWith(10);
+    }
   });
 });

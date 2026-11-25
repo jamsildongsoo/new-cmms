@@ -12,7 +12,6 @@ import { Button } from '@/shared/ui/Button'
 import { Input } from '@/shared/ui/Input'
 import { DataTable } from '@/shared/ui/DataTable'
 import { TypedSearchForm } from '@/shared/ui/TypedSearchForm'
-import { DocumentIdField } from '@/shared/ui/DocumentIdField'
 import {
   boardApi,
   type BoardDetail,
@@ -61,9 +60,8 @@ export function BoardListPage() {
   const print = () =>
     printDocument({
       title: '게시판 목록',
-      columns: ['문서번호', '제목', '작성자', '작성일'],
+      columns: ['제목', '작성자', '작성일'],
       rows: result.items.map((r) => [
-        r.boardId,
         r.title,
         r.createdBy,
         formatDateTime(r.createdAt),
@@ -109,7 +107,7 @@ export function BoardListPage() {
         <div className="min-w-[750px]">
           <DataTable
             rows={loading || error ? [] : result.items}
-            gridTemplateColumns="190px minmax(200px,1fr) 120px 180px"
+            gridTemplateColumns="minmax(200px,1fr) 120px 180px"
             emptyText={
               loading
                 ? '불러오는 중…'
@@ -118,11 +116,6 @@ export function BoardListPage() {
                   : '등록된 게시글이 없습니다.'
             }
             columns={[
-              {
-                key: 'boardId',
-                label: '문서번호',
-                render: (r) => r.boardId,
-              },
               {
                 key: 'title',
                 label: '제목',
@@ -286,7 +279,6 @@ function BoardEditor({ id }: { id?: string }) {
                 printDocument({
                   title: form.title,
                   fields: [
-                    ['문서번호', record.boardId],
                     ['작성자', record.createdBy],
                     ['작성일', formatDateTime(record.createdAt)],
                   ],
@@ -324,7 +316,6 @@ function BoardEditor({ id }: { id?: string }) {
             {error}
           </p>
         )}
-        <DocumentIdField value={record?.boardId} />
         {record && (
           <p className="text-xs text-slate-500">
             작성자: {record.createdBy} · 작성일:{' '}

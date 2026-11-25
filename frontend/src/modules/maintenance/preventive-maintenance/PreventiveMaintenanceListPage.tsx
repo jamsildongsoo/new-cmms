@@ -109,6 +109,7 @@ export function PreventiveMaintenanceListPage() {
       </div>
 
       <TypedSearchForm
+        typeAriaLabel="예방점검 검색 기준" searchAriaLabel="예방점검 검색"
         options={[{ value: 'pmId', label: '문서번호' }, { value: 'documentNo', label: '관리번호' },
           { value: 'title', label: '제목' }, { value: 'equipmentId', label: '설비번호' },
           { value: 'createdBy', label: '작성자' }]}

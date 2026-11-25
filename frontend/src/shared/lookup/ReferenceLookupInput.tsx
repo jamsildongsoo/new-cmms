@@ -49,7 +49,7 @@ export function ReferenceLookupInput({ kind, value, onChange }: {
 
   return <div className="relative">
     <Input role="combobox" aria-label={`${label}번호 검색`} aria-autocomplete="list"
-      aria-expanded={open && results.length > 0} aria-controls={listId}
+      aria-expanded={open && Boolean(value.trim()) && results.length > 0} aria-controls={listId}
       aria-activedescendant={open && active >= 0 ? `${listId}-${active}` : undefined}
       placeholder={`${label}명 검색 후 선택 또는 번호 입력`} value={value}
       onChange={(event) => {
@@ -58,7 +58,7 @@ export function ReferenceLookupInput({ kind, value, onChange }: {
         setOpen(false)
         onChange(event.target.value)
       }}
-      onFocus={() => setOpen(results.length > 0)}
+      onFocus={() => setOpen(Boolean(value.trim()) && results.length > 0)}
       onBlur={() => setOpen(false)}
       onKeyDown={(event) => {
         if (event.key === 'ArrowDown' && results.length) {
@@ -69,7 +69,7 @@ export function ReferenceLookupInput({ kind, value, onChange }: {
           event.preventDefault(); choose(results[active])
         } else if (event.key === 'Escape') setOpen(false)
       }} />
-    {open && results.length > 0 && <ul id={listId} role="listbox" aria-label={`${label} 후보`}
+    {open && Boolean(value.trim()) && results.length > 0 && <ul id={listId} role="listbox" aria-label={`${label} 후보`}
       className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-md border border-slate-300 bg-white text-xs shadow-lg">
       {results.map((row, index) => <li key={row.id} id={`${listId}-${index}`} role="option"
         aria-selected={index === active} className={`cursor-pointer px-2 py-1.5 ${index === active ? 'bg-slate-100' : ''}`}

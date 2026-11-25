@@ -397,7 +397,8 @@ async function main() {
         ) {
           const request = route === '/work-permit-request',
             page = Number(url.searchParams.get('page') || 1),
-            search = (url.searchParams.get('search') || '').toLowerCase()
+            search = (url.searchParams.get('search') || '').toLowerCase(),
+            searchType = url.searchParams.get('searchType') || 'title'
           const rows = Array.from({ length: 21 }, (_, index) => ({
             workPermitId: `PERMIT-${index + 1}`,
             workPermitRequestId: `PERREQ-${index + 1}`,
@@ -405,13 +406,9 @@ async function main() {
             title: `허가 문서 ${index + 1}`,
             applicantName: '신청인',
             status: 'D',
-          })).filter((row) =>
-            [
-              request ? row.workPermitRequestId : row.workPermitId,
-              row.documentNo,
-              row.title,
-            ].some((value) => value.toLowerCase().includes(search)),
-          )
+          })).filter((row) => String(searchType === 'id'
+            ? request ? row.workPermitRequestId : row.workPermitId
+            : row[searchType] ?? '').toLowerCase().includes(search))
           return json({
             items: rows.slice((page - 1) * 20, page * 20),
             total: rows.length,
@@ -476,7 +473,8 @@ async function main() {
         ) {
           const isOrder = route === '/work-order',
             search = (url.searchParams.get('search') || '').toLowerCase(),
-            page = Number(url.searchParams.get('page') || 1)
+            page = Number(url.searchParams.get('page') || 1),
+            searchType = url.searchParams.get('searchType') || 'title'
           const rows = Array.from({ length: 21 }, (_, index) => ({
             workRequestId: `WRKREQ-${index + 1}`,
             workOrderId: `WRKORD-${index + 1}`,
@@ -489,14 +487,9 @@ async function main() {
             totalCost: 10,
             priorityCode: '중',
             status: 'D',
-          })).filter((row) =>
-            [
-              isOrder ? row.workOrderId : row.workRequestId,
-              row.documentNo,
-              row.title,
-              row.equipmentId,
-            ].some((value) => value.toLowerCase().includes(search)),
-          )
+          })).filter((row) => String(searchType === 'id'
+            ? isOrder ? row.workOrderId : row.workRequestId
+            : row[searchType] ?? '').toLowerCase().includes(search))
           return json({
             items: rows.slice((page - 1) * 20, page * 20),
             total: rows.length,
@@ -1240,7 +1233,7 @@ async function main() {
         await evaluate(
           "document.querySelectorAll('main select,main input[type=date]').length",
         ),
-        0,
+        1,
       )
       assert.equal(
         await evaluate(
@@ -1260,6 +1253,9 @@ async function main() {
         'work second page',
       )
       await input(
+        'main select', 'id', true,
+      )
+      await input(
         'input[aria-label="검색어"]',
         route === '/work-order' ? 'WRKORD-21' : 'WRKREQ-21',
       )
@@ -1274,19 +1270,17 @@ async function main() {
     }
     for (const route of ['/work-permit-request', '/work-permit']) {
       await navigate(route, '총 21건')
-      assert.equal(
-        await evaluate(
-          'document.querySelector(\'input[aria-label="허가 문서 검색"]\').placeholder',
-        ),
-        '문서번호·관리번호·작업명',
-      )
+      assert.equal(await evaluate("[...document.querySelectorAll('main select option')].some(option => option.value === 'id')"), true)
       await click('다음')
       await until(
         () => evaluate("document.body.textContent.includes('2 / 2 페이지')"),
         'permit second page',
       )
       await input(
-        'input[aria-label="허가 문서 검색"]',
+        'main select', 'id', true,
+      )
+      await input(
+        'input[aria-label="검색어"]',
         route === '/work-permit' ? 'PERMIT-21' : 'PERREQ-21',
       )
       await click('검색')
@@ -1494,8 +1488,8 @@ async function main() {
     )
     console.log('PASS created role can retry permission save after partial failure')
     await navigate('/boards', '게시판 이전 결과')
-    await input('input[aria-label="게시글 검색"]', '실패검색')
-    await click('조회')
+    await input('input[aria-label="검색어"]', '실패검색')
+    await click('검색')
     await until(
       () => evaluate("document.body.textContent.includes('게시판 조회 실패')"),
       'board query failure',
@@ -1510,8 +1504,8 @@ async function main() {
       ),
       true,
     )
-    await input('input[aria-label="게시글 검색"]', '')
-    await click('조회')
+    await input('input[aria-label="검색어"]', '')
+    await click('검색')
     await until(
       () =>
         evaluate(

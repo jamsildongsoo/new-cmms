@@ -302,6 +302,16 @@ it('paginates and searches only non-deleted posts in the authenticated company',
   await service.remove(actor(), first.boardId);
   expect((await service.list(actor())).total).toBe(1);
 });
+
+it('limits board search to the selected title, body, or author field', async () => {
+  const title = await post(actor(), { title: '펌프', content: '일반 내용' });
+  const body = await post(actor(), { title: '일반 제목', content: '펌프 점검' });
+  const author = await post(actor('reader'), { title: '다른 제목', content: '다른 내용' });
+  expect((await service.list(actor(), { search: '펌프', searchType: 'title' })).items.map((row) => row.boardId)).toEqual([title.boardId]);
+  expect((await service.list(actor(), { search: '펌프', searchType: 'content' })).items.map((row) => row.boardId)).toEqual([body.boardId]);
+  expect((await service.list(actor(), { search: 'reader', searchType: 'createdBy' })).items.map((row) => row.boardId)).toEqual([author.boardId]);
+  expect((await service.list(actor(), { search: title.boardId })).total).toBe(0);
+});
 it('binds a pre-save UUID attachment group to the BORD document ID', async () => {
   const attachment = await db.getRepository(Attachment).save({
     companyId: 'A',

@@ -132,7 +132,7 @@ export function EquipmentListPage() {
         onReset={() => { setFilters({ ...emptyFilters }); changeQuery({ page: 1 }) }}
         extra={<label className="block space-y-1.5 lg:max-w-xs">
           <span className="block text-sm font-medium text-slate-700">사업장</span>
-          <Select value={filters.siteId} onChange={(event) =>
+          <Select aria-label="사업장 필터" value={filters.siteId} onChange={(event) =>
             setFilters((current) => ({ ...current, siteId: event.target.value }))}>
             <option value="">전체 사업장</option>
             {options.sites.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}

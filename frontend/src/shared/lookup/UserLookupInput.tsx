@@ -55,7 +55,7 @@ export function UserLookupInput({ value, onChange, onSelect }: Props) {
         role="combobox"
         aria-label="작성자 검색"
         aria-autocomplete="list"
-        aria-expanded={open && Boolean(results.length)}
+        aria-expanded={open && Boolean(value.trim()) && Boolean(results.length)}
         aria-controls={listId}
         aria-activedescendant={open && active >= 0 && results[active] ? `${listId}-${active}` : undefined}
         value={value}
@@ -85,7 +85,7 @@ export function UserLookupInput({ value, onChange, onSelect }: Props) {
           }
         }}
       />
-      {open && results.length > 0 && (
+      {open && Boolean(value.trim()) && results.length > 0 && (
         <ul id={listId} role="listbox" aria-label="작성자 후보" className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-md border border-slate-300 bg-white text-xs shadow-lg">
           {results.map((user, index) => (
             <li

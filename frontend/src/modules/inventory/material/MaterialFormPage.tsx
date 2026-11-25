@@ -260,8 +260,18 @@ function MaterialEditor({ mode, id }: { mode: FormMode; id?: string }) {
         onSubmit={(e) => void save(e)}
         className="space-y-4 rounded-lg border border-slate-200 bg-white p-4 md:p-5"
       >
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-12">
+          <div className="min-w-0 lg:col-span-3">
+            {materialFields.filter(([key]) => key === 'materialId').map(renderField)}
+          </div>
+          <div className="min-w-0 lg:col-span-9">
+            {materialFields.filter(([key]) => key === 'name').map(renderField)}
+          </div>
+        </div>
         <div className="grid gap-3 md:grid-cols-2">
-          {materialFields.map(renderField)}
+          {materialFields
+            .filter(([key]) => key !== 'materialId' && key !== 'name')
+            .map(renderField)}
         </div>
       </form>
       <div className="rounded-lg border border-slate-200 bg-white p-4 md:p-5">
